@@ -189,8 +189,11 @@ namespace Fedi {
         state.query = "";
         await loadFeed();
         break;
-      case "clear-language":
-        setDiscoveryLanguage("");
+      case "remove-language":
+        setDiscoveryLanguages(state.discoveryLanguages.filter((language) => language !== id));
+        break;
+      case "clear-languages":
+        setDiscoveryLanguages([]);
         break;
       case "follow":
         await toggleFollow(id);
@@ -450,8 +453,8 @@ namespace Fedi {
         void loadFeed();
       }
       if (el.id === "draft-visibility") captureDraft();
-      if (el.id === "discovery-language" || el.id === "settings-language")
-        setDiscoveryLanguage(el.value);
+      if (el.id === "settings-language" && el.value)
+        setDiscoveryLanguages([...state.discoveryLanguages, el.value]);
     });
     document.addEventListener("keydown", editorKeydown);
     document.getElementById("modal")!.addEventListener("click", (event) => {

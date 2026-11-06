@@ -1944,14 +1944,24 @@ summary {
   .brand-caption,
   .sidebar nav,
   .write-button,
-  .sidebar-tools,
+  .sidebar-tools > :not(a),
   .profile-switch > span:not(.avatar),
   .profile-switch > .icon {
     display: none;
   }
   .sidebar-bottom {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     padding: 0;
     margin: 0;
+  }
+  .sidebar-tools {
+    padding: 0;
+  }
+  .sidebar-tools .icon-button {
+    min-width: 44px;
+    min-height: 44px;
   }
   .profile-switch {
     border: 0;
@@ -2328,29 +2338,66 @@ summary {
   margin: 0 8px;
 }
 
-.discovery-options {
+.language-picker {
+  width: 100%;
+  min-width: 0;
+  font-size: 13px;
+}
+.language-picker-heading {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px 16px;
-  margin: 15px 34px 22px;
+  justify-content: space-between;
+  gap: 4px 12px;
+  min-height: 44px;
 }
-.discovery-options > span {
-  color: var(--muted);
-  font-size: 11px;
+.language-picker-heading > span {
+  font-weight: 600;
 }
-.language-picker {
+.language-picker-controls {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  font-size: 12px;
+  gap: 8px;
 }
-label.language-picker select {
-  width: auto;
+.language-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   max-width: 100%;
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--accent-wash);
+}
+.language-chip:hover {
+  border-color: var(--accent);
+}
+.language-chip .icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.language-clear {
+  min-height: 44px;
+}
+.language-all {
+  padding: 10px 0;
+  color: var(--muted);
+}
+.language-add {
+  flex: 1 1 180px;
+  max-width: 230px;
+  min-width: 0;
+}
+label.language-add select {
+  width: 100%;
+  min-height: 44px;
   margin: 0;
-  padding: 8px 12px;
-  font-size: 12px;
+  padding: 10px 12px;
+  font-size: 14px;
 }
 
 /* Notes have a small social composer, separate from the article editor. */
@@ -2548,7 +2595,7 @@ body.zen-mode {
   select,
   .search-box input,
   .timeline-tabs select,
-  label.language-picker select,
+  label.language-add select,
   #message-form textarea {
     font-size: 16px;
   }
@@ -2556,9 +2603,8 @@ body.zen-mode {
     flex-basis: 44px;
     height: 44px;
   }
-  .discovery-options {
-    margin-left: 22px;
-    margin-right: 22px;
+  .language-add {
+    max-width: none;
   }
   .note-button {
     display: none;

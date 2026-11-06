@@ -24,7 +24,9 @@ namespace Fedi {
     draft: null as Draft | null,
     preview: false,
     focus: false,
-    discoveryLanguage: readStore<string>("discovery-language", ""),
+    discoveryLanguages: normalizeDiscoveryLanguages(
+      readStore<unknown>("discovery-languages", readStore<unknown>("discovery-language", [])),
+    ),
     libraryTab: "drafts",
     ownPosts: [] as Post[],
     ownNext: undefined as string | undefined,
@@ -131,6 +133,9 @@ namespace Fedi {
   }
 
   export function render(): void {
+    const languagePicker = document.activeElement?.closest(".language-picker");
+    const languageFocus = languagePicker ? document.activeElement?.id : "";
+    const languageSelect = languagePicker?.querySelector("select")?.id;
     document.body.classList.toggle("focus-mode", state.focus);
     document.body.classList.toggle(
       "zen-mode",
@@ -152,31 +157,43 @@ namespace Fedi {
                 : feedView();
     document.getElementById("app")!.innerHTML =
       `<div class="layout">${sidebar()}<main id="main" tabindex="-1">${content}</main>${rightRail()}</div>${mobileNav()}`;
+    if (languageFocus) {
+      const target = document.getElementById(languageFocus) ||
+        document.getElementById(languageSelect || "");
+      if (target?.hasAttribute("disabled"))
+        document.getElementById(`${languageSelect}-clear`)?.focus({ preventScroll: true });
+      else target?.focus({ preventScroll: true });
+    }
     if (state.view === "editor") updateEditorMeta();
     document.title = `${state.view === "reader" && state.reading ? state.reading.title || "Note" : state.view === "editor" ? (state.draft?.kind === "post" ? "New note" : state.draft?.title) || "New draft" : "Your reading room"} — Fedistack`;
   }
 
-  export function filterByLanguage(posts: Post[], language: string): Post[] {
-    if (!language) return posts;
-    const selected = language.toLowerCase().replace(/_/g, "-");
+  function normalizeDiscoveryLanguages(value: unknown): string[] {
+    const languages = Array.isArray(value) ? value : [value];
+    return [...new Set(languages.filter((language): language is string =>
+      discoveryLanguages.some(([code]) => code === language),
+    ))];
+  }
+  export function filterByLanguages(posts: Post[], languages: string[]): Post[] {
+    if (!languages.length) return posts;
+    const selected = languages.map((language) => language.toLowerCase().replace(/_/g, "-"));
     return posts.filter((post) => {
       const code = post.language?.toLowerCase().replace(/_/g, "-");
-      return code === selected || !!code?.startsWith(`${selected}-`);
+      return selected.some((language) => code === language || !!code?.startsWith(`${language}-`));
     });
   }
-  export function setDiscoveryLanguage(language: string): void {
-    if (!discoveryLanguages.some(([code]) => code === language)) return;
-    state.discoveryLanguage = language;
-    if (!writeStore("discovery-language", language))
-      toast("Language preference is only saved for this tab.");
+  export function setDiscoveryLanguages(languages: string[]): void {
+    state.discoveryLanguages = normalizeDiscoveryLanguages(languages);
+    if (!writeStore("discovery-languages", state.discoveryLanguages))
+      toast("Language preferences are only saved for this tab.");
     if (state.view === "discover") updateFeedFilters();
+    else render();
   }
   function visibleFeedPosts(): Post[] {
     let posts = state.posts.filter(
       (p) => state.filter === "all" || p.kind === state.filter,
     );
-    const language = state.view === "discover" ? state.discoveryLanguage : "";
-    if (language) posts = filterByLanguage(posts, language);
+    if (state.view === "discover") posts = filterByLanguages(posts, state.discoveryLanguages);
     if (state.followingOnly)
       posts = posts.filter(
         (p) => state.relationships.get(p.author.id)?.following,
@@ -203,17 +220,16 @@ namespace Fedi {
           ? "A world of good writing"
           : "Your reading room";
     const posts = visibleFeedPosts();
-    const language = state.view === "discover" ? state.discoveryLanguage : "";
+    const hasLanguages = state.view === "discover" && state.discoveryLanguages.length > 0;
     return `<header class="page-top"><span>${state.view === "bookmarks" ? "SAVED FOR A QUIET MOMENT" : new Date().toLocaleDateString("en", { weekday: "long", month: "long", day: "numeric" }).toUpperCase()}</span><div>${!state.session ? '<span class="demo-badge">DEMO</span>' : '<span class="connected-dot">Connected</span>'}${action("refresh", icon("refresh"), "", "icon-button refresh-button")}</div></header>
       <div class="page-intro"><h1>${title}<span class="accent">.</span></h1><p>${state.view === "bookmarks" ? "Good things are worth coming back to." : "Independent voices. A little more perspective."}</p></div>
       <div class="timeline-tabs" aria-label="Timelines">${(["home", "local", "federated"] as Timeline[]).map((t, i) => `<button data-action="timeline" data-id="${t}" class="${state.timeline === t ? "active" : ""}" aria-pressed="${state.timeline === t}">${["Following", "Local", "Federated"][i]}</button>`).join("")}${state.lists.length ? `<select id="list-select" aria-label="Your lists"><option value="">Your lists</option>${state.lists.map((l) => `<option value="list:${escapeHTML(l.id)}" ${state.timeline === `list:${l.id}` ? "selected" : ""}>${escapeHTML(l.title)}</option>`).join("")}</select>` : ""}</div>
       <div class="feed-controls"><div class="filter-pills" aria-label="Content type">${(["all", "article", "post"] as const).map((f, i) => `<button data-action="filter" data-id="${f}" class="${state.filter === f ? "selected" : ""}" aria-pressed="${state.filter === f}">${["All", "Articles", "Notes"][i]}</button>`).join("")}</div><label class="following-toggle"><input type="checkbox" id="following-only" ${state.followingOnly ? "checked" : ""}> Following only</label></div>
       ${state.view === "discover" ? `<form id="discover-search" class="search-box discover-search">${icon("search")}<input name="query" aria-label="Search people and writing" placeholder="Search people, writing, or #topics" value="${escapeHTML(state.query)}"><button class="button subtle">Search</button></form>` : ""}
-      ${state.view === "discover" ? `<div class="discovery-options">${languageSelector("discovery-language")}<span>${language ? "Using server language labels. Unlabeled posts are hidden." : "Explore writing in every language."}</span></div>` : ""}
       ${state.query ? `<div class="search-summary">Results for “${escapeHTML(state.query)}” ${action("clear-search", "Clear", "", "text-button")}</div>` : ""}
       ${state.accounts.length ? `<div class="account-results">${state.accounts.map((a) => `<div class="recommended">${avatar(a)}<div><button class="author-link" data-action="profile" data-id="${escapeHTML(a.id)}">${escapeHTML(a.name)}</button><p>${escapeHTML(a.acct)}</p></div>${followButton(a)}</div>`).join("")}</div>` : ""}
       ${state.error ? `<div class="error-panel" role="alert">${escapeHTML(state.error)}${action("refresh", "Try again", "", "button subtle")}</div>` : ""}
-      <div class="feed">${posts.map((p, i) => postCard(p, i === 0 && p.kind === "article")).join("")}${!posts.length && !state.loading && !state.error ? emptyState("A little quiet here", language ? "No posts in this language match the loaded results. Load older posts or choose all languages." : state.filter !== "all" ? "No matching writing in the loaded posts. Try another filter or load older posts." : "Follow a writer, explore another timeline, or start a conversation.", language ? action("clear-language", "Show all languages", "", "button subtle") : action("discover", "Explore the fediverse", "", "button subtle")) : ""}</div>
+      <div class="feed">${posts.map((p, i) => postCard(p, i === 0 && p.kind === "article")).join("")}${!posts.length && !state.loading && !state.error ? emptyState("A little quiet here", hasLanguages ? "No posts in the selected languages match the loaded results. Load older posts or change your languages in Settings." : state.filter !== "all" ? "No matching writing in the loaded posts. Try another filter or load older posts." : "Follow a writer, explore another timeline, or start a conversation.", hasLanguages ? '<a href="#settings" class="button subtle">Change language settings</a>' : action("discover", "Explore the fediverse", "", "button subtle")) : ""}</div>
       ${state.loading ? '<div class="loading" role="status">Gathering your reading…</div>' : state.next ? `<div class="load-more">${action("load-more", "Load older posts", "", "button subtle")}</div>` : posts.length ? '<div class="end-note">You’re all caught up. Go make a little something.</div>' : ""}`;
   }
 
@@ -500,7 +516,7 @@ namespace Fedi {
   function settingsView(): string {
     const session = state.session;
     return `<header class="page-top"><span>MAKE YOURSELF AT HOME</span></header><div class="page-intro"><h1>The little details<span class="accent">.</span></h1><p>Your reading room, your way.</p></div><div class="settings-content"><section><h2>Appearance</h2><div class="theme-options">${["light", "dark", "system"].map((t) => `<button class="button ${state.theme === t ? "primary" : "subtle"}" data-action="set-theme" data-id="${t}" aria-pressed="${state.theme === t}">${icon(t === "dark" ? "moon" : t === "light" ? "sun" : "settings")} ${t[0].toUpperCase() + t.slice(1)}</button>`).join("")}</div></section>
-      <section><h2>Discovery language</h2><p>Show only publications in your chosen language when exploring Discover. Home and Saved keep all languages.</p>${languageSelector("settings-language")}<p class="muted">This uses language labels supplied by your server. Posts without a label are excluded when a language is selected. Your preference is saved on this device.</p></section><section><h2>Your connection</h2>${session ? `<p>Connected as <strong>${escapeHTML(session.account.acct)}</strong></p><div class="capability-card"><strong>${session.maxChars.toLocaleString()} characters per publication</strong><p>${session.format === "text/markdown" ? "Native Markdown publishing" : session.format === "text/html" ? "Rich HTML publishing from Markdown" : "Plain-text publishing only"}</p><span>${supportsArticles(session) ? "Ready for long-form writing" : "Reading and notes available. Articles need a rich-text server with a 5,000+ character limit."}</span></div>${action("disconnect", "Log out", "", "button subtle")}` : `<p>Choose an Akkoma, Pleroma, or compatible instance with long posts and rich text. Fedistack checks the server’s capabilities before you write.</p>${action("connect", "Connect your account", "", "button primary")}`}</section>
+      <section><h2>Discovery languages</h2><p>Show publications in any of your chosen languages when exploring Discover. Add languages below and tap a language to remove it. Home and Saved keep all languages.</p>${languageSelector("settings-language")}<p class="muted">This uses language labels supplied by your server. Posts without a label are excluded while language filters are selected. An empty list shows all languages. Your preferences are saved on this device.</p></section><section><h2>Your connection</h2>${session ? `<p>Connected as <strong>${escapeHTML(session.account.acct)}</strong></p><div class="capability-card"><strong>${session.maxChars.toLocaleString()} characters per publication</strong><p>${session.format === "text/markdown" ? "Native Markdown publishing" : session.format === "text/html" ? "Rich HTML publishing from Markdown" : "Plain-text publishing only"}</p><span>${supportsArticles(session) ? "Ready for long-form writing" : "Reading and notes available. Articles need a rich-text server with a 5,000+ character limit."}</span></div>${action("disconnect", "Log out", "", "button subtle")}` : `<p>Choose an Akkoma, Pleroma, or compatible instance with long posts and rich text. Fedistack checks the server’s capabilities before you write.</p>${action("connect", "Connect your account", "", "button primary")}`}</section>
       <section><h2>Made for the open web</h2><p>Fedistack is a quiet place to read and publish independent writing. Your instance hosts your posts and handles your followers. This website is just your reading room.</p><p>No analytics. No external fonts. No runtime dependencies.</p><p class="muted">Choose “Keep me signed in” when connecting to save your sign-in on this device. Log out to remove it. Drafts are stored locally. Direct messages are private mentions handled by your server, and are not end-to-end encrypted.</p></section><section><h2>Keyboard shortcuts</h2><div class="shortcut-list"><span>Bold / italic</span><kbd>⌘ / Ctrl B · I</kbd><span>Insert a link</span><kbd>⌘ / Ctrl K</kbd><span>Save draft</span><kbd>⌘ / Ctrl S</kbd><span>Zen editing / reading focus</span><kbd>⌘ / Ctrl Shift F</kbd><span>Leave Zen / focus mode</span><kbd>Esc</kbd></div></section></div>`;
   }
 

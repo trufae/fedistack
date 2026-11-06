@@ -1257,24 +1257,56 @@ test("demo unpublish preserves title, subtitle, and body and republishes with a 
   assert.equal(app.state.reading.markdown, original.markdown);
 });
 
-test("language filtering matches regional variants and excludes unknown labels only when selected", () => {
+test("language filtering matches any selected language and its regional variants", () => {
   const { app } = setup();
   const posts = ["en", "en-US", "EN_gb", "es", "eng", null, undefined].map(
     (language, id) => ({ id, language }),
   );
   assert.deepEqual(
-    Array.from(app.filterByLanguage(posts, "en"), (p) => p.id),
+    Array.from(app.filterByLanguages(posts, ["en"]), (p) => p.id),
     [0, 1, 2],
   );
   assert.deepEqual(
-    Array.from(app.filterByLanguage(posts, "es"), (p) => p.id),
+    Array.from(app.filterByLanguages(posts, ["es"]), (p) => p.id),
     [3],
   );
-  assert.deepEqual(Array.from(app.filterByLanguage(posts, "fr")), []);
-  assert.equal(app.filterByLanguage(posts, ""), posts);
+  assert.deepEqual(
+    Array.from(app.filterByLanguages(posts, ["en", "es", "ca"]), (p) => p.id),
+    [0, 1, 2, 3],
+  );
+  assert.deepEqual(
+    Array.from(app.filterByLanguages(posts, ["EN_us", "es"]), (p) => p.id),
+    [1, 3],
+  );
+  assert.deepEqual(Array.from(app.filterByLanguages(posts, ["fr", "ca"])), []);
+  assert.equal(app.filterByLanguages(posts, []), posts);
 });
 
-test("the saved language preference filters Discover while Home and Saved retain other languages", () => {
+test("saved language lists preserve legacy choices, validate entries, and stay cleared after reload", () => {
+  for (const [saved, expected] of [
+    [["es", "en", "es", "ca"], ["es", "en", "ca"]],
+    [[null, "", 1, {}, "invalid", "fr"], ["fr"]],
+    [{ language: "en" }, []],
+    [[], []],
+  ]) {
+    const localStorage = storage();
+    localStorage.setItem("fedistack:discovery-languages", JSON.stringify(saved));
+    localStorage.setItem("fedistack:discovery-language", '"de"');
+    const { app } = setup(undefined, { localStorage });
+    assert.deepEqual(Array.from(app.state.discoveryLanguages), expected);
+  }
+  const localStorage = storage();
+  localStorage.setItem("fedistack:discovery-language", '"en"');
+  const { app, context } = setup(undefined, { localStorage });
+  elements(context);
+  assert.deepEqual(Array.from(app.state.discoveryLanguages), ["en"]);
+  app.setDiscoveryLanguages(["en", "es", "ca", "en", "invalid"]);
+  assert.deepEqual(Array.from(setup(undefined, { localStorage }).app.state.discoveryLanguages), ["en", "es", "ca"]);
+  app.setDiscoveryLanguages([]);
+  assert.deepEqual(Array.from(setup(undefined, { localStorage }).app.state.discoveryLanguages), []);
+});
+
+test("the saved language preferences filter Discover while Home and Saved retain other languages", () => {
   const { app, context } = setup();
   const { get } = elements(context);
   const posts = [
@@ -1300,16 +1332,22 @@ test("the saved language preference filters Discover while Home and Saved retain
   app.state.posts = posts;
   app.state.filter = "all";
   app.state.view = "discover";
-  app.setDiscoveryLanguage("en");
-  assert.equal(app.readStore("discovery-language", ""), "en");
+  app.setDiscoveryLanguages(["en"]);
+  assert.deepEqual(Array.from(app.readStore("discovery-languages", [])), ["en"]);
   assert.match(get("app").innerHTML, /English fixture/);
   assert.doesNotMatch(get("app").innerHTML, /Spanish fixture|Unknown fixture/);
-  app.setDiscoveryLanguage("fr");
+  app.setDiscoveryLanguages(["en", "es", "ca"]);
+  assert.match(get("app").innerHTML, /English fixture/);
+  assert.match(get("app").innerHTML, /Spanish fixture/);
+  assert.doesNotMatch(get("app").innerHTML, /Unknown fixture/);
+  assert.doesNotMatch(get("app").innerHTML, /class="language-picker"|data-action="(?:remove-language|clear-languages)"/);
+  app.setDiscoveryLanguages(["fr"]);
   assert.match(
     get("app").innerHTML,
-    /No posts in this language match the loaded results/,
+    /No posts in the selected languages match the loaded results/,
   );
-  assert.match(get("app").innerHTML, /data-action="clear-language"/);
+  assert.match(get("app").innerHTML, /href="#settings" class="button subtle">Change language settings/);
+  assert.doesNotMatch(get("app").innerHTML, /data-action="clear-languages"/);
   for (const view of ["home", "bookmarks"]) {
     app.state.view = view;
     app.render();
@@ -1320,11 +1358,49 @@ test("the saved language preference filters Discover while Home and Saved retain
   app.state.view = "settings";
   app.render();
   assert.match(get("app").innerHTML, /id="settings-language"/);
-  assert.match(get("app").innerHTML, /value="fr" selected/);
-  app.setDiscoveryLanguage("");
+  assert.match(get("app").innerHTML, /aria-label="Remove Français language filter"/);
+  app.setDiscoveryLanguages([]);
+  assert.doesNotMatch(get("app").innerHTML, /data-action="remove-language"/);
   app.state.view = "discover";
   app.render();
   assert.match(get("app").innerHTML, /Unknown fixture/);
+});
+
+test("Settings language controls add, deduplicate, remove, and clear choices", async () => {
+  const { app, context } = setup();
+  const { get } = elements(context);
+  const listeners = new Map();
+  context.document.addEventListener = (name, listener) => listeners.set(name, listener);
+  context.window = { addEventListener() {} };
+  context.matchMedia = () => ({ matches: false, addEventListener() {} });
+  get("modal").addEventListener = () => {};
+  app.route = async () => {};
+  await app.boot();
+  const click = async (action, id = "") => {
+    const button = { dataset: { action, id }, disabled: false };
+    listeners.get("click")({ target: { closest: () => button } });
+    await new Promise(setImmediate);
+    assert.equal(button.disabled, false);
+  };
+  app.state.view = "settings";
+  for (const value of ["en", "es", "ca", "en", ""]) {
+    listeners.get("change")({ target: { id: "settings-language", value } });
+  }
+  assert.deepEqual(Array.from(app.state.discoveryLanguages), ["en", "es", "ca"]);
+  assert.match(get("app").innerHTML, /aria-label="Remove Català language filter"/);
+  assert.doesNotMatch(get("app").innerHTML, /<option value="(?:en|es|ca)"/);
+  await click("remove-language", "es");
+  assert.deepEqual(Array.from(app.state.discoveryLanguages), ["en", "ca"]);
+  assert.doesNotMatch(get("app").innerHTML, /aria-label="Remove Español language filter"/);
+  assert.match(get("app").innerHTML, /<option value="es">/);
+  await click("remove-language", "en");
+  await click("remove-language", "ca");
+  assert.deepEqual(Array.from(app.state.discoveryLanguages), []);
+  assert.match(get("app").innerHTML, /class="language-all">All languages/);
+  app.setDiscoveryLanguages(app.discoveryLanguages.map(([code]) => code));
+  assert.match(get("app").innerHTML, /<select id="settings-language" disabled>/);
+  await click("clear-languages");
+  assert.deepEqual(Array.from(app.state.discoveryLanguages), []);
 });
 
 test("API mapping uses the original publication's language when it is boosted", () => {
@@ -1444,16 +1520,16 @@ test("automatic scanning is bounded and the next load resumes after the scanned 
   assert.equal(requests.length, 11);
 });
 
-test("scanning counts only articles that match the language and following filters", async () => {
+test("scanning counts articles in any selected language that match the following filter", async () => {
   const { app, post, requests } = feedFixture();
   app.state.view = "discover";
-  app.state.discoveryLanguage = "en";
+  app.state.discoveryLanguages = ["en", "es", "ca"];
   app.state.followingOnly = true;
   const author = (id) => ({ ...app.demoAuthors[0], id });
   const pages = [
-    Array.from({ length: 10 }, (_, i) => post(`spanish-${i}`, { language: "es", author: author("friend") })),
+    Array.from({ length: 10 }, (_, i) => post(`french-${i}`, { language: "fr", author: author("friend") })),
     Array.from({ length: 10 }, (_, i) => post(`stranger-${i}`, { language: "en", author: author("stranger") })),
-    Array.from({ length: 10 }, (_, i) => post(`match-${i}`, { language: "en-US", author: author("friend") })),
+    Array.from({ length: 10 }, (_, i) => post(`match-${i}`, { language: ["en-US", "es", "ca"][i % 3], author: author("friend") })),
   ];
   app.state.api.timeline = async (timeline, next) => {
     requests.push({ timeline, next });

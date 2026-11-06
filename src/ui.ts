@@ -1,6 +1,5 @@
 namespace Fedi {
   export const discoveryLanguages: [string, string][] = [
-    ["", "All languages"],
     ["en", "English"],
     ["es", "Español"],
     ["ca", "Català"],
@@ -37,7 +36,16 @@ namespace Fedi {
     ["eo", "Esperanto"],
   ];
   export function languageSelector(id: string): string {
-    return `<label class="language-picker" for="${id}"><span>Language</span><select id="${id}">${discoveryLanguages.map(([code, label]) => `<option value="${code}" ${state.discoveryLanguage === code ? "selected" : ""}>${label}</option>`).join("")}</select></label>`;
+    const selected = state.discoveryLanguages;
+    const available = discoveryLanguages.filter(([code]) => !selected.includes(code));
+    return `<div class="language-picker" role="group" aria-labelledby="${id}-label">
+      <div class="language-picker-heading"><span id="${id}-label">Languages</span>${selected.length ? `<button type="button" id="${id}-clear" class="text-button language-clear" data-action="clear-languages">Show all languages</button>` : ""}</div>
+      <div class="language-picker-controls">${selected.length ? selected.map((code) => {
+        const label = discoveryLanguages.find(([value]) => value === code)![1];
+        return `<button type="button" id="${id}-${code}" class="language-chip" data-action="remove-language" data-id="${code}" aria-label="Remove ${label} language filter"><bdi>${label}</bdi>${icon("close")}</button>`;
+      }).join("") : '<span class="language-all">All languages</span>'}
+      <label class="language-add" for="${id}"><span class="sr-only">Add language</span><select id="${id}"${available.length ? "" : " disabled"}><option value="" selected disabled>${available.length ? "Add language…" : "All languages added"}</option>${available.map(([code, label]) => `<option value="${code}">${label}</option>`).join("")}</select></label></div>
+    </div>`;
   }
   const paths: Record<string, string> = {
     home: '<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/>',

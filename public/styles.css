@@ -1139,9 +1139,26 @@ footer p {
 .comment strong {
   font-size: 12px;
 }
+.comment-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
 .comment .prose {
   font-size: 15px;
   margin-top: 7px;
+}
+.reply-context {
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.reply-context a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .editor-top {
   border-bottom: 1px solid var(--line);
@@ -1190,7 +1207,8 @@ footer p {
 .draft-save-state #save-status[data-state="error"] {
   font-weight: 650;
 }
-.post-owner-actions .delete-link {
+.post-owner-actions .delete-link,
+.comment .delete-link {
   color: var(--accent);
 }
 .published-badge {

@@ -62,7 +62,9 @@ namespace Fedi {
       ...state.ownPosts,
       ...state.comments,
       ...(state.reading ? [state.reading] : []),
-      ...(!state.session ? demoState.posts : []),
+      ...(!state.session
+        ? [...demoState.posts, ...Object.values(demoState.comments).flat()]
+        : []),
     ].find((p) => p.id === id);
   }
   export function navigate(path: string): void {
@@ -391,19 +393,26 @@ namespace Fedi {
       <div class="post-byline">${avatar(p.author)}<div><button class="author-link" data-action="profile" data-id="${escapeHTML(p.author.id)}">${escapeHTML(p.author.name)}</button><div class="byline-sub">${new Date(p.created).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })} · ${readingTime(p.markdown)} min read</div></div>${followButton(p.author)}</div>
       ${postActions(p)}${hidden ? "" : `${p.image ? `<img class="reader-cover" src="${escapeHTML(p.image)}" alt="${escapeHTML(p.imageAlt || "")}">` : ""}<div class="prose reading-prose">${markdown(p.markdown.replace(/^#\s+[^\n]+\n+/, ""))}</div>${p.source ? `<a class="button subtle" href="${escapeHTML(p.source)}" target="_blank" rel="noopener noreferrer">Read the linked article ${icon("external")}</a>` : ""}<div class="reader-end">${icon("leaf")}<span>Thanks for reading. Keep the conversation going.</span></div>${postActions(p)}`}</article>
       <section class="comments"><div class="section-heading"><h2>Conversation <span>${p.replies}</span></h2>${action("share", "Share publication", p.id, "text-button")}</div><form id="reply-form"><label class="sr-only" for="reply-body">Write a comment</label><textarea id="reply-body" name="body" rows="3" required placeholder="Add a little perspective…">${escapeHTML(state.replyDrafts.get(p.id) || "")}</textarea><div class="reply-footer"><span>${p.visibility === "private" ? "Followers only" : p.visibility === "unlisted" ? "Unlisted reply" : "Public reply"}${!state.session || state.session.format !== "text/plain" ? " · Markdown supported" : ""}</span><button class="button primary" type="submit">Reply ${icon("arrow")}</button></div></form>
-      ${state.error ? `<p class="form-error" role="alert">${escapeHTML(state.error)}</p>` : ""}${state.loading ? '<p class="loading">Loading the conversation…</p>' : state.comments.map((c) => `<div class="comment">${avatar(c.author, true)}<div><strong>${escapeHTML(c.author.name)}</strong><span class="byline-sub"> · ${relativeDate(c.created)}</span>${c.warning ? `<details><summary>${escapeHTML(c.warning)}</summary><div class="prose">${markdown(c.markdown)}</div></details>` : `<div class="prose">${markdown(c.markdown)}</div>`}</div></div>`).join("") || '<p class="muted">Be the first to start the conversation.</p>'}</section>`;
+      ${state.error ? `<p class="form-error" role="alert">${escapeHTML(state.error)}</p>` : ""}${state.loading ? '<p class="loading">Loading the conversation…</p>' : state.comments.map(commentCard).join("") || '<p class="muted">Be the first to start the conversation.</p>'}</section>`;
   }
 
   function libraryView(): string {
     const drafts = getDrafts(),
-      posts = state.session
+      writing = state.session
         ? state.ownPosts
-        : demoState.posts.filter((p) => p.author.id === "you");
+        : [...new Map(
+            [...demoState.posts, ...Object.values(demoState.comments).flat()]
+              .filter((p) => p.author.id === "you" && p.visibility !== "direct")
+              .map((p) => [p.id, p]),
+          ).values()].sort((a, b) => b.created.localeCompare(a.created)),
+      posts = writing.filter((p) => !p.replyTo),
+      replies = writing.filter((p) => !!p.replyTo),
+      showingReplies = state.libraryTab === "replies";
     return `<header class="page-top"><span>A SPACE FOR YOUR IDEAS</span><div><a href="#note" class="button subtle small-button">Note</a><a href="#write" class="button primary small-button">${icon("plus")} Article</a></div></header><div class="page-intro"><h1>Your writing<span class="accent">.</span></h1><p>A passing thought today. Someone’s favorite read tomorrow.</p></div>
       ${state.session ? `<p class="account-stats">${(state.session.account.followers ?? 0).toLocaleString()} followers <span>·</span> ${(state.session.account.following ?? 0).toLocaleString()} following <span>·</span> ${(state.session.account.statuses ?? 0).toLocaleString()} total posts</p>` : ""}<div class="stats-grid"><div><strong>${drafts.length}</strong><span>Saved drafts</span></div><div><strong>${posts.length}${state.ownNext ? "+" : ""}</strong><span>Publications loaded</span></div><div><strong>${posts.reduce((n, p) => n + p.likes, 0)}</strong><span>Likes on these posts</span></div><div><strong>${posts.reduce((n, p) => n + p.replies, 0)}</strong><span>Replies on these posts</span></div></div>
-      <div class="timeline-tabs">${["drafts", "published"].map((t) => `<button data-action="library-tab" data-id="${t}" class="${state.libraryTab === t ? "active" : ""}">${t === "drafts" ? `Drafts (${drafts.length})` : "Published"}</button>`).join("")}</div>
-      <div class="draft-list">${state.libraryTab === "drafts" ? drafts.map((d) => `<article class="draft-card"><div><span class="eyebrow">${d.editingId ? "Unpublished changes" : d.kind === "post" ? "Note" : "Article"} · ${relativeDate(d.updated)}</span><a href="#write/${encodeURIComponent(d.id)}"><h2>${escapeHTML(d.kind === "post" ? d.body.trim().slice(0, 60) || "Untitled note" : d.title || "Untitled article")}</h2></a><p>${escapeHTML(plainText(d.body).slice(0, 120) || "A blank page, full of possibility.")}</p><small>${d.body.trim() ? d.body.trim().split(/\s+/).length : 0} words · Saved on this device</small></div><div class="draft-actions"><a class="button subtle" href="#write/${encodeURIComponent(d.id)}">Continue writing ${icon("arrow")}</a>${action("export-draft", "Export .md", d.id, "text-button")}${action("delete-draft", "Delete", d.id, "text-button muted")}</div></article>`).join("") || emptyState("Every good story starts here", "Your drafts autosave as you write. Start something new.", '<a href="#write" class="button primary">Start writing</a>') : posts.map((p) => postCard(p)).join("") || emptyState("Your words will find a home", "Published articles and notes will appear here.")}</div>
-      ${state.error ? `<p class="error-panel">${escapeHTML(state.error)}</p>` : ""}${state.loading ? '<p class="loading">Loading your publications…</p>' : state.libraryTab === "published" && state.ownNext ? `<div class="load-more">${action("own-more", "Load older publications", "", "button subtle")}</div>` : ""}<p class="library-note">Drafts stay in this browser, scoped to your account. Export a Markdown copy to keep a backup.</p>`;
+      <div class="timeline-tabs">${["drafts", "published", "replies"].map((t) => `<button data-action="library-tab" data-id="${t}" class="${state.libraryTab === t ? "active" : ""}">${t === "drafts" ? `Drafts (${drafts.length})` : t === "replies" ? "Replies" : "Published"}</button>`).join("")}</div>
+      <div class="draft-list">${state.libraryTab === "drafts" ? drafts.map((d) => `<article class="draft-card"><div><span class="eyebrow">${d.editingId ? "Unpublished changes" : d.kind === "post" ? "Note" : "Article"} · ${relativeDate(d.updated)}</span><a href="#write/${encodeURIComponent(d.id)}"><h2>${escapeHTML(d.kind === "post" ? d.body.trim().slice(0, 60) || "Untitled note" : d.title || "Untitled article")}</h2></a><p>${escapeHTML(plainText(d.body).slice(0, 120) || "A blank page, full of possibility.")}</p><small>${d.body.trim() ? d.body.trim().split(/\s+/).length : 0} words · Saved on this device</small></div><div class="draft-actions"><a class="button subtle" href="#write/${encodeURIComponent(d.id)}">Continue writing ${icon("arrow")}</a>${action("export-draft", "Export .md", d.id, "text-button")}${action("delete-draft", "Delete", d.id, "text-button muted")}</div></article>`).join("") || emptyState("Every good story starts here", "Your drafts autosave as you write. Start something new.", '<a href="#write" class="button primary">Start writing</a>') : (showingReplies ? replies : posts).map((p) => postCard(p)).join("") || (state.loading ? "" : emptyState(showingReplies ? "Your replies and comments" : "Your words will find a home", state.ownNext ? `No ${showingReplies ? "replies" : "publications"} in the loaded posts. Load older ${showingReplies ? "replies" : "publications"} to keep looking.` : showingReplies ? "Your replies and comments on posts will appear here." : "Published articles and notes will appear here."))}</div>
+      ${state.error ? `<p class="error-panel">${escapeHTML(state.error)}</p>` : ""}${state.loading ? `<p class="loading">Loading your ${showingReplies ? "replies" : "publications"}…</p>` : state.libraryTab !== "drafts" && state.ownNext ? `<div class="load-more">${action("own-more", showingReplies ? "Load older replies" : "Load older publications", "", "button subtle")}</div>` : ""}<p class="library-note">Drafts stay in this browser, scoped to your account. Export a Markdown copy to keep a backup.</p>`;
   }
 
   export async function loadOwnPosts(append = false): Promise<void> {
@@ -420,7 +429,7 @@ namespace Fedi {
       const result = await api.request<MastodonStatus[]>(
         append && state.ownNext
           ? state.ownNext
-          : `/api/v1/accounts/${encodeURIComponent(state.session.account.id)}/statuses?exclude_replies=true&exclude_reblogs=true&limit=40`,
+          : `/api/v1/accounts/${encodeURIComponent(state.session.account.id)}/statuses?exclude_replies=false&exclude_reblogs=true&limit=40`,
       );
       if (version !== loadVersion) return;
       state.ownPosts = [
@@ -428,7 +437,7 @@ namespace Fedi {
           [
             ...(append ? state.ownPosts : []),
             ...result.data
-              .filter((p) => p.visibility !== "direct")
+              .filter((p) => p.visibility !== "direct" && !p.reblog)
               .map(mapStatus),
           ].map((p) => [p.id, p]),
         ).values(),

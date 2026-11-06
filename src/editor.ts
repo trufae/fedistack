@@ -303,7 +303,7 @@ namespace Fedi {
       else
         post = {
           ...(d.editingId
-            ? demoState.posts.find((p) => p.id === d.editingId)
+            ? findPost(d.editingId)
             : undefined),
           id: d.editingId || uid(),
           author: demoMe,
@@ -328,6 +328,11 @@ namespace Fedi {
           post,
           ...demoState.posts.filter((p) => p.id !== post.id),
         ];
+        for (const parentId of Object.keys(demoState.comments)) {
+          demoState.comments[parentId] = demoState.comments[parentId].map(
+            (p) => p.id === post.id ? post : p,
+          );
+        }
         saveDemo();
       }
       const drafts = readStore<Draft[]>(key, []).filter((x) => x.id !== d.id);
@@ -446,39 +451,63 @@ namespace Fedi {
       );
     }
     if (state.api !== api) return;
-    removePublicationFromState(id);
+    removePublicationFromState(post);
     closeModal();
     toast("Unpublished. Your article is saved in drafts.");
     navigate(`write/${encodeURIComponent(draft.id)}`);
   }
   export function confirmDeletePublication(id: string): void {
-    const post = ownedPublication(id);
+    const post = ownedPublication(id),
+      kind = post.replyTo ? "comment" : "publication";
     showModal(
-      "Delete this publication?",
-      `<p><strong>${escapeHTML(post.title || plainText(post.markdown).slice(0, 100))}</strong></p><p>${state.api ? "This will delete the publication from your server and request its removal from the fediverse. This cannot be undone." : "This removes the publication from your offline demo."}</p>${action("confirm-delete-publication", "Delete publication", id, "button danger")} ${action("close-modal", "Keep publication", "", "button subtle")}`,
+      `Delete this ${kind}?`,
+      `<p><strong>${escapeHTML(post.title || plainText(post.markdown).slice(0, 100))}</strong></p><p>${state.api ? `This will delete the ${kind} from your server and request its removal from the fediverse. This cannot be undone.` : `This removes the ${kind} from your offline demo.`}</p>${action("confirm-delete-publication", `Delete ${kind}`, id, "button danger")} ${action("close-modal", `Keep ${kind}`, "", "button subtle")}`,
     );
   }
   export async function deletePublication(id: string): Promise<void> {
-    ownedPublication(id);
-    const api = state.api;
+    const post = ownedPublication(id),
+      api = state.api;
     if (api) await api.deleteStatus(id);
     if (state.api !== api) return;
-    const wasReading = removePublicationFromState(id);
+    const wasReading = removePublicationFromState(post);
     closeModal();
-    toast("Publication deleted.");
+    toast(post.replyTo ? "Comment deleted." : "Publication deleted.");
     if (state.view === "reader" && wasReading) {
-      state.libraryTab = "published";
+      state.libraryTab = post.replyTo ? "replies" : "published";
       navigate("drafts");
     } else render();
   }
-  function removePublicationFromState(id: string): boolean {
+  function removePublicationFromState(post: Post): boolean {
+    const id = post.id;
+    if (post.replyTo) {
+      // A post can occur in multiple views, sometimes as the same object.
+      const cachedPosts = new Set([
+        ...state.posts,
+        ...state.ownPosts,
+        ...state.comments,
+        ...(state.reading ? [state.reading] : []),
+        ...(!state.api
+          ? [...demoState.posts, ...Object.values(demoState.comments).flat()]
+          : []),
+      ]);
+      for (const parent of cachedPosts) {
+        if (parent.id === post.replyTo)
+          parent.replies = Math.max(0, parent.replies - 1);
+      }
+    }
     if (!state.api) {
       demoState.posts = demoState.posts.filter((p) => p.id !== id);
+      for (const parentId of Object.keys(demoState.comments)) {
+        demoState.comments[parentId] = demoState.comments[parentId].filter(
+          (p) => p.id !== id,
+        );
+      }
       delete demoState.comments[id];
       saveDemo();
     }
     state.posts = state.posts.filter((p) => p.id !== id);
     state.ownPosts = state.ownPosts.filter((p) => p.id !== id);
+    state.comments = state.comments.filter((p) => p.id !== id);
     if (state.session?.account.statuses !== undefined)
       state.session.account.statuses = Math.max(
         0,

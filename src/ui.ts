@@ -142,7 +142,7 @@ namespace Fedi {
       <button class="icon-button ${post.liked ? "liked" : ""}" data-action="like" data-id="${escapeHTML(post.id)}" aria-label="${post.liked ? "Unlike" : "Like"}" aria-pressed="${post.liked}">${icon("heart")}<span>${post.likes || ""}</span></button>
       <a class="icon-button" href="#read/${encodeURIComponent(post.id)}" aria-label="Read ${post.replies} comments">${icon("comment")}<span>${post.replies || ""}</span></a>
       <button class="icon-button" data-action="share" data-id="${escapeHTML(post.id)}" aria-label="Share publication">${icon("external")}</button>
-      </div><div class="post-owner-actions">${owned ? `${action("edit-publication", `${icon("edit")} Edit`, post.id, "text-button")}${action("unpublish-publication", "Unpublish", post.id, "text-button")}${action("delete-publication", "Delete", post.id, "text-button delete-link")}` : ""}<button class="icon-button ${post.saved ? "saved" : ""}" data-action="save" data-id="${escapeHTML(post.id)}" aria-label="${post.saved ? "Remove bookmark" : "Save for later"}" aria-pressed="${post.saved}">${icon("bookmark")}</button></div></div>`;
+      </div><div class="post-owner-actions">${owned ? `${action("edit-publication", `${icon("edit")} Edit`, post.id, "text-button")}${action("unpublish-publication", "Unpublish", post.id, "text-button")}${action("delete-publication", post.replyTo ? "Delete comment" : "Delete", post.id, "text-button delete-link")}` : ""}<button class="icon-button ${post.saved ? "saved" : ""}" data-action="save" data-id="${escapeHTML(post.id)}" aria-label="${post.saved ? "Remove bookmark" : "Save for later"}" aria-pressed="${post.saved}">${icon("bookmark")}</button></div></div>`;
   }
 
   export function postCard(post: Post, featured = false): string {
@@ -150,6 +150,7 @@ namespace Fedi {
     const href = `#read/${encodeURIComponent(post.id)}`;
     return `<article class="post-card ${featured ? "featured" : ""} ${post.kind}">
       ${post.boostedBy ? `<p class="boost-label">${icon("refresh")} Shared by ${escapeHTML(post.boostedBy)}</p>` : ""}
+      ${post.replyTo ? `<p class="reply-context"><a href="#read/${encodeURIComponent(post.replyTo)}">${icon("comment")} View conversation ${icon("arrow")}</a></p>` : ""}
       <div class="post-byline">${avatar(post.author)}<div><button class="author-link" data-action="profile" data-id="${escapeHTML(post.author.id)}">${escapeHTML(post.author.name)}</button><div class="byline-sub">${escapeHTML(post.author.publication || post.author.acct)} <span>· ${relativeDate(post.created)}</span></div></div>${followButton(post.author)}</div>
       ${
         hidden
@@ -161,6 +162,13 @@ namespace Fedi {
       </div>${!featured && post.image ? `<a href="${href}"><img class="thumbnail" src="${escapeHTML(post.image)}" alt="${escapeHTML(post.imageAlt || "")}" loading="lazy"></a>` : ""}</div>`
       }
       ${postActions(post)}</article>`;
+  }
+
+  export function commentCard(post: Post): string {
+    const owned =
+      post.author.id === (state.session?.account.id || "you") &&
+      post.visibility !== "direct";
+    return `<div class="comment">${avatar(post.author, true)}<div><div class="comment-header"><div><strong>${escapeHTML(post.author.name)}</strong><span class="byline-sub"> · ${relativeDate(post.created)}</span></div>${owned ? action("delete-publication", "Delete comment", post.id, "text-button delete-link") : ""}</div>${post.warning ? `<details><summary>${escapeHTML(post.warning)}</summary><div class="prose">${markdown(post.markdown)}</div></details>` : `<div class="prose">${markdown(post.markdown)}</div>`}</div></div>`;
   }
 
   export function emptyState(

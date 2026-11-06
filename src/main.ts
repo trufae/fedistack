@@ -124,6 +124,7 @@ namespace Fedi {
         writeStore("oauth", null, true);
         state.posts = [];
         state.ownPosts = [];
+        state.ownNext = undefined;
         state.comments = [];
         state.reading = null;
         state.accounts = [];
@@ -236,7 +237,7 @@ namespace Fedi {
       case "library-tab":
         state.libraryTab = id;
         render();
-        if (id === "published") await loadOwnPosts();
+        if (id === "published" || id === "replies") await loadOwnPosts();
         break;
       case "own-more":
         await loadOwnPosts(true);

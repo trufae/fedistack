@@ -824,6 +824,177 @@ function ownPublication(app) {
   return post;
 }
 
+test("the reader offers deletion only for your comments and asks for confirmation", () => {
+  const { app, context } = setup();
+  const { get } = elements(context);
+  const parent = ownPublication(app);
+  const mine = { ...parent, id: "my-comment", replyTo: parent.id, warning: "Spoiler" };
+  const other = { ...mine, id: "other-comment", author: app.demoAuthors[0] };
+  app.state.comments = [mine, other];
+  app.state.view = "reader";
+  app.render();
+  assert.match(get("app").innerHTML, /data-action="delete-publication" data-id="my-comment"[^>]*>Delete comment/);
+  assert.doesNotMatch(get("app").innerHTML, /data-action="delete-publication" data-id="other-comment"/);
+  assert.doesNotMatch(app.commentCard({ ...mine, visibility: "direct" }), /delete-publication/);
+  const modal = get("modal");
+  modal.querySelector = () => null;
+  modal.showModal = () => { modal.open = true; };
+  app.confirmDeletePublication(mine.id);
+  assert.equal(modal.open, true);
+  assert.match(modal.innerHTML, /Delete this comment\?/);
+  assert.match(modal.innerHTML, /data-action="confirm-delete-publication" data-id="my-comment"[^>]*>Delete comment/);
+  assert.match(modal.innerHTML, /Keep comment/);
+  assert.equal(app.state.comments.length, 2);
+});
+
+test("deleting a comment removes every cached copy and updates only its parent's count once", async () => {
+  const { app, context } = setup();
+  const { get } = elements(context);
+  get("modal").close = () => {};
+  const root = ownPublication(app);
+  root.replies = 4;
+  const parent = { ...root, id: "parent-comment", replyTo: root.id, replies: 1 };
+  const mine = { ...root, id: "my-comment", replyTo: parent.id, replies: 0 };
+  const parentCopy = { ...parent };
+  app.state.view = "reader";
+  app.state.posts = [root, parent, mine];
+  app.state.ownPosts = [parentCopy, { ...mine }];
+  app.state.comments = [parent, mine];
+  app.state.replyDrafts.set(root.id, "Unsent comment");
+  const deleted = [];
+  app.state.api = { deleteStatus: async (id) => deleted.push(id) };
+  await app.deletePublication(mine.id);
+  assert.deepEqual(deleted, [mine.id]);
+  assert.equal(app.findPost(mine.id), undefined);
+  assert.equal(app.state.comments.length, 1);
+  assert.equal(app.state.reading, root);
+  assert.equal(root.replies, 4);
+  assert.equal(parent.replies, 0);
+  assert.equal(parentCopy.replies, 0);
+  assert.equal(app.state.session.account.statuses, 2);
+  assert.equal(app.state.replyDrafts.get(root.id), "Unsent comment");
+  assert.equal(context.location.hash, "");
+  assert.equal(get("toast").textContent, "Comment deleted.");
+});
+
+test("failed comment deletion keeps the conversation intact and rejects other authors", async () => {
+  const { app } = setup();
+  const parent = ownPublication(app);
+  const mine = { ...parent, id: "mine-comment", replyTo: parent.id };
+  const other = { ...mine, id: "other-comment", author: app.demoAuthors[0] };
+  app.state.comments = [mine, other];
+  const replies = parent.replies;
+  let requests = 0;
+  app.state.api = { deleteStatus: async () => {
+    requests++;
+    throw new Error("Deletion failed");
+  } };
+  await assert.rejects(app.deletePublication(other.id), /own publications/);
+  assert.equal(requests, 0);
+  await assert.rejects(app.deletePublication(mine.id), /Deletion failed/);
+  assert.equal(app.state.comments.length, 2);
+  assert.equal(parent.replies, replies);
+  assert.equal(app.state.session.account.statuses, 3);
+});
+
+test("demo replies appear in Your writing and deletion persists when reopening the conversation", async () => {
+  const { app, context } = setup();
+  const { get } = elements(context);
+  get("modal").close = () => {};
+  const parent = app.demoState.posts[0];
+  const replies = parent.replies;
+  const mine = {
+    ...parent, id: "demo-comment", author: app.demoMe, replyTo: parent.id,
+    title: "", kind: "post", markdown: "My demo comment", replies: 0,
+  };
+  app.demoState.comments[parent.id] = [mine];
+  app.state.view = "drafts";
+  app.state.libraryTab = "replies";
+  app.render();
+  assert.match(get("app").innerHTML, /My demo comment/);
+  assert.match(get("app").innerHTML, /View conversation/);
+  assert.equal(app.findPost(mine.id), mine);
+  app.state.libraryTab = "published";
+  app.render();
+  assert.doesNotMatch(get("app").innerHTML, /My demo comment/);
+  app.state.libraryTab = "replies";
+  await app.deletePublication(mine.id);
+  const saved = JSON.parse(context.localStorage.getItem("fedistack:demo"));
+  assert.equal(saved.comments[parent.id].length, 0);
+  assert.equal(saved.posts[0].replies, Math.max(0, replies - 1));
+  context.location.hash = `#read/${parent.id}`;
+  await app.route();
+  assert.equal(app.state.comments.some((p) => p.id === mine.id), false);
+  assert.doesNotMatch(get("app").innerHTML, /My demo comment/);
+});
+
+test("editing a demo comment preserves its parent and updates the stored conversation", async () => {
+  const { app, context } = setup();
+  const { get } = elements(context);
+  get("modal").close = () => {};
+  const parent = app.demoState.posts[0];
+  const mine = {
+    ...parent, id: "demo-comment", author: app.demoMe, replyTo: parent.id,
+    title: "", kind: "post", markdown: "Original comment", replies: 0,
+  };
+  app.demoState.comments[parent.id] = [mine];
+  app.state.draft = { ...app.newDraft("post"), editingId: mine.id, body: "Edited comment" };
+  await app.publishDraft();
+  assert.equal(app.state.reading.replyTo, parent.id);
+  assert.equal(app.demoState.comments[parent.id][0].markdown, "Edited comment");
+  app.state.view = "drafts";
+  app.state.libraryTab = "replies";
+  app.render();
+  assert.equal(get("app").innerHTML.match(/Edited comment/g).length, 1);
+  assert.doesNotMatch(get("app").innerHTML, /Original comment/);
+});
+
+test("Your writing loads and paginates replies while keeping publications, boosts, and DMs separate", async () => {
+  const { app, context } = setup();
+  const { get } = elements(context);
+  ownPublication(app);
+  app.state.view = "drafts";
+  app.state.libraryTab = "replies";
+  app.htmlToMarkdown = (text) => text;
+  const account = {
+    id: "me", username: "writer", display_name: "Writer", acct: "writer",
+    avatar: "", note: "", url: "https://example.org/@writer",
+  };
+  const status = (id, replyTo, visibility = "public") => ({
+    id, account, content: `Body of ${id}`, created_at: new Date().toISOString(),
+    favourites_count: 0, replies_count: 0, visibility, spoiler_text: "",
+    in_reply_to_id: replyTo,
+  });
+  const next = "https://example.org/api/v1/accounts/me/statuses?max_id=40&exclude_replies=false";
+  const requests = [];
+  app.state.api = { request: async (path) => {
+    requests.push(path);
+    return requests.length === 1
+      ? { data: [status("article", null)], next }
+      : { data: [
+          status("article", null), status("reply", "parent/id"),
+          status("private-message", "dm", "direct"),
+          { ...status("boost", null), reblog: status("boosted", "parent") },
+        ] };
+  } };
+  await app.loadOwnPosts();
+  assert.match(requests[0], /exclude_replies=false/);
+  assert.match(requests[0], /exclude_reblogs=true/);
+  assert.match(get("app").innerHTML, /No replies in the loaded posts/);
+  assert.match(get("app").innerHTML, /Load older replies/);
+  await app.loadOwnPosts(true);
+  assert.equal(requests[1], next);
+  assert.deepEqual(Array.from(app.state.ownPosts, (p) => p.id), ["article", "reply"]);
+  assert.match(get("app").innerHTML, /Body of reply/);
+  assert.match(get("app").innerHTML, /href="#read\/parent%2Fid"/);
+  assert.match(get("app").innerHTML, /Delete comment/);
+  assert.doesNotMatch(get("app").innerHTML, /Body of article|Body of private-message|Body of boosted|Load older replies/);
+  app.state.libraryTab = "published";
+  app.render();
+  assert.match(get("app").innerHTML, /Body of article/);
+  assert.doesNotMatch(get("app").innerHTML, /Body of reply/);
+});
+
 test("unpublishing saves the original source before removal and opens an unpublished draft", async () => {
   const { app, context } = setup();
   const { get } = elements(context);

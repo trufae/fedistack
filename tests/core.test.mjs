@@ -29,6 +29,7 @@ function setup(
     AbortController,
     crypto: webcrypto,
     btoa,
+    atob,
     fetch,
     localStorage: stores.localStorage || storage(),
     sessionStorage: stores.sessionStorage || storage(),
@@ -1184,7 +1185,7 @@ async function postActionFixture(fetch) {
 
 test("Share copies the current Fedistack reader link and keeps the original separately accessible", async () => {
   const { app, context, get, click } = await postActionFixture();
-  const post = { ...app.demoPosts[0], id: "remote/id", url: "https://author.example/@writer/original" };
+  const post = { ...app.demoPosts[0], author: { ...app.demoAuthors[0], acct: "writer@author.example" }, id: "remote/id", url: "https://author.example/@writer/original" };
   app.state.posts = [post];
   app.state.api = new app.API("https://social.example", "private-token");
   context.location.href = "https://reader.example/custom/path/?code=secret&state=secret#home";
@@ -1196,7 +1197,7 @@ test("Share copies the current Fedistack reader link and keeps the original sepa
   assert.equal(link.origin, "https://reader.example");
   assert.equal(link.pathname, "/custom/path/");
   assert.equal(link.search, "");
-  assert.equal(link.hash, "#read/remote%2Fid?server=https%3A%2F%2Fsocial.example");
+  assert.equal(link.hash, "#@writer/remote%2Fid?server=https%3A%2F%2Fsocial.example");
   assert.doesNotMatch(copied, /secret|private-token|author\.example/);
   assert.match(get("toast").textContent, /Fedistack reading link copied/);
   assert.match(app.postActions(post), /href="https:\/\/author.example\/@writer\/original"[^>]*aria-label="Open original post"/);
@@ -1223,6 +1224,236 @@ function sharedStatus(overrides = {}) {
     ...overrides,
   };
 }
+
+test("same-origin sharing copies a compact UUID link that opens without an account", async () => {
+  const id = "01a1b21a-0895-7011-a0ba-ae115d92861f";
+  const origin = "https://lolcathost.org";
+  const { app, context, click } = await postActionFixture();
+  const post = { ...app.demoPosts[0], author: { ...app.demoAuthors[0], acct: "writer" }, id, url: `${origin}/objects/${id}` };
+  app.state.posts = [post];
+  app.state.api = new app.API(`${origin}:443/`, "private-token");
+  context.location.href = `${origin}/?code=secret#home`;
+  let copied;
+  context.navigator = { clipboard: { writeText: async (text) => { copied = text; } } };
+  click(id, "share");
+  await new Promise(setImmediate);
+  assert.equal(copied, `${origin}/#@writer/aGyGgiVcBGguq4RXZKGHw`);
+
+  const requests = [];
+  const reader = await postActionFixture(async (url, options) => {
+    requests.push({ url, options });
+    return Response.json(url.endsWith("/context")
+      ? { ancestors: [], descendants: [sharedStatus({ id: "reply", in_reply_to_id: id })] }
+      : sharedStatus({ id }));
+  });
+  Object.assign(reader.context.location, { origin, href: copied, hash: new URL(copied).hash });
+  reader.app.state.posts = [{ ...post, title: "Unrelated cached post" }];
+  await reader.app.route();
+  assert.equal(reader.app.state.error, "");
+  assert.equal(reader.app.state.reading.id, id);
+  assert.equal(reader.app.state.reading.title, "Shared article");
+  assert.equal(reader.app.state.readerServer, origin);
+  assert.equal(reader.app.state.comments[0].replyTo, id);
+  assert.equal(reader.app.publicationLink(reader.app.state.reading), copied);
+  assert.deepEqual(requests.map(({ url }) => url), [
+    `${origin}/api/v1/statuses/${id}`,
+    `${origin}/api/v1/statuses/${id}/context`,
+  ]);
+  assert.ok(requests.every(({ options }) => !options.headers.Authorization));
+});
+
+test("username links escape the author's name and keep resolving after a rename", async () => {
+  const requests = [];
+  const { app, context } = await postActionFixture(async (url) => {
+    requests.push(url);
+    return Response.json(url.endsWith("/context")
+      ? { ancestors: [], descendants: [] }
+      : sharedStatus());
+  });
+  const post = {
+    ...app.demoPosts[0],
+    author: { ...app.demoAuthors[0], acct: "old/name?# ü@source.example" },
+    boostedBy: app.demoAuthors[1],
+  };
+  app.state.readerServer = context.location.origin;
+  app.state.reading = post;
+  const link = new URL(app.publicationLink(post));
+  assert.equal(link.hash, "#@old%2Fname%3F%23%20%C3%BC/slow-web");
+  context.location.hash = link.hash;
+  await app.route();
+  assert.equal(app.state.error, "");
+  assert.equal(app.state.reading.author.acct, "writer");
+  assert.deepEqual(requests, [
+    "https://reader.example/api/v1/statuses/slow-web",
+    "https://reader.example/api/v1/statuses/slow-web/context",
+  ]);
+  assert.equal(new URL(app.publicationLink(app.state.reading)).hash, "#@writer/slow-web");
+});
+
+test("existing marked UUID links with and without usernames still open the original post", async () => {
+  const id = "01a1b21a-0895-7011-a0ba-ae115d92861f";
+  const requests = [];
+  const { app, context } = await postActionFixture(async (url) => {
+    requests.push(url);
+    return Response.json(url.endsWith("/context")
+      ? { ancestors: [], descendants: [] }
+      : sharedStatus({ id }));
+  });
+  for (const route of ["p", "@writer"]) {
+    context.location.hash = `#${route}/~AaGyGgiVcBGguq4RXZKGHw`;
+    requests.length = 0;
+    await app.route();
+    assert.equal(app.state.error, "");
+    assert.equal(app.state.reading.id, id);
+    assert.equal(requests[0], `https://reader.example/api/v1/statuses/${id}`);
+    assert.equal(new URL(app.publicationLink(app.state.reading)).hash, "#@writer/aGyGgiVcBGguq4RXZKGHw");
+  }
+});
+
+test("legacy p routes keep unmarked opaque IDs literal", async () => {
+  const id = "AaGyGgiVcBGguq4RXZKGHw";
+  const requests = [];
+  const { app, context } = await postActionFixture(async (url) => {
+    requests.push(url);
+    return Response.json(url.endsWith("/context")
+      ? { ancestors: [], descendants: [] }
+      : sharedStatus({ id }));
+  });
+  context.location.hash = `#p/${id}`;
+  await app.route();
+  assert.equal(app.state.error, "");
+  assert.equal(app.state.reading.id, id);
+  assert.equal(requests[0], `https://reader.example/api/v1/statuses/${id}`);
+  assert.equal(new URL(app.publicationLink(app.state.reading)).hash, "#@writer/%41aGyGgiVcBGguq4RXZKGHw");
+});
+
+test("share IDs preserve UUID bits and opaque IDs across origins and subdirectories", async () => {
+  let id;
+  const requests = [];
+  const { app, context } = await postActionFixture(async (url) => {
+    requests.push(url);
+    return Response.json(url.endsWith("/context")
+      ? { ancestors: [], descendants: [] }
+      : sharedStatus({ id }));
+  });
+  for (id of [
+    "00000000-0000-0000-0000-000000000000",
+    "00000000-0000-0000-0000-000000000001",
+    "00000000-0000-0000-0000-000000000002",
+    "00000000-0000-0000-0000-000000000003",
+    "00000000-0000-0000-0000-000000000004",
+    "00100000-0000-0000-0000-000000000000",
+    "04000000-0000-0000-0000-000000000000",
+    "ffffffff-ffff-ffff-ffff-ffffffffffff",
+    "fbefbefb-efbe-fbef-befb-efbefbefbefb",
+    "01A1B21A-0895-7011-A0BA-AE115D92861F",
+    "12345678901234567890",
+    "AaGyGgiVcBGguq4RXZKGHw",
+    "aGyGgiVcBGguq4RXZKGHw",
+    "A",
+    "Q",
+    "g",
+    "w",
+    "%41",
+    "~AaGyGgiVcBGguq4RXZKGHw",
+    "remote/id?query#hash% ü",
+  ]) {
+    const post = { ...app.demoPosts[0], author: { ...app.demoAuthors[0], acct: "writer" }, id };
+    app.state.readerServer = "https://source.example";
+    app.state.reading = post;
+    const link = new URL(app.publicationLink(post));
+    assert.equal(link.pathname, "/fedistack/");
+    assert.match(link.hash, /\?server=https%3A%2F%2Fsource.example$/);
+    if (/^[0-9a-f-]{36}$/.test(id)) assert.match(link.hash, /^#@writer\/[A-Za-z0-9_-]{1,22}\?/);
+    if (id.startsWith("~")) assert.match(link.hash, /^#@writer\/%7E/);
+    context.location.hash = link.hash;
+    requests.length = 0;
+    await app.route();
+    assert.equal(app.state.error, "", id);
+    assert.equal(app.state.reading.id, id);
+    assert.equal(requests[0], `https://source.example/api/v1/statuses/${encodeURIComponent(id)}`);
+    assert.equal(app.publicationLink(app.state.reading), link.href);
+  }
+});
+
+test("same-origin shared links resolve through a different signed-in server before interacting", async () => {
+  const requests = [];
+  const { app, context, click } = await postActionFixture(async (url, options) => {
+    requests.push({ url, options });
+    if (url.startsWith("https://reader.example/")) return Response.json(sharedStatus());
+    if (url.includes("/api/v2/search?"))
+      return Response.json({ accounts: [], statuses: [sharedStatus({ id: "local-id" })] });
+    if (url.endsWith("/context")) return Response.json({ ancestors: [], descendants: [] });
+    return Response.json(sharedStatus({ id: "local-id", reblogged: true }));
+  });
+  app.state.session = { ...longServer, account: app.demoMe, server: "https://account.example", token: "local-token" };
+  app.state.api = new app.API(app.state.session.server, app.state.session.token);
+  app.state.posts = [{ ...app.demoPosts[0], title: "Unrelated cached post" }];
+  context.location.hash = "#@writer/slow-web";
+  await app.route();
+  assert.equal(app.state.error, "");
+  assert.equal(requests[0].url, "https://reader.example/api/v1/statuses/slow-web");
+  assert.equal(requests[0].options.headers.Authorization, undefined);
+  assert.equal(requests[1].options.headers.Authorization, "Bearer local-token");
+  assert.equal(requests[2].url, "https://account.example/api/v1/statuses/local-id/context");
+  assert.equal(app.state.reading.id, "local-id");
+  assert.equal(app.state.readerServer, "");
+  assert.match(app.publicationLink(app.state.reading), /^https:\/\/reader.example\/fedistack\/#@writer\/local-id\?server=https%3A%2F%2Faccount.example$/);
+  click("local-id");
+  await new Promise(setImmediate);
+  assert.equal(requests[3].url, "https://account.example/api/v1/statuses/local-id/reblog");
+  assert.equal(requests[3].options.headers.Authorization, "Bearer local-token");
+});
+
+test("short links reject malformed IDs before requesting a post", async () => {
+  let calls = 0;
+  const { app, context } = await postActionFixture(async () => { calls++; });
+  for (const id of ["", "~", "~AaGyGgiVcBGguq4RXZKGHx", "~AaGyGgiVcBGguq4RXZKGHw=", "%E0%A4%A"]) {
+    context.location.hash = `#@writer/${id}`;
+    await app.route();
+    assert.ok(app.state.error, id);
+    assert.equal(app.state.reading, null);
+  }
+  assert.equal(calls, 0);
+});
+
+test("short links preserve private-post access checks and stay open after connecting", async () => {
+  let visibility = "private";
+  const requests = [];
+  const { app, context, get } = await postActionFixture(async (url, options) => {
+    requests.push({ url, options });
+    if (url.endsWith("/context")) return Response.json({ ancestors: [], descendants: [] });
+    if (!url.includes("/statuses/")) return Response.json([]);
+    return Response.json(sharedStatus({ visibility }));
+  });
+  context.location.hash = "#@writer/slow-web";
+  for (visibility of ["private", "direct"]) {
+    await app.route();
+    assert.equal(app.state.reading, null);
+    assert.ok(app.state.error);
+  }
+  assert.ok(requests.every(({ options }) => !options.headers.Authorization));
+  visibility = "private";
+  get("modal").close = () => {};
+  await app.setSession({ ...longServer, account: app.demoMe, server: context.location.origin, token: "account-token" });
+  assert.equal(app.state.view, "reader");
+  assert.equal(context.location.hash, "#@writer/slow-web");
+  assert.equal(app.state.reading.visibility, "private");
+  assert.equal(app.state.readerServer, "");
+  assert.equal(requests[2].options.headers.Authorization, "Bearer account-token");
+});
+
+test("demo share links continue to open offline with legacy reader routes", async () => {
+  const { app, context } = await postActionFixture();
+  const post = app.demoPosts[0];
+  const link = new URL(app.publicationLink(post));
+  assert.equal(link.hash, `#read/${post.id}`);
+  context.location.hash = link.hash;
+  await app.route();
+  assert.equal(app.state.reading.id, post.id);
+  assert.equal(app.state.error, "");
+  assert.equal(app.state.readerServer, "");
+});
 
 test("a shared link opens Markdown and public comments without a session or cached post", async () => {
   const requests = [];

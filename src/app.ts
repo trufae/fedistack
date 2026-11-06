@@ -78,13 +78,40 @@ namespace Fedi {
         : []),
     ].find((p) => p.id === id);
   }
+  const compactPublicationID = /^[A-Za-z0-9_-]{0,21}[AQgw]$/;
+  function publicationID(id: string): string {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) {
+      const encoded = encodeURIComponent(id).replace(/^~/, "%7E");
+      // Escape opaque IDs that could otherwise be mistaken for compact UUIDs.
+      return compactPublicationID.test(encoded)
+        ? `%${encoded.charCodeAt(0).toString(16).toUpperCase()}${encoded.slice(1)}`
+        : encoded;
+    }
+    const bytes = id.replace(/-/g, "").match(/../g)!;
+    // Leading zero groups are restored when reading; no UUID bits are lost.
+    return btoa(String.fromCharCode(...bytes.map((byte) => parseInt(byte, 16))))
+      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "").replace(/^A+(?=.)/, "");
+  }
+  function expandPublicationID(id: string, compact = false): string {
+    const marked = id.startsWith("~");
+    if (!marked && (!compact || !compactPublicationID.test(id))) return decodeURIComponent(id);
+    const encoded = marked ? id.slice(1) : id.padStart(22, "A");
+    if (!/^[A-Za-z0-9_-]{21}[AQgw]$/.test(encoded))
+      throw new Error("This publication link is invalid.");
+    const hex = Array.from(atob(encoded.replace(/-/g, "+").replace(/_/g, "/") + "=="),
+      (byte) => byte.charCodeAt(0).toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
   export function publicationLink(post: Post): string {
     const url = new URL(location.href);
     const server = state.readerServer && post === state.reading
       ? state.readerServer
       : state.api?.server || state.session?.server;
+    const username = post.author.acct.split("@")[0];
     url.search = "";
-    url.hash = `read/${encodeURIComponent(post.id)}${server ? `?${new URLSearchParams({ server })}` : ""}`;
+    url.hash = server
+      ? `@${encodeURIComponent(username)}/${publicationID(post.id)}${server !== url.origin ? `?${new URLSearchParams({ server })}` : ""}`
+      : `read/${encodeURIComponent(post.id)}`;
     return url.href;
   }
   export function navigate(path: string): void {
@@ -373,6 +400,7 @@ namespace Fedi {
     }
     const [path, query = ""] = location.hash.slice(1).split("?");
     const [page, rawId] = path.split("/");
+    const sharedPublication = page === "p" || page.startsWith("@");
     let id = "";
     try {
       id = decodeURIComponent(rawId || "");
@@ -408,8 +436,12 @@ namespace Fedi {
       render();
       return;
     }
-    if (page === "read") {
-      const source = new URLSearchParams(query).get("server");
+    if (page === "read" || sharedPublication) {
+      // Shared links default to this origin, even when signed in elsewhere.
+      // Legacy internal #read links continue to use the connected account.
+      // The username is descriptive; the server and ID locate the publication.
+      const source = new URLSearchParams(query).get("server") ||
+        (sharedPublication ? location.origin : "");
       state.view = "reader";
       state.reading = source ? null : findPost(id) || null;
       if (source) state.revealed.delete(id);
@@ -419,6 +451,11 @@ namespace Fedi {
       const version = loadVersion,
         api = state.api;
       try {
+        if (sharedPublication) {
+          id = expandPublicationID(rawId || "", page.startsWith("@"));
+          if (!id) throw new Error("This publication link is invalid.");
+          state.revealed.delete(id);
+        }
         const server = source ? serverURL(source) : "";
         let readerAPI = server && server !== api?.server ? new API(server) : api;
         let post = state.reading || (readerAPI ? await readerAPI.status(id) : null);
@@ -640,7 +677,7 @@ namespace Fedi {
     state.query = "";
     state.timeline = "home";
     closeModal();
-    if (location.hash.startsWith("#read/")) await route();
+    if (/^#(?:read|p|@[^/]*)\//.test(location.hash)) await route();
     else navigate("home");
     await loadServerDrafts();
     try {

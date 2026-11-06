@@ -686,6 +686,80 @@ test("all major views render using only bundled data", () => {
   }
 });
 
+test("opening and leaving a chat switches the viewport layout and keeps its draft", () => {
+  const { app, context } = setup();
+  const { get } = elements(context);
+  const classes = new Map();
+  context.document.body.classList.toggle = (name, enabled) => classes.set(name, enabled);
+  app.state.view = "messages";
+  app.state.conversations = app.initialConversations();
+  app.render();
+  assert.equal(classes.get("conversation-open"), false);
+  assert.match(get("app").innerHTML, /data-action="new-message"/);
+
+  app.state.conversation = app.state.conversations[0].id;
+  get("message-body").value = "A draft to finish later";
+  app.rememberMessage();
+  app.state.error = "Could not refresh messages";
+  app.render();
+  const chat = get("app").innerHTML;
+  assert.equal(classes.get("conversation-open"), true);
+  assert.doesNotMatch(chat, /data-action="new-message"|KEEP THE CONVERSATION GOING|A little more personal/);
+  assert.match(chat, /href="#messages"[^>]*aria-label="All conversations"/);
+  assert.match(chat, /id="message-body"[^>]*>A draft to finish later<\/textarea>/);
+  assert.ok(chat.indexOf('role="alert"') > chat.indexOf('id="message-thread"'));
+  assert.ok(chat.indexOf('role="alert"') < chat.indexOf('id="message-form"'));
+
+  app.state.conversation = "";
+  app.render();
+  assert.equal(classes.get("conversation-open"), false);
+  assert.match(get("app").innerHTML, /data-action="new-message"/);
+  app.state.conversation = app.state.conversations[0].id;
+  app.state.view = "home";
+  app.render();
+  assert.equal(classes.get("conversation-open"), false);
+});
+
+test("keyboard viewport changes keep the latest message visible without interrupting history reading", () => {
+  const { app, context } = setup();
+  const { get } = elements(context);
+  context.window = {};
+  assert.doesNotThrow(() => app.updateConversationViewport());
+
+  const thread = get("message-thread");
+  thread.scrollHeight = 1800;
+  thread.clientHeight = 600;
+  let scrollTop = 1200;
+  Object.defineProperty(thread, "scrollTop", {
+    get: () => scrollTop,
+    set: (value) => { scrollTop = Math.min(value, thread.scrollHeight - thread.clientHeight); },
+  });
+  const styles = new Map();
+  context.document.documentElement.style = {
+    setProperty(name, value) {
+      styles.set(name, value);
+      if (name === "--conversation-height") thread.clientHeight = parseFloat(value) - 200;
+    },
+  };
+  context.window.visualViewport = { height: 500, offsetTop: 40 };
+  app.updateConversationViewport();
+  assert.equal(styles.get("--conversation-height"), "500px");
+  assert.equal(styles.get("--conversation-top"), "40px");
+  assert.equal(thread.scrollTop, 1500);
+
+  // Reading an earlier message must not jump to the newest one on a resize.
+  thread.scrollTop = 100;
+  context.window.visualViewport = { height: 450, offsetTop: 60 };
+  app.updateConversationViewport();
+  assert.equal(thread.scrollTop, 100);
+
+  thread.scrollTop = thread.scrollHeight;
+  context.window.visualViewport = { height: 800, offsetTop: 0 };
+  app.updateConversationViewport();
+  assert.equal(styles.get("--conversation-top"), "0px");
+  assert.equal(thread.scrollTop, 1200);
+});
+
 test("content warnings keep publication body and imagery out of the initial card", () => {
   const { app } = setup();
   const post = {

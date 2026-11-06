@@ -143,6 +143,11 @@ namespace Fedi {
     );
     document.body.classList.toggle("writing-view", state.view === "editor");
     document.body.classList.toggle("messages-view", state.view === "messages");
+    document.body.classList.toggle(
+      "conversation-open",
+      state.view === "messages" &&
+        state.conversations.some((c) => c.id === state.conversation),
+    );
     const content =
       state.view === "editor"
         ? editorView()

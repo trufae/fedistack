@@ -1517,6 +1517,50 @@ footer p {
 .messages-view .right-rail {
   display: none;
 }
+/* An open chat owns the viewport; its messages are the scrolling surface. */
+body.conversation-open {
+  padding: 0;
+  overflow: hidden;
+}
+.conversation-open #app {
+  position: fixed;
+  top: var(--conversation-top, 0px);
+  left: 0;
+  right: 0;
+  height: 100vh;
+  height: var(--conversation-height, 100dvh);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+    env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
+.conversation-open .layout {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.conversation-open .sidebar {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+}
+.conversation-open main {
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+.conversation-open .messages-layout {
+  height: 100%;
+  min-height: 0;
+  border-top: 0;
+}
+.conversation-open .conversation-list {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
 .messages-layout {
   display: grid;
   grid-template-columns: 290px minmax(0, 1fr);
@@ -1561,9 +1605,12 @@ footer p {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 .conversation-header {
   display: flex;
+  flex-shrink: 0;
   gap: 10px;
   align-items: center;
   padding: 17px 22px;
@@ -1585,12 +1632,15 @@ footer p {
 .message-thread {
   padding: 25px;
   flex: 1;
-  max-height: calc(100dvh - 410px);
-  min-height: 230px;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior-y: contain;
   display: flex;
   flex-direction: column;
   gap: 25px;
+}
+.message-thread > * {
+  flex-shrink: 0;
 }
 .message {
   max-width: 85%;
@@ -1620,6 +1670,11 @@ footer p {
 .outgoing > small {
   text-align: right;
 }
+.message-composer {
+  flex-shrink: 0;
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+}
 #message-form {
   margin: 12px 23px 0;
   display: flex;
@@ -1627,10 +1682,12 @@ footer p {
   gap: 9px;
 }
 #message-form textarea {
+  flex: 1;
   font-size: 12px;
   resize: none;
 }
 #message-form button {
+  flex-shrink: 0;
   padding: 12px;
 }
 .dm-note {
@@ -1650,8 +1707,8 @@ footer p {
   font-size: 12px;
   padding: 25px;
 }
-.mobile-back {
-  display: none;
+.conversation-back {
+  flex-shrink: 0;
 }
 dialog {
   max-width: 490px;
@@ -2256,14 +2313,36 @@ summary {
   }
   .has-conversation .conversation-detail {
     display: flex;
+    height: 100%;
   }
   .message-thread {
-    min-height: 260px;
-    max-height: calc(100dvh - 460px);
     padding: 22px;
   }
-  .mobile-back {
-    display: inline-flex;
+  .conversation-open #app {
+    padding-bottom: 0;
+  }
+  .conversation-open .sidebar {
+    display: none;
+  }
+  .conversation-open .mobile-nav {
+    position: static;
+    flex-shrink: 0;
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .conversation-header > div {
+    flex: 1;
+  }
+  .conversation-header strong,
+  .conversation-header small {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .conversation-back {
+    min-width: 44px;
+    min-height: 44px;
   }
   .messages-view .page-intro {
     padding-bottom: 20px;
@@ -2274,12 +2353,6 @@ summary {
   .dm-note {
     font-size: 9px;
     text-align: center;
-  }
-  #message-form textarea {
-    flex: 1;
-  }
-  #message-form button {
-    flex-shrink: 0;
   }
   .focus-mode {
     padding-bottom: 0;

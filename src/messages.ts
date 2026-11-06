@@ -5,6 +5,21 @@ namespace Fedi {
     messageDrafts.clear();
     messageVersion++;
   }
+  export function updateConversationViewport(): void {
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+    const thread = document.getElementById("message-thread");
+    const atBottom =
+      thread && thread.scrollHeight - thread.scrollTop - thread.clientHeight < 2;
+    // iOS resizes/pans the visual viewport when the keyboard opens.
+    document.documentElement.style.setProperty(
+      "--conversation-height", `${viewport.height}px`,
+    );
+    document.documentElement.style.setProperty(
+      "--conversation-top", `${viewport.offsetTop}px`,
+    );
+    if (atBottom) scrollMessages();
+  }
   export function sameAudience(
     post: Post,
     accounts: Account[],
@@ -22,7 +37,8 @@ namespace Fedi {
     const current = state.conversations.find(
       (c) => c.id === state.conversation,
     );
-    return `<header class="page-top"><span>KEEP THE CONVERSATION GOING</span>${action("new-message", `${icon("plus")} New message`, "", "button subtle small-button")}</header><div class="page-intro"><h1>Conversations<span class="accent">.</span></h1><p>A little more personal.</p></div>
+    const feedback = `${state.error ? `<p class="error-panel" role="alert">${escapeHTML(state.error)} ${action("refresh-messages", "Try again", "", "text-button")}</p>` : ""}${state.loading ? '<div class="loading" role="status">Loading conversations…</div>' : ""}`;
+    return `${current ? "" : `<header class="page-top"><span>KEEP THE CONVERSATION GOING</span>${action("new-message", `${icon("plus")} New message`, "", "button subtle small-button")}</header><div class="page-intro"><h1>Conversations<span class="accent">.</span></h1><p>A little more personal.</p></div>`}
       <div class="messages-layout ${current ? "has-conversation" : ""}"><div class="conversation-list">${
         state.conversations
           .map((c) => {
@@ -33,8 +49,8 @@ namespace Fedi {
           .join("") ||
         '<p class="muted conversation-empty">Your conversations will appear here.</p>'
       }${state.conversationNext ? action("more-conversations", "Load older conversations", "", "button subtle") : ""}</div>
-      <section class="conversation-detail">${current ? `<div class="conversation-header"><a href="#messages" class="icon-button mobile-back" aria-label="All conversations">${icon("back")}</a>${current.accounts[0] ? avatar(current.accounts[0], true) : ""}<div><strong>${escapeHTML(current.accounts.map((a) => a.name).join(", "))}</strong><small>${escapeHTML(current.accounts.map((a) => "@" + a.acct).join(", "))}</small></div></div><div class="message-thread" id="message-thread">${current.messages.map((m) => `<div class="message ${m.author.id === (state.session?.account.id || "you") ? "outgoing" : ""}"><div class="message-bubble prose">${m.warning ? `<details><summary>${escapeHTML(m.warning)}</summary>${markdown(m.markdown)}</details>` : markdown(m.markdown)}</div><small>${escapeHTML(m.author.name)} · ${new Date(m.created).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</small></div>`).join("")}</div><form id="message-form" data-id="${escapeHTML(current.id)}"><label class="sr-only" for="message-body">Message</label><textarea id="message-body" name="body" rows="2" required placeholder="Write a thoughtful little something…">${escapeHTML(messageDrafts.get(current.id) || "")}</textarea><button type="submit" class="button primary" aria-label="Send message">${icon("send")}</button></form><p class="dm-note">${icon("lock")} Private mentions, not end-to-end encrypted.</p>` : emptyState("A conversation starts with hello", "Choose a conversation or reach out to someone new.", action("new-message", "Write a message", "", "button subtle"))}</section></div>
-      ${state.error ? `<p class="error-panel" role="alert">${escapeHTML(state.error)} ${action("refresh-messages", "Try again", "", "text-button")}</p>` : ""}${state.loading ? '<div class="loading" role="status">Loading conversations…</div>' : ""}`;
+      <section class="conversation-detail">${current ? `<div class="conversation-header"><a href="#messages" class="icon-button conversation-back" aria-label="All conversations">${icon("back")}</a>${current.accounts[0] ? avatar(current.accounts[0], true) : ""}<div><strong>${escapeHTML(current.accounts.map((a) => a.name).join(", "))}</strong><small>${escapeHTML(current.accounts.map((a) => "@" + a.acct).join(", "))}</small></div></div><div class="message-thread" id="message-thread">${current.messages.map((m) => `<div class="message ${m.author.id === (state.session?.account.id || "you") ? "outgoing" : ""}"><div class="message-bubble prose">${m.warning ? `<details><summary>${escapeHTML(m.warning)}</summary>${markdown(m.markdown)}</details>` : markdown(m.markdown)}</div><small>${escapeHTML(m.author.name)} · ${new Date(m.created).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</small></div>`).join("")}${feedback}</div><div class="message-composer"><form id="message-form" data-id="${escapeHTML(current.id)}"><label class="sr-only" for="message-body">Message</label><textarea id="message-body" name="body" rows="2" required placeholder="Write a thoughtful little something…">${escapeHTML(messageDrafts.get(current.id) || "")}</textarea><button type="submit" class="button primary" aria-label="Send message">${icon("send")}</button></form><p class="dm-note">${icon("lock")} Private mentions, not end-to-end encrypted.</p></div>` : emptyState("A conversation starts with hello", "Choose a conversation or reach out to someone new.", action("new-message", "Write a message", "", "button subtle"))}</section></div>
+      ${current ? "" : feedback}`;
   }
   export async function loadConversations(append = false): Promise<void> {
     const version = ++messageVersion,

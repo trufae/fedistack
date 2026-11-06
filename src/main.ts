@@ -423,6 +423,9 @@ namespace Fedi {
 
   export async function boot(): Promise<void> {
     applyTheme();
+    updateConversationViewport();
+    window.visualViewport?.addEventListener("resize", updateConversationViewport);
+    window.visualViewport?.addEventListener("scroll", updateConversationViewport);
     if (state.session?.server && state.session.token)
       state.api = new API(state.session.server, state.session.token);
     else state.session = null;

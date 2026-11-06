@@ -118,19 +118,25 @@ namespace Fedi {
       : "";
     return `<button type="button" class="${classes}" data-action="${name}" data-id="${escapeHTML(id)}"${accessible}>${label}</button>`;
   }
-  export function followButton(account: Account): string {
+  export function followButton(account: Account, compact = true): string {
     if (account.id === (state.session?.account.id || "you")) return "";
     const r = state.relationships.get(account.id);
     const label = r?.following
-      ? "Following"
+      ? compact
+        ? "Following"
+        : "Unfollow"
       : r?.requested
-        ? "Requested"
+        ? compact
+          ? "Requested"
+          : "Cancel request"
         : "Follow";
     return action(
       "follow",
       label,
       account.id,
-      `button follow ${r?.following || r?.requested ? "is-following" : ""}`,
+      compact
+        ? `button follow ${r?.following || r?.requested ? "is-following" : ""}`
+        : "button subtle",
     );
   }
 

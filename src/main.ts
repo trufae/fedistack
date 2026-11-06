@@ -75,7 +75,7 @@ namespace Fedi {
     if (!a) return;
     showModal(
       a.name,
-      `<div class="profile-card">${avatar(a)}<p class="muted">@${escapeHTML(a.acct)}</p><p>${escapeHTML(a.bio)}</p>${followButton(a)} ${action("message-account", `${icon("mail")} Message`, a.id, "button subtle")}${a.url ? `<a href="${escapeHTML(a.url)}" class="button subtle" target="_blank" rel="noopener noreferrer">View profile ${icon("external")}</a>` : ""}</div>`,
+      `<div class="profile-card">${avatar(a)}<p class="muted">@${escapeHTML(a.acct)}</p><p>${escapeHTML(a.bio)}</p>${followButton(a, false)} ${action("message-account", `${icon("mail")} Message`, a.id, "button subtle")}${a.url ? `<a href="${escapeHTML(a.url)}" class="button subtle" target="_blank" rel="noopener noreferrer">View profile ${icon("external")}</a>` : ""}</div>`,
     );
   }
   async function checkServer(button: HTMLButtonElement): Promise<void> {

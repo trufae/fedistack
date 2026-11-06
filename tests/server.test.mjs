@@ -31,11 +31,15 @@ test("the local server serves the complete static distribution and blocks traver
     ["/app.js", "text/javascript"],
     ["/styles.css", "text/css"],
     ["/assets/slow-web.svg", "image/svg+xml"],
+    ["/assets/favicon.svg", "image/svg+xml"],
+    ["/assets/icon-32.png", "image/png"],
+    ["/assets/icon-180.png", "image/png"],
+    ["/assets/favicon.ico", "image/x-icon"],
   ]) {
     const response = await fetch(origin + path);
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("content-type"), type);
-    assert.ok((await response.text()).length > 0);
+    assert.ok((await response.arrayBuffer()).byteLength > 0);
   }
   assert.equal((await fetch(origin + "/..%2fpackage.json")).status, 404);
   assert.equal((await fetch(origin + "/missing")).status, 404);

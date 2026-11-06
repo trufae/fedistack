@@ -24,3 +24,9 @@ serve: dist
 
 clean:
 	rm -rf dist
+
+zip: dist
+	rm -f fedistack.zip
+	mv dist fedistack
+	zip -r fedistack.zip fedistack
+	mv fedistack dist

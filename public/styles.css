@@ -806,44 +806,6 @@ main {
 .discover-search input {
   font-size: 12px;
 }
-.welcome-card {
-  position: relative;
-  margin-top: 35px;
-  border: 1px solid #cad2be;
-  background: var(--sage);
-  padding: 23px 22px 22px;
-  border-radius: 5px;
-  overflow: hidden;
-}
-.welcome-card .eyebrow {
-  font-size: 8px;
-  letter-spacing: 1.1px;
-}
-.welcome-card h2 {
-  font-size: 31px;
-  line-height: 1.1;
-  margin-top: 25px;
-  font-weight: 500;
-}
-.welcome-card p {
-  font-size: 11px;
-  line-height: 1.8;
-  color: var(--muted);
-  margin: 15px 0 20px;
-}
-.welcome-mark {
-  position: absolute;
-  right: 18px;
-  top: 70px;
-  transform: rotate(13deg);
-  color: #7f916f;
-  opacity: 0.5;
-}
-.welcome-mark .icon {
-  width: 56px;
-  height: 56px;
-  stroke-width: 1;
-}
 .text-button {
   display: inline-flex;
   align-items: center;
@@ -1965,12 +1927,6 @@ summary {
   }
   .right-rail {
     padding: 25px 18px;
-  }
-  .welcome-card {
-    padding: 20px 15px;
-  }
-  .welcome-card h2 {
-    font-size: 29px;
   }
   .recommended .follow {
     font-size: 8px;

@@ -2,3 +2,4 @@ node_modules/
 .pmai/
 dist/
 .DS_Store
+*.zip

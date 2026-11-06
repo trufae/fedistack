@@ -1,0 +1,15 @@
+{
+  "name": "fedistack",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A quiet place to read and write on the fediverse.",
+  "scripts": {
+    "build": "make dist",
+    "test": "make test",
+    "check": "make check",
+    "dev": "make serve"
+  },
+  "devDependencies": {
+    "typescript": "5.0.4"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "none",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noEmitOnError": true,
+    "outFile": "dist/app.js"
+  },
+  "files": [
+    "src/types.ts",
+    "src/markdown.ts",
+    "src/storage.ts",
+    "src/api.ts",
+    "src/demo.ts",
+    "src/ui.ts",
+    "src/app.ts",
+    "src/editor.ts",
+    "src/messages.ts",
+    "src/main.ts"
+  ]
+}

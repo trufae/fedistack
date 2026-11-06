@@ -1,0 +1,250 @@
+namespace Fedi {
+  let messageVersion = 0;
+  const messageDrafts = new Map<string, string>();
+  export function clearMessageDrafts(): void {
+    messageDrafts.clear();
+    messageVersion++;
+  }
+  export function sameAudience(
+    post: Post,
+    accounts: Account[],
+    me: string,
+  ): boolean {
+    const expected = new Set([...accounts.map((a) => a.id), me]);
+    const actual = new Set(post.audience || []);
+    return (
+      post.visibility === "direct" &&
+      actual.size === expected.size &&
+      [...actual].every((id) => expected.has(id))
+    );
+  }
+  export function messagesView(): string {
+    const current = state.conversations.find(
+      (c) => c.id === state.conversation,
+    );
+    return `<header class="page-top"><span>KEEP THE CONVERSATION GOING</span>${action("new-message", `${icon("plus")} New message`, "", "button subtle small-button")}</header><div class="page-intro"><h1>Conversations<span class="accent">.</span></h1><p>A little more personal.</p></div>
+      <div class="messages-layout ${current ? "has-conversation" : ""}"><div class="conversation-list">${
+        state.conversations
+          .map((c) => {
+            const a = c.accounts[0],
+              last = c.messages[c.messages.length - 1];
+            return `<a href="#messages/${encodeURIComponent(c.id)}" class="conversation-item ${current?.id === c.id ? "selected" : ""}">${a ? avatar(a) : icon("mail")}<div><strong>${escapeHTML(c.accounts.map((a) => a.name).join(", ") || "Conversation")}</strong><p>${escapeHTML(last ? plainText(last.markdown).slice(0, 65) : "Start a conversation")}</p><small>${last ? relativeDate(last.created) : "New"}</small></div>${c.unread ? '<span class="unread-dot"></span>' : ""}</a>`;
+          })
+          .join("") ||
+        '<p class="muted conversation-empty">Your conversations will appear here.</p>'
+      }${state.conversationNext ? action("more-conversations", "Load older conversations", "", "button subtle") : ""}</div>
+      <section class="conversation-detail">${current ? `<div class="conversation-header"><a href="#messages" class="icon-button mobile-back" aria-label="All conversations">${icon("back")}</a>${current.accounts[0] ? avatar(current.accounts[0], true) : ""}<div><strong>${escapeHTML(current.accounts.map((a) => a.name).join(", "))}</strong><small>${escapeHTML(current.accounts.map((a) => "@" + a.acct).join(", "))}</small></div></div><div class="message-thread" id="message-thread">${current.messages.map((m) => `<div class="message ${m.author.id === (state.session?.account.id || "you") ? "outgoing" : ""}"><div class="message-bubble prose">${m.warning ? `<details><summary>${escapeHTML(m.warning)}</summary>${markdown(m.markdown)}</details>` : markdown(m.markdown)}</div><small>${escapeHTML(m.author.name)} · ${new Date(m.created).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</small></div>`).join("")}</div><form id="message-form" data-id="${escapeHTML(current.id)}"><label class="sr-only" for="message-body">Message</label><textarea id="message-body" name="body" rows="2" required placeholder="Write a thoughtful little something…">${escapeHTML(messageDrafts.get(current.id) || "")}</textarea><button type="submit" class="button primary" aria-label="Send message">${icon("send")}</button></form><p class="dm-note">${icon("lock")} Private mentions, not end-to-end encrypted.</p>` : emptyState("A conversation starts with hello", "Choose a conversation or reach out to someone new.", action("new-message", "Write a message", "", "button subtle"))}</section></div>
+      ${state.error ? `<p class="error-panel" role="alert">${escapeHTML(state.error)} ${action("refresh-messages", "Try again", "", "text-button")}</p>` : ""}${state.loading ? '<div class="loading" role="status">Loading conversations…</div>' : ""}`;
+  }
+  export async function loadConversations(append = false): Promise<void> {
+    const version = ++messageVersion,
+      api = state.api;
+    let selected = state.conversation;
+    state.loading = true;
+    state.error = "";
+    render();
+    try {
+      if (!api) state.conversations = demoState.conversations;
+      else {
+        const result = await api.conversations(
+          append ? state.conversationNext : undefined,
+        );
+        if (
+          version !== messageVersion ||
+          state.api !== api ||
+          state.view !== "messages"
+        )
+          return;
+        const existing = state.conversations;
+        const incoming = result.conversations.map((c) => {
+          const cached = existing.find(
+            (x) =>
+              x.id === c.id ||
+              (x.id.startsWith("new-") &&
+                x.messages.some((m) => c.messages.some((n) => n.id === m.id))),
+          );
+          if (cached?.id === selected && cached.id !== c.id) {
+            selected = c.id;
+            state.conversation = c.id;
+            history.replaceState(
+              null,
+              "",
+              `#messages/${encodeURIComponent(c.id)}`,
+            );
+          }
+          return cached
+            ? { ...c, messages: mergeMessages(cached.messages, c.messages) }
+            : c;
+        });
+        state.conversations = [
+          ...new Map(
+            [
+              ...existing.filter(
+                (c) =>
+                  append ||
+                  (c.id === selected && !incoming.some((i) => i.id === c.id)),
+              ),
+              ...incoming,
+            ].map((c) => [c.id, c]),
+          ).values(),
+        ];
+        state.conversationNext = result.next;
+      }
+      const current = state.conversations.find((c) => c.id === selected);
+      if (current) {
+        const last = current.messages[current.messages.length - 1];
+        if (api && last) {
+          const context = await api.context(last.id);
+          if (
+            version !== messageVersion ||
+            state.api !== api ||
+            state.view !== "messages" ||
+            state.conversation !== selected
+          )
+            return;
+          // Contexts may include non-private replies. Never put those in the DM view.
+          current.messages = mergeMessages(
+            current.messages,
+            context.filter((p) =>
+              sameAudience(p, current.accounts, state.session!.account.id),
+            ),
+          );
+          if (current.unread)
+            await api.post(
+              `/api/v1/conversations/${encodeURIComponent(current.id)}/read`,
+            );
+        }
+        current.unread = false;
+        if (!api) saveDemo();
+      }
+    } catch (error) {
+      if (version === messageVersion && state.view === "messages")
+        state.error = (error as Error).message;
+    } finally {
+      if (
+        version === messageVersion &&
+        state.view === "messages" &&
+        state.api === api
+      ) {
+        state.loading = false;
+        render();
+        scrollMessages();
+      }
+    }
+  }
+  function mergeMessages(a: Post[], b: Post[]): Post[] {
+    return [...new Map([...a, ...b].map((p) => [p.id, p])).values()].sort(
+      (x, y) => Date.parse(x.created) - Date.parse(y.created),
+    );
+  }
+  function scrollMessages(): void {
+    const thread = document.getElementById("message-thread");
+    if (thread) thread.scrollTop = thread.scrollHeight;
+  }
+  export function rememberMessage(): void {
+    const el = document.getElementById(
+      "message-body",
+    ) as HTMLTextAreaElement | null;
+    if (el) messageDrafts.set(state.conversation, el.value);
+  }
+  export async function sendMessage(id: string, body: string): Promise<void> {
+    const current = state.conversations.find((c) => c.id === id);
+    if (!current || !body.trim()) return;
+    const api = state.api;
+    const participants = current.accounts.filter(
+      (a) => a.id !== state.session?.account.id,
+    );
+    if (!participants.length) throw new Error("Choose a recipient first.");
+    // Mentions determine DM recipients. Require an explicit new conversation to add people.
+    const allowed = new Set(participants.map((a) => a.acct.toLowerCase()));
+    const mentions = Array.from(
+      body.matchAll(/(?:^|[^a-z0-9_])@([a-z0-9_.-]+(?:@[a-z0-9.-]+)?)/gi),
+      (m) => m[1].toLowerCase().replace(/\.+$/, ""),
+    );
+    if (mentions.some((m) => !allowed.has(m)))
+      throw new Error(
+        "This message mentions someone outside this conversation. Start a new conversation to add a recipient.",
+      );
+    const text = `${participants.map((a) => "@" + a.acct).join(" ")} ${body.trim()}`;
+    if (state.session && Array.from(text).length > state.session.maxChars)
+      throw new Error(
+        `Your server allows ${state.session.maxChars.toLocaleString()} characters, including recipient mentions.`,
+      );
+    const last = current.messages[current.messages.length - 1];
+    const sent = api
+      ? await api.createStatus(text, "direct", last?.id)
+      : {
+          id: uid(),
+          author: demoMe,
+          title: "",
+          subtitle: "",
+          markdown: body.trim(),
+          kind: "post" as const,
+          created: new Date().toISOString(),
+          likes: 0,
+          replies: 0,
+          liked: false,
+          saved: false,
+          visibility: "direct" as const,
+          warning: "",
+          tags: [],
+        };
+    if (state.api !== api) return;
+    current.messages.push(sent);
+    current.unread = false;
+    messageDrafts.delete(id);
+    if (!api) saveDemo();
+    if (state.view === "messages") {
+      render();
+      scrollMessages();
+    }
+  }
+  export function newMessageDialog(): void {
+    showModal(
+      "Say hello.",
+      `<p>Find a writer by their full Fediverse address.</p><form id="recipient-form"><label>Recipient<input name="recipient" required placeholder="@writer@their.instance" autocomplete="off"></label><button class="button primary" type="submit">Find recipient ${icon("arrow")}</button></form>`,
+    );
+  }
+  export async function findRecipient(query: string): Promise<void> {
+    const api = state.api;
+    const accounts = api
+      ? (await api.search(query)).accounts
+      : demoAuthors.filter((a) =>
+          `${a.name} ${a.acct}`
+            .toLowerCase()
+            .includes(query.replace(/^@/, "").toLowerCase()),
+        );
+    if (state.api !== api) return;
+    state.accounts = accounts;
+    showModal(
+      "Choose your recipient",
+      accounts.length
+        ? accounts
+            .map(
+              (a) =>
+                `<div class="recommended">${avatar(a)}<div><strong>${escapeHTML(a.name)}</strong><p>${escapeHTML(a.acct)}</p></div>${action("message-account", "Message", a.id, "button subtle")}</div>`,
+            )
+            .join("")
+        : "<p>No matching accounts. Try the full address, such as writer@their.instance.</p>",
+    );
+  }
+  export function startConversation(id: string): void {
+    const account = allAccounts().find((a) => a.id === id);
+    if (!account) return;
+    let conversation = state.conversations.find(
+      (c) => c.accounts.length === 1 && c.accounts[0].id === id,
+    );
+    if (!conversation) {
+      conversation = {
+        id: `new-${uid()}`,
+        accounts: [account],
+        unread: false,
+        messages: [],
+      };
+      state.conversations.unshift(conversation);
+      if (!state.api) saveDemo();
+    }
+    closeModal();
+    navigate(`messages/${encodeURIComponent(conversation.id)}`);
+  }
+}

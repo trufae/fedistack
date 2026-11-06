@@ -1,0 +1,140 @@
+namespace Fedi {
+  export type Visibility = "public" | "unlisted" | "private" | "direct";
+  export type Timeline =
+    | "home"
+    | "local"
+    | "federated"
+    | "bookmarks"
+    | `list:${string}`;
+  export type View =
+    | "home"
+    | "discover"
+    | "bookmarks"
+    | "drafts"
+    | "editor"
+    | "messages"
+    | "settings"
+    | "reader";
+  export interface Account {
+    id: string;
+    name: string;
+    acct: string;
+    avatar: string;
+    bio: string;
+    publication?: string;
+    color?: string;
+    url?: string;
+    followers?: number;
+    following?: number;
+    statuses?: number;
+  }
+  export interface Post {
+    id: string;
+    author: Account;
+    title: string;
+    subtitle: string;
+    markdown: string;
+    kind: "article" | "post";
+    created: string;
+    image?: string;
+    imageAlt?: string;
+    likes: number;
+    replies: number;
+    liked: boolean;
+    saved: boolean;
+    visibility: Visibility;
+    warning: string;
+    url?: string;
+    source?: string;
+    replyTo?: string;
+    boostedBy?: string;
+    tags: string[];
+    local?: boolean;
+    audience?: string[];
+    language?: string | null;
+  }
+  export interface Conversation {
+    id: string;
+    accounts: Account[];
+    unread: boolean;
+    messages: Post[];
+  }
+  export interface Draft {
+    id: string;
+    title: string;
+    subtitle: string;
+    body: string;
+    kind: "article" | "post";
+    visibility: Exclude<Visibility, "direct">;
+    warning: string;
+    updated: string;
+    publishKey?: string;
+    editingId?: string;
+  }
+  export type PostFormat = "text/markdown" | "text/html" | "text/plain";
+  export interface Capabilities {
+    maxChars: number;
+    format: PostFormat;
+    software: string;
+  }
+  export interface Session extends Capabilities {
+    server: string;
+    token: string;
+    account: Account;
+  }
+  export interface Relationship {
+    id: string;
+    following: boolean;
+    requested: boolean;
+  }
+  export interface MastodonAccount {
+    id: string;
+    display_name: string;
+    username: string;
+    acct: string;
+    avatar: string;
+    note: string;
+    url: string;
+    followers_count?: number;
+    following_count?: number;
+    statuses_count?: number;
+  }
+  export interface MastodonStatus {
+    language?: string | null;
+    id: string;
+    account: MastodonAccount;
+    content: string;
+    created_at: string;
+    favourites_count: number;
+    replies_count: number;
+    favourited?: boolean;
+    bookmarked?: boolean;
+    visibility: Visibility;
+    spoiler_text: string;
+    sensitive?: boolean;
+    url: string;
+    in_reply_to_id?: string;
+    reblog?: MastodonStatus;
+    mentions?: { id: string; acct: string }[];
+    tags?: { name: string }[];
+    filtered?: { filter: { filter_action: string; title: string } }[];
+    media_attachments?: {
+      type: string;
+      preview_url: string;
+      description?: string;
+    }[];
+    card?: {
+      type: string;
+      title: string;
+      description: string;
+      image: string;
+      url: string;
+    };
+  }
+  export interface MastodonConversation {
+    id: string;
+    accounts: MastodonAccount[];
+    unread: boolean;
+    last_status: MastodonStatus | null;
+  }
+}

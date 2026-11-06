@@ -4,6 +4,8 @@
 
 The article editor targets servers that advertise **at least 5,000 characters and rich-text input** through the Mastodon-compatible API. Capability detection reads both v1 and v2 instance metadata, including Akkoma/Pleroma `post_formats` and glitch-soc `supported_mime_types`.
 
+These are separate requirements checked by Fedistack before sending an article. A server can advertise a 32,768-character limit without advertising Markdown or HTML input. In that case, the article editor reports the missing format support; notes still use the full advertised character limit. The 5,000-character requirement is a minimum server capacity, not a maximum post length or a minimum article length.
+
 For example, infosec.exchange advertised **11,000 characters, Markdown, and HTML** when checked on November 6, 2026. The client checks the actual instance configuration rather than assuming defaults.
 
 - Articles are **one publication**, never truncated or automatically turned into threads.

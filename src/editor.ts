@@ -39,8 +39,10 @@ namespace Fedi {
       return "Give your publication a little substance before publishing.";
     if (draft.kind === "article" && !draft.title.trim())
       return "Your article needs a title.";
-    if (draft.kind === "article" && !supportsArticles(capabilities))
-      return "Articles need a server with rich-text support and a limit of at least 5,000 characters. Connect a compatible instance in Settings; your draft stays saved here.";
+    if (draft.kind === "article") {
+      const problem = articleSupportProblem(capabilities);
+      if (problem) return `${problem} Your draft stays saved here.`;
+    }
     const count = Array.from(
       publicationPayload(draft, capabilities.format) + draft.warning,
     ).length;

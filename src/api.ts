@@ -495,9 +495,14 @@ namespace Fedi {
     };
   }
   export function supportsArticles(capabilities: Capabilities): boolean {
-    return (
-      capabilities.maxChars >= 5000 && capabilities.format !== "text/plain"
-    );
+    return !articleSupportProblem(capabilities);
+  }
+  export function articleSupportProblem(capabilities: Capabilities): string {
+    if (capabilities.maxChars < 5000)
+      return `This server allows ${capabilities.maxChars.toLocaleString()} characters per post. Fedistack’s article editor requires a server limit of at least 5,000 characters.`;
+    if (capabilities.format === "text/plain")
+      return `This server allows ${capabilities.maxChars.toLocaleString()} characters per post, but does not advertise Markdown or HTML publishing. Fedistack’s article editor requires one of these formats. You can still publish plain-text notes.`;
+    return "";
   }
 
   export function mapAccount(account: MastodonAccount): Account {

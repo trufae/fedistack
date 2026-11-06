@@ -347,6 +347,29 @@ test("publication limits count Unicode code points and content warnings", () => 
   );
 });
 
+test("a 32K server without rich text reports a format requirement, not a length limit", () => {
+  const { app, context } = setup();
+  const { get } = elements(context);
+  const capabilities = app.detectCapabilities({
+    configuration: { statuses: { max_characters: 32768 } },
+  });
+  app.state.session = capabilities;
+  app.state.draft = { ...article, title: "Title", subtitle: "", body: "x".repeat(907) };
+  get("character-count");
+  app.updateEditorMeta();
+  assert.equal(get("character-count").textContent, "914 / 32,768 characters");
+  const problem = app.publishProblem(app.state.draft, capabilities);
+  assert.match(problem, /32,768/);
+  assert.match(problem, /does not advertise Markdown or HTML publishing/);
+  assert.doesNotMatch(problem, /5,000|Shorten/);
+  assert.equal(app.supportsArticles(capabilities), false);
+  assert.equal(app.publishProblem({ ...app.state.draft, kind: "post" }, capabilities), "");
+  for (const format of ["text/markdown", "text/html"]) {
+    assert.equal(app.supportsArticles({ ...capabilities, format }), true);
+    assert.equal(app.publishProblem(app.state.draft, { ...capabilities, format }), "");
+  }
+});
+
 test("drafts survive reload and are isolated by server and account", () => {
   const { app, context } = setup();
   assert.equal(app.saveDraft(article), true);

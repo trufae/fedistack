@@ -121,17 +121,15 @@ namespace Fedi {
   }
 
   function mobileNav(): string {
-    const current = state.view === "editor"
-      ? state.draft?.kind === "post" ? "note" : "drafts"
-      : state.view;
+    const current = state.view === "editor" ? "drafts" : state.view;
+    const me = state.session?.account || demoMe;
     const items = [
       ["home", "home", "Home"],
       ["discover", "compass", "Discover"],
       ["drafts", "edit", "Your writing"],
-      ["note", "comment", "Write a note"],
       ["messages", "mail", "Messages"],
     ];
-    return `<nav class="mobile-nav" aria-label="Mobile navigation">${items.map(([view, symbol, name]) => `<a href="#${view}"${view === "drafts" ? ' class="mobile-write"' : ""} aria-label="${name}"${current === view ? ' aria-current="page"' : ""}>${icon(symbol)}</a>`).join("")}</nav>`;
+    return `<nav class="mobile-nav" aria-label="Mobile navigation">${items.map(([view, symbol, name]) => `<a href="#${view}"${view === "drafts" ? ' class="mobile-write"' : ""} aria-label="${name}"${current === view ? ' aria-current="page"' : ""}>${icon(symbol)}</a>`).join("")}<a href="#settings" aria-label="Account and settings"${current === "settings" ? ' aria-current="page"' : ""}>${avatar(me, false, "mobile-account")}</a></nav>`;
   }
 
   export function render(): void {

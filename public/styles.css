@@ -2058,32 +2058,8 @@ summary {
   .brand-caption,
   .sidebar nav,
   .write-button,
-  .sidebar-tools > :not(a),
-  .profile-switch > span:not(.avatar),
-  .profile-switch > .icon {
-    display: none;
-  }
   .sidebar-bottom {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 0;
-    margin: 0;
-  }
-  .sidebar-tools {
-    padding: 0;
-  }
-  .sidebar-tools .icon-button {
-    min-width: 44px;
-    min-height: 44px;
-  }
-  .profile-switch {
-    border: 0;
-    padding: 0;
-  }
-  .profile-switch .avatar {
-    width: 31px;
-    height: 31px;
+    display: none;
   }
   .page-top {
     min-height: 58px;
@@ -2165,6 +2141,14 @@ summary {
   }
   .mobile-nav > a[aria-current="page"] .icon {
     stroke-width: 2.5;
+  }
+  .mobile-nav .avatar {
+    width: 31px;
+    height: 31px;
+  }
+  .mobile-nav > a[aria-current="page"] .avatar {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
   }
   .mobile-nav > .mobile-write {
     justify-self: center;

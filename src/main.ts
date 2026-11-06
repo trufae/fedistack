@@ -1,8 +1,9 @@
 namespace Fedi {
   const mutations = new Set<string>();
-  async function togglePost(id: string, kind: "like" | "save"): Promise<void> {
+  async function togglePost(id: string, kind: "like" | "save" | "repost"): Promise<void> {
     const post = findPost(id);
     if (!post) return;
+    if (kind === "repost" && !canRepost(post)) return;
     const api = state.api;
     if (api) {
       const updated = await api.toggle(post, kind);
@@ -10,14 +11,18 @@ namespace Fedi {
       [
         ...state.posts,
         ...state.ownPosts,
+        ...state.comments,
         ...(state.reading ? [state.reading] : []),
       ]
         .filter((p) => p.id === id)
-        .forEach((p) => Object.assign(p, updated));
+        .forEach((p) => Object.assign(p, updated, { boostedBy: p.boostedBy }));
     } else {
       if (kind === "like") {
         post.liked = !post.liked;
         post.likes += post.liked ? 1 : -1;
+      } else if (kind === "repost") {
+        post.reposted = !post.reposted;
+        post.reposts = Math.max(0, (post.reposts || 0) + (post.reposted ? 1 : -1));
       } else post.saved = !post.saved;
       saveDemo();
     }
@@ -230,6 +235,9 @@ namespace Fedi {
       case "save":
         await togglePost(id, "save");
         break;
+      case "repost":
+        await togglePost(id, "repost");
+        break;
       case "share":
         await sharePost(id);
         break;
@@ -427,7 +435,9 @@ namespace Fedi {
             created: new Date().toISOString(),
             likes: 0,
             replies: 0,
+            reposts: 0,
             liked: false,
+            reposted: false,
             saved: false,
             visibility: post.visibility,
             warning: post.warning,

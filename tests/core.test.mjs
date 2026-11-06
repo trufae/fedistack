@@ -1161,6 +1161,138 @@ test("edits use PUT and deletes use DELETE for the original status", async () =>
   assert.equal(requests[1].url, requests[0].url);
 });
 
+async function postActionFixture(fetch) {
+  const { app, context } = setup(fetch);
+  const { get } = elements(context);
+  const listeners = new Map();
+  context.document.addEventListener = (name, listener) => listeners.set(name, listener);
+  context.window = { addEventListener() {} };
+  context.matchMedia = () => ({ matches: false, addEventListener() {} });
+  get("modal").addEventListener = () => {};
+  app.route = async () => {};
+  await app.boot();
+  app.htmlToMarkdown = (text) => text;
+  const click = (id) => {
+    const button = { dataset: { action: "repost", id }, disabled: false };
+    listeners.get("click")({ target: { closest: () => button } });
+    return button;
+  };
+  return { app, context, get, click };
+}
+
+test("repost clicks use the original status, synchronize counts, and undo without changing attribution", async () => {
+  const requests = [];
+  const original = {
+    id: "original/id",
+    account: { id: "writer", username: "writer", display_name: "Writer", acct: "writer", avatar: "", note: "", url: "" },
+    content: "# An article",
+    created_at: new Date().toISOString(),
+    favourites_count: 5, replies_count: 2, reblogs_count: 7,
+    favourited: true, reblogged: false, bookmarked: true,
+    visibility: "unlisted", spoiler_text: "", url: "",
+  };
+  let failure = false;
+  const { app, get, click } = await postActionFixture(async (url, options) => {
+    requests.push({ url, options });
+    if (failure) return Response.json({ error: "Repost rejected" }, { status: 403 });
+    if (url.endsWith("/unreblog")) return Response.json(original);
+    return Response.json({
+      ...original, id: "wrapper", reblogs_count: 0,
+      account: { ...original.account, display_name: "Me" },
+      reblog: { ...original, reblogged: true, reblogs_count: 8 },
+    });
+  });
+  app.state.session = { ...longServer, server: "https://example.org", token: "test", account: app.demoMe };
+  app.state.api = new app.API("example.org", "test");
+  const post = app.mapStatus(original);
+  app.state.posts = [{ ...post, boostedBy: "A friend" }];
+  app.state.ownPosts = [{ ...post }];
+  app.state.comments = [{ ...post }];
+  app.state.reading = { ...post };
+  app.state.view = "reader";
+  const button = click(post.id);
+  assert.equal(button.disabled, true);
+  click(post.id);
+  await new Promise(setImmediate);
+  assert.equal(button.disabled, false);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, "https://example.org/api/v1/statuses/original%2Fid/reblog");
+  assert.equal(requests[0].options.method, "POST");
+  assert.equal(requests[0].options.headers.Authorization, "Bearer test");
+  for (const copy of [...app.state.posts, ...app.state.ownPosts, ...app.state.comments, app.state.reading]) {
+    assert.equal(copy.id, post.id);
+    assert.equal(copy.reposted, true);
+    assert.equal(copy.reposts, 8);
+    assert.equal(copy.liked, true);
+    assert.equal(copy.saved, true);
+  }
+  assert.equal(app.state.posts[0].boostedBy, "A friend");
+  assert.equal(app.state.reading.boostedBy, undefined);
+  assert.match(get("app").innerHTML, /data-action="repost"[^>]*aria-label="Undo repost"[^>]*aria-pressed="true"/);
+
+  click(post.id);
+  await new Promise(setImmediate);
+  assert.equal(requests[1].url, "https://example.org/api/v1/statuses/original%2Fid/unreblog");
+  assert.equal(requests[1].options.method, "POST");
+  assert.equal(app.state.reading.reposted, false);
+  assert.equal(app.state.reading.reposts, 7);
+  assert.match(get("app").innerHTML, /data-action="repost"[^>]*aria-label="Repost"[^>]*aria-pressed="false"/);
+
+  failure = true;
+  const rejected = click(post.id);
+  await new Promise(setImmediate);
+  assert.equal(rejected.disabled, false);
+  assert.equal(app.state.reading.reposted, false);
+  assert.equal(app.state.reading.reposts, 7);
+  assert.match(get("toast").textContent, /Repost rejected/);
+});
+
+test("demo reposts persist, support older stored posts, and reject private posts", async () => {
+  const { app, context, get, click } = await postActionFixture();
+  const post = app.demoState.posts[0];
+  delete post.reposts;
+  delete post.reposted;
+  app.state.posts = [post];
+  click(post.id);
+  await new Promise(setImmediate);
+  assert.equal(post.reposted, true);
+  assert.equal(post.reposts, 1);
+  assert.match(get("app").innerHTML, /data-action="repost"[^>]*aria-label="Undo repost"/);
+  const reloaded = setup(undefined, { localStorage: context.localStorage }).app;
+  assert.equal(reloaded.demoState.posts[0].reposted, true);
+  assert.equal(reloaded.demoState.posts[0].reposts, 1);
+  click(post.id);
+  await new Promise(setImmediate);
+  assert.equal(post.reposted, false);
+  assert.equal(post.reposts, 0);
+  assert.equal(app.readStore("demo", {}).posts[0].reposted, false);
+
+  let requests = 0;
+  app.state.api = { toggle: async () => { requests++; return post; } };
+  for (const visibility of ["private", "direct"]) {
+    post.visibility = visibility;
+    assert.match(app.postActions(post), /data-action="repost"[^>]* disabled/);
+    click(post.id);
+    await new Promise(setImmediate);
+    assert.equal(requests, 0);
+    assert.equal(post.reposted, false);
+  }
+});
+
+test("a repost response from a previous account cannot change the current feed", async () => {
+  const { app, click } = await postActionFixture();
+  const post = { ...app.demoPosts[0] };
+  let finish;
+  app.state.posts = [post];
+  app.state.api = { toggle: () => new Promise((resolve) => { finish = resolve; }) };
+  click(post.id);
+  app.state.api = null;
+  finish({ ...post, reposted: true, reposts: 1 });
+  await new Promise(setImmediate);
+  assert.equal(post.reposted, false);
+  assert.equal(post.reposts, 0);
+});
+
 test("updating a demo publication keeps its ID and engagement without creating a second post", async () => {
   const { app, context } = setup();
   const { get } = elements(context);
@@ -1171,6 +1303,8 @@ test("updating a demo publication keeps its ID and engagement without creating a
     author: app.demoMe,
     likes: 17,
     replies: 4,
+    reposts: 3,
+    reposted: true,
     saved: true,
   };
   app.demoState.posts.unshift(original);
@@ -1182,6 +1316,8 @@ test("updating a demo publication keeps its ID and engagement without creating a
   assert.equal(matches[0].title, "Updated title");
   assert.equal(matches[0].likes, 17);
   assert.equal(matches[0].replies, 4);
+  assert.equal(matches[0].reposts, 3);
+  assert.equal(matches[0].reposted, true);
   assert.equal(matches[0].saved, true);
   assert.equal(app.getDrafts().length, 0);
 });

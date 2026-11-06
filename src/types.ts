@@ -41,7 +41,9 @@ namespace Fedi {
     imageAlt?: string;
     likes: number;
     replies: number;
+    reposts: number;
     liked: boolean;
+    reposted: boolean;
     saved: boolean;
     visibility: Visibility;
     warning: string;
@@ -141,7 +143,9 @@ namespace Fedi {
     created_at: string;
     favourites_count: number;
     replies_count: number;
+    reblogs_count: number;
     favourited?: boolean;
+    reblogged?: boolean;
     bookmarked?: boolean;
     visibility: Visibility;
     spoiler_text: string;

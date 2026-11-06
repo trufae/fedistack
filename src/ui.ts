@@ -63,6 +63,7 @@ namespace Fedi {
       '<path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8z"/>',
     comment:
       '<path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5 10 10 0 0 1-4-.8L3 21l1.8-5.5a10 10 0 0 1-.8-4A8.5 8.5 0 0 1 12.5 3H13a8.5 8.5 0 0 1 8 8v.5z"/>',
+    repost: '<path d="m2 7 4-4 4 4M6 3v12a3 3 0 0 0 3 3h3m10-1-4 4-4-4m4 4V9a3 3 0 0 0-3-3h-3"/>',
     arrow: '<path d="M4 12h16m-6-6 6 6-6 6"/>',
     back: '<path d="M20 12H4m6-6-6 6 6 6"/>',
     chevron: '<path d="m9 5 7 7-7 7"/>',
@@ -190,6 +191,10 @@ namespace Fedi {
     );
   }
 
+  export function canRepost(post: Post): boolean {
+    return post.visibility === "public" || post.visibility === "unlisted";
+  }
+
   export function postActions(post: Post): string {
     const owned =
       post.author.id === (state.session?.account.id || "you") &&
@@ -197,6 +202,7 @@ namespace Fedi {
     return `<div class="post-actions"><div>
       <button class="icon-button ${post.liked ? "liked" : ""}" data-action="like" data-id="${escapeHTML(post.id)}" aria-label="${post.liked ? "Unlike" : "Like"}" aria-pressed="${post.liked}">${icon("heart")}<span>${post.likes || ""}</span></button>
       <a class="icon-button" href="#read/${encodeURIComponent(post.id)}" aria-label="Read ${post.replies} comments">${icon("comment")}<span>${post.replies || ""}</span></a>
+      <button class="icon-button ${post.reposted ? "reposted" : ""}" data-action="repost" data-id="${escapeHTML(post.id)}" aria-label="${post.reposted ? "Undo repost" : "Repost"}" aria-pressed="${!!post.reposted}" title="${!canRepost(post) ? "Only public and unlisted posts can be reposted" : post.reposted ? "Undo repost" : "Repost"}"${canRepost(post) ? "" : " disabled"}>${icon("repost")}<span>${post.reposts || ""}</span></button>
       <button class="icon-button" data-action="share" data-id="${escapeHTML(post.id)}" aria-label="Share publication">${icon("external")}</button>
       </div><div class="post-owner-actions">${owned ? `${action("edit-publication", `${icon("edit")} Edit`, post.id, "text-button")}${action("unpublish-publication", "Unpublish", post.id, "text-button")}${action("delete-publication", post.replyTo ? "Delete comment" : "Delete", post.id, "text-button delete-link")}` : ""}<button class="icon-button ${post.saved ? "saved" : ""}" data-action="save" data-id="${escapeHTML(post.id)}" aria-label="${post.saved ? "Remove bookmark" : "Save for later"}" aria-pressed="${post.saved}">${icon("bookmark")}</button></div></div>`;
   }

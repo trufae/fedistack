@@ -359,15 +359,19 @@ namespace Fedi {
         ),
       );
     }
-    async toggle(post: Post, action: "like" | "save"): Promise<Post> {
+    async toggle(post: Post, action: "like" | "save" | "repost"): Promise<Post> {
       const method =
         action === "like"
           ? post.liked
             ? "unfavourite"
             : "favourite"
-          : post.saved
-            ? "unbookmark"
-            : "bookmark";
+          : action === "repost"
+            ? post.reposted
+              ? "unreblog"
+              : "reblog"
+            : post.saved
+              ? "unbookmark"
+              : "bookmark";
       return mapStatus(
         await this.post<MastodonStatus>(
           `/api/v1/statuses/${encodeURIComponent(post.id)}/${method}`,
@@ -539,7 +543,9 @@ namespace Fedi {
       created: s.created_at,
       likes: s.favourites_count,
       replies: s.replies_count,
+      reposts: s.reblogs_count || 0,
       liked: !!s.favourited,
+      reposted: !!s.reblogged,
       saved: !!s.bookmarked,
       visibility: s.visibility,
       warning,

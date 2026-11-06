@@ -662,7 +662,8 @@ main {
 .post-actions .liked .icon {
   fill: var(--accent-wash);
 }
-.post-actions .saved {
+.post-actions .saved,
+.post-actions .reposted {
   color: var(--accent);
 }
 .post-actions .saved .icon {

@@ -116,6 +116,20 @@ namespace Fedi {
       <footer>Fedistack <span>·</span> Made for the open web<br><a href="#settings">About & settings</a>${!state.session ? "<p>Demo stories and people are fictional.</p>" : ""}</footer></aside>`;
   }
 
+  function mobileNav(): string {
+    const current = state.view === "editor"
+      ? state.draft?.kind === "post" ? "note" : "drafts"
+      : state.view;
+    const items = [
+      ["home", "home", "Home"],
+      ["discover", "compass", "Discover"],
+      ["drafts", "edit", "Your writing"],
+      ["note", "comment", "Write a note"],
+      ["messages", "mail", "Messages"],
+    ];
+    return `<nav class="mobile-nav" aria-label="Mobile navigation">${items.map(([view, symbol, name]) => `<a href="#${view}"${view === "drafts" ? ' class="mobile-write"' : ""} aria-label="${name}"${current === view ? ' aria-current="page"' : ""}>${icon(symbol)}</a>`).join("")}</nav>`;
+  }
+
   export function render(): void {
     document.body.classList.toggle("focus-mode", state.focus);
     document.body.classList.toggle(
@@ -137,7 +151,7 @@ namespace Fedi {
                 ? settingsView()
                 : feedView();
     document.getElementById("app")!.innerHTML =
-      `<div class="layout">${sidebar()}<main id="main" tabindex="-1">${content}</main>${rightRail()}</div><nav class="mobile-nav" aria-label="Mobile navigation"><a href="#home" aria-label="Home">${icon("home")}</a><a href="#discover" aria-label="Discover">${icon("compass")}</a><a href="#drafts" class="mobile-write" aria-label="Your writing">${icon("edit")}</a><a href="#note" aria-label="Write a note">${icon("comment")}</a><a href="#messages" aria-label="Messages">${icon("mail")}</a></nav>`;
+      `<div class="layout">${sidebar()}<main id="main" tabindex="-1">${content}</main>${rightRail()}</div>${mobileNav()}`;
     if (state.view === "editor") updateEditorMeta();
     document.title = `${state.view === "reader" && state.reading ? state.reading.title || "Note" : state.view === "editor" ? (state.draft?.kind === "post" ? "New note" : state.draft?.title) || "New draft" : "Your reading room"} — Fedistack`;
   }

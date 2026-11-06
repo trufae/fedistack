@@ -687,21 +687,37 @@ test("all major views render using only bundled data", () => {
   }
 });
 
-function avatarRenderFixture() {
+function imageRenderFixture() {
   const { app, context } = setup();
-  const image = (src, key = "author") => ({
-    src,
-    key,
-    getAttribute(name) { return name === "src" ? this.src : this.key; },
-    removeAttribute(name) { assert.equal(name, "src"); this.src = null; },
-    replaceWith(previous) {
-      // Replacement must happen in the live document, not the inert template.
-      assert.equal(root.images.includes(this), true);
-      root.images[root.images.indexOf(this)] = previous;
-    },
-  });
+  const image = (src, key = "author", extra = {}) => {
+    const attributes = { src, ...extra };
+    if (key !== null) attributes["data-avatar-key"] = key;
+    return {
+      mutations: [],
+      get src() { return this.getAttribute("src"); },
+      get key() { return this.getAttribute("data-avatar-key"); },
+      get attributes() {
+        return Object.entries(attributes).map(([name, value]) => ({ name, value }));
+      },
+      getAttribute(name) { return attributes[name] ?? null; },
+      hasAttribute(name) { return name in attributes; },
+      setAttribute(name, value) {
+        this.mutations.push(name);
+        attributes[name] = value;
+      },
+      removeAttribute(name) {
+        this.mutations.push(name);
+        delete attributes[name];
+      },
+      replaceWith(previous) {
+        // Replacement must happen in the live document, not the inert template.
+        assert.equal(root.images.includes(this), true);
+        root.images[root.images.indexOf(this)] = previous;
+      },
+    };
+  };
   const select = (images, selector) => {
-    assert.equal(selector, ".avatar img");
+    assert.equal(selector, "img");
     return images;
   };
   const root = {
@@ -723,7 +739,7 @@ function avatarRenderFixture() {
 }
 
 test("rerenders retain each avatar image without resetting its source or loading state", () => {
-  const { app, root, content, image } = avatarRenderFixture();
+  const { app, root, content, image } = imageRenderFixture();
   const first = image("https://example.org/avatar.png");
   const duplicate = image(first.src);
   const other = image("https://example.org/other.png");
@@ -747,7 +763,7 @@ test("rerenders retain each avatar image without resetting its source or loading
 });
 
 test("new and changed avatar URLs load normally and removed images are not cached", () => {
-  const { app, root, content, image } = avatarRenderFixture();
+  const { app, root, content, image } = imageRenderFixture();
   const previous = image("https://example.org/old.png");
   const changed = image("https://example.org/new.png");
   const additional = image(changed.src);
@@ -766,7 +782,7 @@ test("new and changed avatar URLs load normally and removed images are not cache
 });
 
 test("appending another post by the same author keeps the suggestion avatar in its own slot", () => {
-  const { app, root, content, image } = avatarRenderFixture();
+  const { app, root, content, image } = imageRenderFixture();
   const src = "https://example.org/avatar.png";
   const firstPost = image(src, "post:first");
   const suggestion = image(src, "suggested:author");
@@ -776,6 +792,90 @@ test("appending another post by the same author keeps the suggestion avatar in i
   app.renderHTML(root, "another post before the suggestions panel");
   assert.deepEqual(root.images, [firstPost, newPost, suggestion]);
   assert.equal(newPost.src, src);
+});
+
+test("rerenders retain logos, covers, thumbnails, and duplicate inline images", () => {
+  const { app, root, content, image } = imageRenderFixture();
+  const logo = image("assets/favicon.svg", null);
+  const cover = image("https://example.org/cover.png", null, { class: "feature-cover" });
+  const thumbnail = image("https://example.org/thumbnail.png", null, { class: "thumbnail", loading: "lazy" });
+  const inline = image(cover.src, null, { loading: "lazy", referrerpolicy: "no-referrer" });
+  const duplicate = image(inline.src, null, { loading: "lazy", referrerpolicy: "no-referrer" });
+  const avatar = image(cover.src);
+  cover.complete = true;
+  thumbnail.complete = false;
+  root.images = [logo, cover, thumbnail, inline, duplicate, avatar];
+  const reordered = [logo, thumbnail, inline, duplicate, avatar, cover];
+  const placeholders = reordered.map((old) => image(old.src, old.key,
+    Object.fromEntries(old.attributes.map(({ name, value }) => [name, value]))));
+  content.images = placeholders;
+
+  app.renderHTML(root, "updated feed with inline images");
+  assert.deepEqual(root.images, reordered);
+  assert.equal(cover.complete, true);
+  assert.equal(thumbnail.complete, false);
+  assert.ok(reordered.every((old) => old.mutations.length === 0));
+  assert.ok(placeholders.every((placeholder) => placeholder.src === null));
+});
+
+test("retained covers update presentation and alt text without rewriting their source", () => {
+  const { app, root, content, image } = imageRenderFixture();
+  const src = "https://example.org/cover.png";
+  const cover = image(src, null, {
+    "data-image-key": "cover:first", class: "thumbnail", alt: "Old description", loading: "lazy",
+  });
+  const other = image(src, null, { "data-image-key": "cover:second", class: "thumbnail" });
+  const reader = image(src, null, { "data-image-key": "cover:first", class: "reader-cover", alt: "New description", width: "800" });
+  const newCover = image(src, null, { "data-image-key": "cover:third", class: "thumbnail" });
+  root.images = [cover, other];
+  content.images = [newCover, image(src, null, { "data-image-key": "cover:second", class: "thumbnail" }), reader];
+
+  app.renderHTML(root, "another cover followed by the reader");
+  assert.deepEqual(root.images, [newCover, other, cover]);
+  assert.equal(cover.getAttribute("class"), "reader-cover");
+  assert.equal(cover.getAttribute("alt"), "New description");
+  assert.equal(cover.getAttribute("width"), "800");
+  assert.equal(cover.hasAttribute("loading"), false);
+  assert.equal(cover.src, src);
+  assert.equal(cover.mutations.includes("src"), false);
+  assert.deepEqual(other.mutations, []);
+  assert.equal(newCover.src, src);
+});
+
+test("changed image sources and request attributes use new images", () => {
+  for (const [name, value] of Object.entries({
+    src: "https://example.org/new.png", srcset: "https://example.org/large.png 2x",
+    sizes: "100vw", crossorigin: "anonymous", referrerpolicy: "no-referrer",
+  })) {
+    const { app, root, content, image } = imageRenderFixture();
+    const old = image("https://example.org/old.png", null);
+    const changed = image(old.src, null, { [name]: value });
+    root.images = [old];
+    content.images = [changed];
+    app.renderHTML(root, "updated image request");
+    assert.equal(root.images[0], changed, name);
+    assert.equal(changed.getAttribute(name), value);
+
+    const returning = image(old.src, null);
+    content.images = [returning];
+    app.renderHTML(root, "previously removed image returns");
+    assert.equal(root.images[0], returning);
+  }
+});
+
+test("retaining responsive images leaves their sources untouched and disables placeholder requests", () => {
+  const { app, root, content, image } = imageRenderFixture();
+  const src = "https://example.org/small.png";
+  const extra = { srcset: "https://example.org/large.png 2x", sizes: "100vw" };
+  const old = image(src, null, extra);
+  const placeholder = image(src, null, extra);
+  root.images = [old];
+  content.images = [placeholder];
+  app.renderHTML(root, "updated text around a responsive image");
+  assert.equal(root.images[0], old);
+  assert.deepEqual(old.mutations, []);
+  assert.equal(placeholder.src, null);
+  assert.equal(placeholder.hasAttribute("srcset"), false);
 });
 
 test("opening and leaving a chat switches the viewport layout and keeps its draft", () => {

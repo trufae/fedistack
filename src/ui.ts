@@ -100,17 +100,18 @@ namespace Fedi {
     return `<span class="avatar ${small ? "small" : ""} ${escapeHTML(account.color || "sage")}">${account.avatar ? `<img data-avatar-key="${escapeHTML(key)}" src="${escapeHTML(safeURL(account.avatar, true))}" alt="" loading="lazy" referrerpolicy="no-referrer">` : escapeHTML(initials)}</span>`;
   }
   export function renderHTML(element: HTMLElement, html: string): void {
-    const avatars = new Map<string, HTMLImageElement[]>();
+    const images = new Map<string, HTMLImageElement[]>();
     const key = (image: HTMLImageElement): string => JSON.stringify([
-      image.getAttribute("data-avatar-key"), image.getAttribute("src"),
-    ]);
-    element.querySelectorAll<HTMLImageElement>(".avatar img").forEach((image) => {
+      "data-avatar-key", "data-image-key", "src", "srcset", "sizes",
+      "crossorigin", "referrerpolicy",
+    ].map((name) => image.getAttribute(name)));
+    element.querySelectorAll<HTMLImageElement>("img").forEach((image) => {
       const id = key(image);
-      const matches = avatars.get(id) || [];
+      const matches = images.get(id) || [];
       matches.push(image);
-      avatars.set(id, matches);
+      images.set(id, matches);
     });
-    if (!avatars.size) {
+    if (!images.size) {
       element.innerHTML = html;
       return;
     }
@@ -118,10 +119,20 @@ namespace Fedi {
     const template = document.createElement("template");
     template.innerHTML = html;
     const retained: [HTMLImageElement, HTMLImageElement][] = [];
-    template.content.querySelectorAll<HTMLImageElement>(".avatar img").forEach((image) => {
-      const previous = avatars.get(key(image))?.shift();
+    template.content.querySelectorAll<HTMLImageElement>("img").forEach((image) => {
+      const previous = images.get(key(image))?.shift();
       if (previous) {
+        // Covers can move between thumbnail, featured, and reader layouts.
+        // Update their presentation without reassigning unchanged sources.
+        for (const { name } of Array.from(previous.attributes)) {
+          if (!image.hasAttribute(name)) previous.removeAttribute(name);
+        }
+        for (const { name, value } of Array.from(image.attributes)) {
+          if (previous.getAttribute(name) !== value)
+            previous.setAttribute(name, value);
+        }
         image.removeAttribute("src");
+        image.removeAttribute("srcset");
         retained.push([image, previous]);
       }
     });
@@ -201,10 +212,10 @@ namespace Fedi {
         hidden
           ? `<div class="content-warning">${icon("eye")}<strong>${escapeHTML(post.warning)}</strong>${action("reveal", "Show content", post.id, "button subtle")}</div>`
           : `
-      ${featured && post.image ? `<a href="${href}" class="cover-link"><img class="feature-cover" src="${escapeHTML(post.image)}" alt="${escapeHTML(post.imageAlt || "")}"></a>` : ""}
+      ${featured && post.image ? `<a href="${href}" class="cover-link"><img class="feature-cover" data-image-key="cover:${escapeHTML(post.id)}" src="${escapeHTML(post.image)}" alt="${escapeHTML(post.imageAlt || "")}"></a>` : ""}
       <div class="post-content ${!featured && post.image ? "with-thumbnail" : ""}"><div>
       ${post.kind === "article" ? `<a href="${href}" class="article-link"><h2>${escapeHTML(post.title)}</h2><p class="excerpt">${escapeHTML((post.subtitle || plainText(post.markdown)).slice(0, featured ? 210 : 160))}</p></a><div class="article-meta"><span>${escapeHTML(post.tags[0] || "Article")}</span><span>·</span><span>${readingTime(post.markdown)} min read</span></div>` : `<div class="prose note-body">${markdown(post.markdown)}</div>`}
-      </div>${!featured && post.image ? `<a href="${href}"><img class="thumbnail" src="${escapeHTML(post.image)}" alt="${escapeHTML(post.imageAlt || "")}" loading="lazy"></a>` : ""}</div>`
+      </div>${!featured && post.image ? `<a href="${href}"><img class="thumbnail" data-image-key="cover:${escapeHTML(post.id)}" src="${escapeHTML(post.image)}" alt="${escapeHTML(post.imageAlt || "")}" loading="lazy"></a>` : ""}</div>`
       }
       ${postActions(post)}</article>`;
   }

@@ -1865,6 +1865,16 @@ summary {
   opacity: 1;
   transform: translate(-50%, 0);
 }
+@media (min-width: 701px) {
+  .sidebar {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+  }
+  .sidebar > * {
+    flex-shrink: 0;
+  }
+}
 @media (min-width: 1450px) {
   .layout {
     max-width: 1330px;
@@ -2335,6 +2345,12 @@ summary {
   }
   dialog {
     padding: 22px;
+  }
+}
+@media (orientation: landscape) and (pointer: coarse) {
+  body {
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
   }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -403,6 +403,7 @@ namespace Fedi {
     const post = findPost(id);
     if (
       !post ||
+      state.readerServer ||
       post.author.id !== (state.session?.account.id || "you") ||
       post.visibility === "direct"
     ) {
@@ -523,8 +524,8 @@ namespace Fedi {
       const cachedPosts = new Set([
         ...state.posts,
         ...state.ownPosts,
-        ...state.comments,
-        ...(state.reading ? [state.reading] : []),
+        ...(state.readerServer ? [] : state.comments),
+        ...(state.reading && !state.readerServer ? [state.reading] : []),
         ...(!state.api
           ? [...demoState.posts, ...Object.values(demoState.comments).flat()]
           : []),
@@ -546,7 +547,8 @@ namespace Fedi {
     }
     state.posts = state.posts.filter((p) => p.id !== id);
     state.ownPosts = state.ownPosts.filter((p) => p.id !== id);
-    state.comments = state.comments.filter((p) => p.id !== id);
+    if (!state.readerServer)
+      state.comments = state.comments.filter((p) => p.id !== id);
     if (state.session?.account.statuses !== undefined)
       state.session.account.statuses = Math.max(
         0,
@@ -559,7 +561,7 @@ namespace Fedi {
         delete d.editingId;
         saveDraft(d);
       });
-    const wasReading = state.reading?.id === id;
+    const wasReading = !state.readerServer && state.reading?.id === id;
     if (wasReading) state.reading = null;
     return wasReading;
   }

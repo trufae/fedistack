@@ -16,6 +16,7 @@ namespace Fedi {
     revealed: new Set<string>(),
     lists: [] as UserList[],
     reading: null as Post | null,
+    readerServer: "",
     comments: [] as Post[],
     replyDrafts: new Map<string, string>(),
     conversations: [] as Conversation[],
@@ -63,6 +64,10 @@ namespace Fedi {
     ];
   }
   export function findPost(id: string): Post | undefined {
+    if (state.readerServer) {
+      const post = [state.reading, ...state.comments].find((p) => p?.id === id);
+      if (post) return post;
+    }
     return [
       ...state.posts,
       ...state.ownPosts,
@@ -72,6 +77,15 @@ namespace Fedi {
         ? [...demoState.posts, ...Object.values(demoState.comments).flat()]
         : []),
     ].find((p) => p.id === id);
+  }
+  export function publicationLink(post: Post): string {
+    const url = new URL(location.href);
+    const server = state.readerServer && post === state.reading
+      ? state.readerServer
+      : state.api?.server || state.session?.server;
+    url.search = "";
+    url.hash = `read/${encodeURIComponent(post.id)}${server ? `?${new URLSearchParams({ server })}` : ""}`;
+    return url.href;
   }
   export function navigate(path: string): void {
     if (location.hash === `#${path}`) void route();
@@ -98,7 +112,7 @@ namespace Fedi {
     return `<aside class="sidebar"><a class="brand" href="#home"><img src="assets/favicon.svg" alt="">fedistack<span>•</span></a><div class="brand-caption">Independent voices, connected.</div>
       <nav aria-label="Main navigation">${items.map(([view, symbol, name]) => `<a href="#${view}" class="nav-item ${state.view === view || (view === "drafts" && state.view === "editor") ? "active" : ""}" ${state.view === view ? 'aria-current="page"' : ""}>${icon(symbol)}<span>${name}</span>${view === "drafts" && getDrafts().length ? `<span class="nav-count">${getDrafts().length}</span>` : ""}${view === "messages" && state.conversations.some((c) => c.unread) ? '<span class="unread-dot"></span>' : ""}</a>`).join("")}</nav>
       <a href="#write" class="button primary write-button">${icon("edit")}<span>Write an article</span></a><a href="#note" class="button subtle note-button">${icon("comment")}<span>Note</span></a>
-      <div class="sidebar-bottom"><div class="sidebar-tools"><button class="icon-button" data-action="theme" aria-label="Toggle light and dark theme">${icon(document.documentElement.dataset.theme === "dark" ? "sun" : "moon")}</button><span>${state.session ? "Open & connected" : "Offline demo"}</span></div>
+      <div class="sidebar-bottom"><div class="sidebar-tools"><button class="icon-button" data-action="theme" aria-label="Toggle light and dark theme">${icon(document.documentElement.dataset.theme === "dark" ? "sun" : "moon")}</button><span>${state.session ? "Open & connected" : state.readerServer ? "Public reading" : "Offline demo"}</span></div>
       <button class="profile-switch" data-action="${state.session ? "account" : "connect"}">${avatar(me, false, "sidebar")}<span><strong>${escapeHTML(state.session ? me.name : "Make yourself at home")}</strong><small>${escapeHTML(state.session ? new URL(state.session.server).host : "Connect your account")}</small></span>${icon("chevron")}</button></div></aside>`;
   }
 
@@ -111,12 +125,12 @@ namespace Fedi {
               .map((p) => [p.author.id, p.author]),
           ).values(),
         ].slice(0, 3)
-      : demoAuthors.slice(0, 3);
+      : state.readerServer ? [] : demoAuthors.slice(0, 3);
     return `<aside class="right-rail"><form class="search-box" id="search-form">${icon("search")}<input name="query" aria-label="Search publications and people" placeholder="Search your corner of the world" value="${escapeHTML(state.query)}"><button type="submit" class="sr-only">Search</button></form>
       ${authors.length ? `<section class="rail-section"><div class="section-heading"><h3>Voices to explore</h3>${icon("users")}</div>${authors.map((a) => `<div class="recommended">${avatar(a, false, `suggested:${a.id}`)}<div><button class="author-link" data-action="profile" data-id="${escapeHTML(a.id)}">${escapeHTML(a.name)}</button><p>${escapeHTML(a.publication || a.bio.slice(0, 55) || a.acct)}</p></div>${followButton(a)}</div>`).join("")}</section>` : ""}
       <section class="rail-section"><h3>Follow your curiosity</h3><div class="topics">${["Technology", "Culture", "Design", "Nature", "Life", "Writing"].map((t) => action("topic", t, t, "topic")).join("")}</div></section>
       <section class="little-note">${icon("globe")}<p>Your words. Your community.<br><strong>Your corner of the fediverse.</strong></p></section>
-      <footer>Fedistack <span>·</span> Made for the open web<br><a href="#settings">About & settings</a>${!state.session ? "<p>Demo stories and people are fictional.</p>" : ""}</footer></aside>`;
+      <footer>Fedistack <span>·</span> Made for the open web<br><a href="#settings">About & settings</a>${!state.session && !state.readerServer ? "<p>Demo stories and people are fictional.</p>" : ""}</footer></aside>`;
   }
 
   function mobileNav(): string {
@@ -357,7 +371,8 @@ namespace Fedi {
       }
       state.draft = null;
     }
-    const [page, rawId] = location.hash.slice(1).split("/");
+    const [path, query = ""] = location.hash.slice(1).split("?");
+    const [page, rawId] = path.split("/");
     let id = "";
     try {
       id = decodeURIComponent(rawId || "");
@@ -368,6 +383,12 @@ namespace Fedi {
     state.error = "";
     state.loading = false;
     state.focus = false;
+    // Public reader IDs belong to their source server, not the current account.
+    if (state.readerServer) {
+      state.reading = null;
+      state.comments = [];
+    }
+    state.readerServer = "";
     if (page === "write" || page === "note") {
       if (id && state.api && !getDrafts().some((d) => d.id === id)) {
         const version = loadVersion;
@@ -388,16 +409,20 @@ namespace Fedi {
       return;
     }
     if (page === "read") {
+      const source = new URLSearchParams(query).get("server");
       state.view = "reader";
-      state.reading = findPost(id) || null;
+      state.reading = source ? null : findPost(id) || null;
+      if (source) state.revealed.delete(id);
       state.comments = [];
       state.loading = true;
       render();
       const version = loadVersion,
         api = state.api;
       try {
-        const post = state.reading || (api ? await api.status(id) : null);
-        if (version !== loadVersion) return;
+        const server = source ? serverURL(source) : "";
+        let readerAPI = server && server !== api?.server ? new API(server) : api;
+        let post = state.reading || (readerAPI ? await readerAPI.status(id) : null);
+        if (version !== loadVersion || state.api !== api) return;
         if (!post) throw new Error("This publication is not available.");
         if (post.visibility === "direct") {
           state.reading = null;
@@ -405,13 +430,30 @@ namespace Fedi {
             "This is a private message. Open it from Conversations.",
           );
         }
+        if (readerAPI && readerAPI !== api && post.visibility !== "public" && post.visibility !== "unlisted")
+          throw new Error("This publication requires access through its server. Connect an authorized account to read it.");
+        if (api && readerAPI !== api && post.url) {
+          try {
+            const originalURL = post.url;
+            const resolved = (await api.search(originalURL)).posts.find((p) => p.url === originalURL);
+            if (resolved) {
+              post = resolved;
+              readerAPI = api;
+            }
+          } catch {
+            // Keep the public article readable if the reader's server cannot resolve it.
+          }
+          if (version !== loadVersion || state.api !== api) return;
+        }
+        state.readerServer = readerAPI && readerAPI !== api ? readerAPI.server : "";
         state.reading = post;
-        const comments = api
-          ? await api.context(id)
+        const comments = readerAPI
+          ? await readerAPI.context(post.id)
           : [...demoComments(post), ...(demoState.comments[id] || [])];
-        if (version !== loadVersion) return;
+        if (version !== loadVersion || state.api !== api) return;
+        const readingId = post.id;
         state.comments = comments.filter(
-          (p) => p.visibility !== "direct" && p.id !== id && !!p.replyTo,
+          (p) => p.visibility !== "direct" && (!state.readerServer || p.visibility !== "private") && p.id !== readingId && !!p.replyTo,
         );
       } catch (error) {
         if (version === loadVersion) state.error = (error as Error).message;
@@ -461,11 +503,18 @@ namespace Fedi {
     if (!p)
       return `<div class="page-intro">${emptyState(state.loading ? "Opening your next read…" : "Publication unavailable", state.error, '<a class="button subtle" href="#home">Back home</a>')}</div>`;
     const hidden = p.warning && !state.revealed.has(p.id);
+    const publicReading = !!state.readerServer;
+    const author = publicReading
+      ? `<strong>${escapeHTML(p.author.name)}</strong>`
+      : `<button class="author-link" data-action="profile" data-id="${escapeHTML(p.author.id)}">${escapeHTML(p.author.name)}</button>`;
+    const replyForm = publicReading
+      ? `<p class="muted">${state.session ? "Open the original post to join the conversation." : `Connect your account to join the conversation. ${action("connect", "Connect", "", "text-button")}`}</p>`
+      : `<form id="reply-form"><label class="sr-only" for="reply-body">Write a comment</label><textarea id="reply-body" name="body" rows="3" required placeholder="Add a little perspective…">${escapeHTML(state.replyDrafts.get(p.id) || "")}</textarea><div class="reply-footer"><span>${p.visibility === "private" ? "Followers only" : p.visibility === "unlisted" ? "Unlisted reply" : "Public reply"}${!state.session || state.session.format !== "text/plain" ? " · Markdown supported" : ""}</span><button class="button primary" type="submit">Reply ${icon("arrow")}</button></div></form>`;
     return `<header class="page-top"><a class="text-button" href="#home">${icon("back")} Back to reading</a><button class="icon-button" data-action="focus" aria-label="${state.focus ? "Leave" : "Enter"} focus mode" title="Focus mode">${icon("book")}</button></header><article class="reader">
-      ${hidden ? `<div class="content-warning"><h2>${escapeHTML(p.warning)}</h2>${action("reveal", "Show publication", p.id, "button subtle")}</div>` : `<span class="eyebrow">${escapeHTML(p.author.publication || "INDEPENDENT WRITING")}</span>${p.author.id === (state.session?.account.id || "you") ? `<span class="published-badge">${state.session ? "Published" : "Published in demo"}</span>` : ""}<h1>${escapeHTML(p.title || "A note from " + p.author.name)}</h1>${p.subtitle ? `<p class="reader-subtitle">${escapeHTML(p.subtitle)}</p>` : ""}`}
-      <div class="post-byline">${avatar(p.author, false, `post:${p.id}`)}<div><button class="author-link" data-action="profile" data-id="${escapeHTML(p.author.id)}">${escapeHTML(p.author.name)}</button><div class="byline-sub">${new Date(p.created).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })} · ${readingTime(p.markdown)} min read</div></div>${followButton(p.author)}</div>
+      ${hidden ? `<div class="content-warning"><h2>${escapeHTML(p.warning)}</h2>${action("reveal", "Show publication", p.id, "button subtle")}</div>` : `<span class="eyebrow">${escapeHTML(p.author.publication || "INDEPENDENT WRITING")}</span>${!publicReading && p.author.id === (state.session?.account.id || "you") ? `<span class="published-badge">${state.session ? "Published" : "Published in demo"}</span>` : ""}<h1>${escapeHTML(p.title || "A note from " + p.author.name)}</h1>${p.subtitle ? `<p class="reader-subtitle">${escapeHTML(p.subtitle)}</p>` : ""}`}
+      <div class="post-byline">${avatar(p.author, false, `post:${p.id}`)}<div>${author}<div class="byline-sub">${new Date(p.created).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })} · ${readingTime(p.markdown)} min read</div></div>${publicReading ? "" : followButton(p.author)}</div>
       ${postActions(p)}${hidden ? "" : `${p.image ? `<img class="reader-cover" data-image-key="cover:${escapeHTML(p.id)}" src="${escapeHTML(p.image)}" alt="${escapeHTML(p.imageAlt || "")}">` : ""}<div class="prose reading-prose">${markdown(p.markdown.replace(/^#\s+[^\n]+\n+/, ""))}</div>${p.source ? `<a class="button subtle" href="${escapeHTML(p.source)}" target="_blank" rel="noopener noreferrer">Read the linked article ${icon("external")}</a>` : ""}<div class="reader-end">${icon("leaf")}<span>Thanks for reading. Keep the conversation going.</span></div>${postActions(p)}`}</article>
-      <section class="comments"><div class="section-heading"><h2>Conversation <span>${p.replies}</span></h2>${action("share", "Share publication", p.id, "text-button")}</div><form id="reply-form"><label class="sr-only" for="reply-body">Write a comment</label><textarea id="reply-body" name="body" rows="3" required placeholder="Add a little perspective…">${escapeHTML(state.replyDrafts.get(p.id) || "")}</textarea><div class="reply-footer"><span>${p.visibility === "private" ? "Followers only" : p.visibility === "unlisted" ? "Unlisted reply" : "Public reply"}${!state.session || state.session.format !== "text/plain" ? " · Markdown supported" : ""}</span><button class="button primary" type="submit">Reply ${icon("arrow")}</button></div></form>
+      <section class="comments"><div class="section-heading"><h2>Conversation <span>${p.replies}</span></h2>${action("share", "Share publication", p.id, "text-button")}</div>${replyForm}
       ${state.error ? `<p class="form-error" role="alert">${escapeHTML(state.error)}</p>` : ""}${state.loading ? '<p class="loading">Loading the conversation…</p>' : state.comments.map(commentCard).join("") || '<p class="muted">Be the first to start the conversation.</p>'}</section>`;
   }
 
@@ -591,7 +640,8 @@ namespace Fedi {
     state.query = "";
     state.timeline = "home";
     closeModal();
-    navigate("home");
+    if (location.hash.startsWith("#read/")) await route();
+    else navigate("home");
     await loadServerDrafts();
     try {
       const api = state.api;

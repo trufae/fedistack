@@ -1169,16 +1169,215 @@ async function postActionFixture(fetch) {
   context.window = { addEventListener() {} };
   context.matchMedia = () => ({ matches: false, addEventListener() {} });
   get("modal").addEventListener = () => {};
+  const route = app.route;
   app.route = async () => {};
   await app.boot();
+  app.route = route;
   app.htmlToMarkdown = (text) => text;
-  const click = (id) => {
-    const button = { dataset: { action: "repost", id }, disabled: false };
+  const click = (id, action = "repost") => {
+    const button = { dataset: { action, id }, disabled: false };
     listeners.get("click")({ target: { closest: () => button } });
     return button;
   };
   return { app, context, get, click };
 }
+
+test("Share copies the current Fedistack reader link and keeps the original separately accessible", async () => {
+  const { app, context, get, click } = await postActionFixture();
+  const post = { ...app.demoPosts[0], id: "remote/id", url: "https://author.example/@writer/original" };
+  app.state.posts = [post];
+  app.state.api = new app.API("https://social.example", "private-token");
+  context.location.href = "https://reader.example/custom/path/?code=secret&state=secret#home";
+  let copied, dialog;
+  context.navigator = { clipboard: { writeText: async (text) => { copied = text; } } };
+  click(post.id, "share");
+  await new Promise(setImmediate);
+  const link = new URL(copied);
+  assert.equal(link.origin, "https://reader.example");
+  assert.equal(link.pathname, "/custom/path/");
+  assert.equal(link.search, "");
+  assert.equal(link.hash, "#read/remote%2Fid?server=https%3A%2F%2Fsocial.example");
+  assert.doesNotMatch(copied, /secret|private-token|author\.example/);
+  assert.match(get("toast").textContent, /Fedistack reading link copied/);
+  assert.match(app.postActions(post), /href="https:\/\/author.example\/@writer\/original"[^>]*aria-label="Open original post"/);
+
+  context.navigator.clipboard.writeText = async () => { throw new Error("Clipboard denied"); };
+  app.showModal = (title, body) => { dialog = { title, body }; };
+  click(post.id, "share");
+  await new Promise(setImmediate);
+  assert.match(dialog.body, /Fedistack reading link/);
+  assert.ok(dialog.body.includes(app.escapeHTML(copied)));
+  assert.ok(dialog.body.includes(post.url));
+  assert.match(dialog.body, /Open original/);
+});
+
+function sharedStatus(overrides = {}) {
+  return {
+    id: "slow-web",
+    account: { id: "you", username: "writer", display_name: "Remote writer", acct: "writer", avatar: "", note: "", url: "https://source.example/@writer" },
+    content: "# Shared article\n\nA **formatted** post.",
+    created_at: new Date().toISOString(),
+    favourites_count: 2, replies_count: 1, reblogs_count: 0,
+    visibility: "public", spoiler_text: "",
+    url: "https://source.example/@writer/original",
+    ...overrides,
+  };
+}
+
+test("a shared link opens Markdown and public comments without a session or cached post", async () => {
+  const requests = [];
+  const { app, context, get } = await postActionFixture(async (url, options) => {
+    requests.push({ url, options });
+    return Response.json(url.endsWith("/context") ? {
+      ancestors: [],
+      descendants: [
+        sharedStatus({ id: "reply", content: "A *public reply*.", in_reply_to_id: "slow-web" }),
+        sharedStatus({ id: "private", content: "Private reply", visibility: "private", in_reply_to_id: "slow-web" }),
+      ],
+    } : sharedStatus());
+  });
+  // The demo has the same ID; the shared link must never display that cached story.
+  app.state.posts = app.demoPosts;
+  context.location.hash = "#read/slow-web?server=https%3A%2F%2Fsource.example";
+  await app.route();
+  assert.equal(app.state.reading.title, "Shared article");
+  assert.equal(app.state.readerServer, "https://source.example");
+  assert.equal(app.state.api, null);
+  assert.equal(app.findPost("slow-web"), app.state.reading);
+  assert.match(get("app").innerHTML, /A <strong>formatted<\/strong> post/);
+  assert.match(get("app").innerHTML, /A <em>public reply<\/em>/);
+  assert.doesNotMatch(get("app").innerHTML, /Private reply|Published in demo|Offline demo|id="reply-form"|data-action="(?:like|repost|save|delete-publication)"/);
+  assert.match(app.publicationLink(app.state.reading), /\?server=https%3A%2F%2Fsource.example$/);
+  assert.equal(requests.length, 2);
+  for (const { url, options } of requests) {
+    assert.ok(url.startsWith("https://source.example/api/v1/statuses/slow-web"));
+    assert.equal(options.method, "GET");
+    assert.equal(options.headers.Authorization, undefined);
+  }
+  context.location.hash = "#home";
+  await app.route();
+  assert.equal(app.state.readerServer, "");
+  assert.notEqual(app.findPost("slow-web").title, "Shared article");
+});
+
+test("readers on another server resolve the post before sending interactions with their local ID", async () => {
+  const requests = [];
+  const { app, context, click } = await postActionFixture(async (url, options) => {
+    requests.push({ url, options });
+    if (url.startsWith("https://source.example/")) return Response.json(sharedStatus());
+    if (url.includes("/api/v2/search?")) {
+      assert.equal(new URL(url).searchParams.get("q"), sharedStatus().url);
+      return Response.json({ accounts: [], statuses: [sharedStatus({ id: "local-id" })] });
+    }
+    if (url.endsWith("/context")) return Response.json({ ancestors: [], descendants: [] });
+    return Response.json(sharedStatus({ id: "local-id", reblogged: true, reblogs_count: 1 }));
+  });
+  app.state.session = { ...longServer, account: app.demoMe, server: "https://reader.social", token: "local-token" };
+  app.state.api = new app.API(app.state.session.server, app.state.session.token);
+  app.state.posts = [{ ...app.demoPosts[0], markdown: "Unrelated cached post" }];
+  context.location.hash = "#read/slow-web?server=https%3A%2F%2Fsource.example";
+  await app.route();
+  assert.equal(app.state.reading.id, "local-id");
+  assert.equal(app.state.readerServer, "");
+  assert.equal(requests[0].options.headers.Authorization, undefined);
+  assert.equal(requests[1].options.headers.Authorization, "Bearer local-token");
+  assert.equal(requests[2].url, "https://reader.social/api/v1/statuses/local-id/context");
+  click("local-id");
+  await new Promise(setImmediate);
+  assert.equal(requests[3].url, "https://reader.social/api/v1/statuses/local-id/reblog");
+  assert.equal(requests[3].options.headers.Authorization, "Bearer local-token");
+  assert.equal(app.state.reading.reposted, true);
+});
+
+test("an unresolved shared article remains readable without using another server's IDs for actions", async () => {
+  const { app, context, get } = await postActionFixture(async (url) => {
+    if (url.startsWith("https://reader.social/")) return Response.json({ error: "Cannot resolve" }, { status: 422 });
+    if (url.endsWith("/context")) return Response.json({ error: "Login required for comments" }, { status: 401 });
+    return Response.json(sharedStatus());
+  });
+  app.state.session = { ...longServer, account: app.demoMe, server: "https://reader.social", token: "local-token" };
+  app.state.api = new app.API(app.state.session.server, app.state.session.token);
+  app.state.posts = [{ ...app.demoPosts[0], markdown: "Unrelated cached post" }];
+  context.location.hash = "#read/slow-web?server=https%3A%2F%2Fsource.example";
+  await app.route();
+  assert.equal(app.findPost("slow-web"), app.state.reading);
+  assert.equal(app.state.readerServer, "https://source.example");
+  assert.match(get("app").innerHTML, /<strong>formatted<\/strong>/);
+  assert.match(get("app").innerHTML, /Login required for comments/);
+  assert.doesNotMatch(get("app").innerHTML, /id="reply-form"|data-action="(?:like|repost|save|delete-publication)"/);
+  assert.match(app.publicationLink(app.state.reading), /server=https%3A%2F%2Fsource.example/);
+});
+
+test("shared links reject unsafe servers and private content, but preserve authorized same-server access", async () => {
+  let calls = 0, visibility = "private";
+  const { app, context, get } = await postActionFixture(async (url, options) => {
+    calls++;
+    if (url.endsWith("/context")) return Response.json({ ancestors: [], descendants: [] });
+    if (app.state.api) assert.equal(options.headers.Authorization, "Bearer account-token");
+    return Response.json(sharedStatus({ visibility, content: "Private content" }));
+  });
+  context.location.hash = "#read/slow-web?server=" + encodeURIComponent("https://user:password@source.example");
+  await app.route();
+  assert.equal(calls, 0);
+  assert.equal(app.state.reading, null);
+  for (visibility of ["private", "direct"]) {
+    context.location.hash = "#read/slow-web?server=https%3A%2F%2Fsource.example";
+    await app.route();
+    assert.equal(app.state.reading, null);
+    assert.doesNotMatch(get("app").innerHTML, /Private content/);
+  }
+  visibility = "private";
+  app.state.session = { ...longServer, account: app.demoMe, server: "https://source.example", token: "account-token" };
+  app.state.api = new app.API(app.state.session.server, app.state.session.token);
+  await app.route();
+  assert.equal(app.state.readerServer, "");
+  assert.equal(app.state.reading.visibility, "private");
+  assert.match(get("app").innerHTML, /Private content/);
+});
+
+test("a late shared-post response cannot replace a newer page", async () => {
+  let finish;
+  const { app, context, get } = await postActionFixture(() => new Promise((resolve) => { finish = resolve; }));
+  context.location.hash = "#read/slow-web?server=https%3A%2F%2Fsource.example";
+  const opening = app.route();
+  context.location.hash = "#settings";
+  await app.route();
+  finish(Response.json(sharedStatus()));
+  await opening;
+  assert.equal(app.state.view, "settings");
+  assert.equal(app.state.reading, null);
+  assert.equal(app.state.readerServer, "");
+  assert.doesNotMatch(get("app").innerHTML, /Shared article/);
+});
+
+test("pending account mutations cannot overwrite public reader posts with the same IDs", async () => {
+  const { app, get, click } = await postActionFixture();
+  const local = { ...app.demoPosts[0], author: app.demoMe };
+  let finishToggle, finishDelete;
+  app.state.api = {
+    toggle: () => new Promise((resolve) => { finishToggle = resolve; }),
+    deleteStatus: () => new Promise((resolve) => { finishDelete = resolve; }),
+  };
+  app.state.posts = [local];
+  get("modal").close = () => {};
+  click(local.id);
+  const deleting = app.deletePublication(local.id);
+  const remote = { ...local, title: "Remote shared article" };
+  app.state.view = "reader";
+  app.state.readerServer = "https://source.example";
+  app.state.reading = remote;
+  app.state.comments = [{ ...local, replyTo: "remote-parent" }];
+  finishToggle({ ...local, reposted: true, reposts: 1 });
+  await new Promise(setImmediate);
+  assert.equal(remote.title, "Remote shared article");
+  assert.equal(remote.reposted, false);
+  finishDelete();
+  await deleting;
+  assert.equal(app.state.posts.length, 0);
+  assert.equal(app.state.reading, remote);
+  assert.equal(app.state.comments.length, 1);
+  await assert.rejects(app.deletePublication(remote.id), /only manage your own/);
+});
 
 test("repost clicks use the original status, synchronize counts, and undo without changing attribution", async () => {
   const requests = [];

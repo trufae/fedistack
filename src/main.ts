@@ -3,6 +3,7 @@ namespace Fedi {
   async function togglePost(id: string, kind: "like" | "save" | "repost"): Promise<void> {
     const post = findPost(id);
     if (!post) return;
+    if (state.readerServer) return;
     if (kind === "repost" && !canRepost(post)) return;
     const api = state.api;
     if (api) {
@@ -11,8 +12,8 @@ namespace Fedi {
       [
         ...state.posts,
         ...state.ownPosts,
-        ...state.comments,
-        ...(state.reading ? [state.reading] : []),
+        ...(state.readerServer ? [] : state.comments),
+        ...(state.reading && !state.readerServer ? [state.reading] : []),
       ]
         .filter((p) => p.id === id)
         .forEach((p) => Object.assign(p, updated, { boostedBy: p.boostedBy }));
@@ -58,13 +59,11 @@ namespace Fedi {
   async function sharePost(id: string): Promise<void> {
     const post = findPost(id);
     if (!post) return;
-    const link =
-      post.url ||
-      `${location.href.split("#")[0]}#read/${encodeURIComponent(id)}`;
-    if (post.url && navigator.clipboard) {
+    const link = publicationLink(post);
+    if (navigator.clipboard) {
       try {
         await navigator.clipboard.writeText(link);
-        toast("Publication link copied. Ready to share.");
+        toast("Fedistack reading link copied. Ready to share.");
         return;
       } catch {
         /* File URLs and denied clipboard permissions use the selectable link. */
@@ -72,7 +71,7 @@ namespace Fedi {
     }
     showModal(
       "Share this publication",
-      `<p>${post.url ? "Copy the original publication link. It works independently of Fedistack." : "This is a local demo link. Connect an account and publish to get a public, shareable link."}</p><label>Publication link<input id="share-link" readonly value="${escapeHTML(link)}"></label>${action("copy-link", "Copy link", "", "button primary")}${post.url ? `<a class="button subtle" href="${escapeHTML(post.url)}" target="_blank" rel="noopener noreferrer">Open original ${icon("external")}</a>` : ""}`,
+      `<p>${post.url ? "Share this Fedistack link so readers see the formatted publication here." : "This is a local demo link. Connect an account and publish to get a public, shareable link."}</p><label>Fedistack reading link<input id="share-link" readonly value="${escapeHTML(link)}"></label>${action("copy-link", "Copy link", "", "button primary")}${post.url ? `<a class="button subtle" href="${escapeHTML(post.url)}" target="_blank" rel="noopener noreferrer">Open original ${icon("external")}</a>` : ""}`,
     );
   }
   function profile(id: string): void {
@@ -400,7 +399,7 @@ namespace Fedi {
       const post = state.reading,
         api = state.api,
         body = value("body");
-      if (!post || !body) return;
+      if (!post || !body || state.readerServer) return;
       const source = `${post.author.id !== (state.session?.account.id || "you") ? "@" + post.author.acct + " " : ""}${body}`;
       const format = state.session?.format || "text/markdown";
       const text =
@@ -451,7 +450,7 @@ namespace Fedi {
         saveDemo();
       }
       state.replyDrafts.delete(post.id);
-      if (state.reading?.id === post.id && state.view === "reader") {
+      if (!state.readerServer && state.reading?.id === post.id && state.view === "reader") {
         state.comments.push(reply);
         render();
       }

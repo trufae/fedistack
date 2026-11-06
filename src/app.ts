@@ -135,7 +135,7 @@ namespace Fedi {
                 ? settingsView()
                 : feedView();
     document.getElementById("app")!.innerHTML =
-      `<div class="layout">${sidebar()}<main id="main" tabindex="-1">${content}</main>${rightRail()}</div><nav class="mobile-nav" aria-label="Mobile navigation"><a href="#home" aria-label="Home">${icon("home")}</a><a href="#discover" aria-label="Discover">${icon("compass")}</a><a href="#note" aria-label="Write a note">${icon("comment")}</a><a href="#messages" aria-label="Messages">${icon("mail")}</a><a href="#drafts" aria-label="Your writing">${icon("edit")}</a></nav>`;
+      `<div class="layout">${sidebar()}<main id="main" tabindex="-1">${content}</main>${rightRail()}</div><nav class="mobile-nav" aria-label="Mobile navigation"><a href="#home" aria-label="Home">${icon("home")}</a><a href="#discover" aria-label="Discover">${icon("compass")}</a><a href="#drafts" class="mobile-write" aria-label="Your writing">${icon("edit")}</a><a href="#note" aria-label="Write a note">${icon("comment")}</a><a href="#messages" aria-label="Messages">${icon("mail")}</a></nav>`;
     if (state.view === "editor") updateEditorMeta();
     document.title = `${state.view === "reader" && state.reading ? state.reading.title || "Note" : state.view === "editor" ? (state.draft?.kind === "post" ? "New note" : state.draft?.title) || "New draft" : "Your reading room"} — Fedistack`;
   }

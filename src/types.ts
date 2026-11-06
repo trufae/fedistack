@@ -71,6 +71,28 @@ namespace Fedi {
     updated: string;
     publishKey?: string;
     editingId?: string;
+    serverId?: string;
+    serverDraftId?: string;
+    serverContent?: string;
+    serverDraftContent?: string;
+    serverPreviousIds?: string[];
+    serverSaveKey?: string;
+    serverSaveText?: string;
+    scheduleKey?: string;
+    scheduleTime?: string;
+  }
+  export interface ScheduledStatus {
+    id: string;
+    scheduled_at: string | null;
+    params: {
+      text: string;
+      spoiler_text?: string | null;
+      visibility?: Visibility | null;
+      content_type?: PostFormat;
+      poll?: unknown;
+      in_reply_to_id?: string | null;
+    };
+    media_attachments: unknown[];
   }
   export type PostFormat = "text/markdown" | "text/html" | "text/plain";
   export interface Capabilities {

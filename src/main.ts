@@ -150,6 +150,8 @@ namespace Fedi {
         state.posts = [];
         state.ownPosts = [];
         state.ownNext = undefined;
+        state.scheduledPosts = [];
+        state.serverDraftError = "";
         state.comments = [];
         state.reading = null;
         state.accounts = [];
@@ -307,15 +309,37 @@ namespace Fedi {
       case "delete-draft":
         showModal(
           "Delete this draft?",
-          `<p>This removes the local draft. Export a Markdown copy first if you want to keep it.</p>${action("confirm-delete-draft", "Delete draft", id, "button danger")} ${action("close-modal", "Keep writing", "", "button subtle")}`,
+          `<p>This removes the draft from this device and its saved server copies. Export a Markdown copy first if you want to keep it.</p>${action("confirm-delete-draft", "Delete draft", id, "button danger")} ${action("close-modal", "Keep writing", "", "button subtle")}`,
         );
         break;
       case "confirm-delete-draft":
-        if (!removeDraft(id))
-          throw new Error("Could not remove the draft from browser storage.");
+        await deleteSyncedDraft(id);
         closeModal();
         render();
         break;
+      case "schedule":
+        scheduleDialog();
+        break;
+      case "reschedule":
+        scheduleDialog(id);
+        break;
+      case "refresh-server-drafts":
+        await loadServerDrafts();
+        render();
+        break;
+      case "cancel-schedule":
+        showModal("Cancel scheduled publication?", `<p>This removes the scheduled post and its content from the server. It will no longer publish automatically.</p>${action("confirm-cancel-schedule", "Cancel publication", id, "button danger")} ${action("close-modal", "Keep scheduled", "", "button subtle")}`);
+        break;
+      case "confirm-cancel-schedule": {
+        const api = state.api;
+        if (!api) break;
+        await api.deleteScheduledStatus(id);
+        if (state.api !== api) break;
+        closeModal();
+        await loadServerDrafts();
+        render();
+        break;
+      }
       case "new-message":
         newMessageDialog();
         break;
@@ -334,6 +358,10 @@ namespace Fedi {
   async function submit(form: HTMLFormElement): Promise<void> {
     const data = new FormData(form),
       value = (key: string) => String(data.get(key) || "").trim();
+    if (form.id === "schedule-form") {
+      await submitSchedule(value("time"), form.dataset.id || "");
+      return;
+    }
     if (["follow-tag-form", "save-list-form", "list-member-search"].includes(form.id)) {
       await submitInterestForm(form.id, value(form.id === "follow-tag-form" ? "tag" : form.id === "save-list-form" ? "title" : "query"));
       return;
@@ -500,6 +528,9 @@ namespace Fedi {
       window.scrollTo(0, 0);
     });
     window.addEventListener("pagehide", flushDraft);
+    window.addEventListener("online", () => {
+      for (const draft of getDrafts()) queueDraftSync(draft);
+    });
     window.addEventListener("beforeunload", (event) => {
       if (!flushDraft()) {
         event.preventDefault();
@@ -531,7 +562,12 @@ namespace Fedi {
         connectDialog();
         formError(error);
       }
-    } else await route();
+    } else {
+      void loadServerDrafts().then(() => {
+        if (state.view === "drafts") render();
+      });
+      await route();
+    }
     if (state.api) {
       const api = state.api;
       try {

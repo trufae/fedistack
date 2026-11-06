@@ -2199,3 +2199,348 @@ test("the Note composer keeps save and limit checks without article formatting o
     /allows 10/,
   );
 });
+
+function scheduledServer() {
+  const statuses = new Map(), requests = [], keys = new Map();
+  let sequence = 0;
+  const server = {
+    statuses, requests,
+    fail: null,
+    beforeCreate: null,
+    async fetch(url, options = {}) {
+      const path = new URL(url).pathname;
+      const method = options.method || "GET";
+      const body = options.body ? JSON.parse(options.body) : null;
+      requests.push({ path, method, body, headers: options.headers });
+      const failure = server.fail?.({ path, method, body });
+      if (failure) return new Response(JSON.stringify({ error: failure }), { status: 422 });
+      if (method === "POST" && path === "/api/v1/statuses") {
+        await server.beforeCreate?.();
+        const key = options.headers["Idempotency-Key"];
+        if (keys.has(key)) return Response.json(keys.get(key));
+        const result = {
+          id: String(++sequence), scheduled_at: body.scheduled_at,
+          params: { text: body.status, spoiler_text: body.spoiler_text,
+            visibility: body.visibility, content_type: body.content_type },
+          media_attachments: [],
+        };
+        statuses.set(result.id, result);
+        keys.set(key, result);
+        return Response.json(result);
+      }
+      if (path === "/api/v1/scheduled_statuses") return Response.json([...statuses.values()]);
+      const id = path.split("/").pop();
+      if (!statuses.has(id)) return Response.json({ error: "Not found" }, { status: 404 });
+      if (method === "DELETE") {
+        statuses.delete(id);
+        return new Response(null, { status: 204 });
+      }
+      if (method === "PUT") statuses.get(id).scheduled_at = body.scheduled_at;
+      return Response.json(statuses.get(id));
+    },
+  };
+  return server;
+}
+function draftClient(server, stores) {
+  const client = setup(server.fetch, stores);
+  client.app.state.session = { ...longServer, server: "https://example.org", token: "token", account: { id: "me" } };
+  client.app.state.api = new client.app.API("https://example.org", "token");
+  return client;
+}
+
+test("server drafts round-trip Markdown and editing metadata and load on another device", async () => {
+  const server = scheduledServer(), first = draftClient(server);
+  const draft = { ...article, body: "\n**Accents é and emoji 🦊**\n", editingId: "original", warning: "CW", visibility: "private" };
+  assert.equal(first.app.saveDraft(draft), true);
+  assert.equal(server.requests.length, 0, "local save is immediate and independent of the network");
+  await first.app.syncServerDraft(draft.id);
+  assert.equal(server.statuses.size, 1);
+  const remote = [...server.statuses.values()][0];
+  assert.match(remote.scheduled_at, /^9999-/);
+  assert.match(remote.params.text, /# An independent publication/);
+  const second = draftClient(server);
+  await second.app.loadServerDrafts();
+  assert.equal(second.app.getDrafts().length, 1);
+  assert.equal(second.app.draftContent(second.app.getDrafts()[0]), second.app.draftContent(draft));
+  assert.equal(second.app.serverDraftLabel(second.app.getDrafts()[0]), "Saved on server");
+  assert.equal(second.app.state.scheduledPosts.length, 0);
+});
+
+test("a failed server save keeps the local draft and never retries as an immediate post", async () => {
+  const server = scheduledServer(), { app } = draftClient(server);
+  server.fail = ({ method }) => method === "POST" && "Unsupported scheduled date";
+  app.saveDraft({ ...article });
+  await assert.rejects(app.syncServerDraft(article.id), /Unsupported scheduled date/);
+  assert.equal(app.getDrafts()[0].body, article.body);
+  assert.match(app.serverDraftLabel(app.getDrafts()[0]), /Server save failed/);
+  const writes = server.requests.filter((r) => r.method === "POST");
+  assert.equal(writes.length, 1);
+  assert.match(writes[0].body.scheduled_at, /^9999-/);
+});
+
+test("draft replacement creates the new copy before deleting the previous copy", async () => {
+  const server = scheduledServer(), { app } = draftClient(server);
+  app.saveDraft({ ...article });
+  await app.syncServerDraft(article.id);
+  const original = app.getDrafts()[0].serverId;
+  app.saveDraft({ ...app.getDrafts()[0], body: "New body" });
+  server.fail = ({ method }) => method === "POST" && "Storage unavailable";
+  await assert.rejects(app.syncServerDraft(article.id));
+  assert.equal(server.statuses.has(original), true);
+  server.fail = null;
+  await app.syncServerDraft(article.id);
+  assert.equal(server.statuses.size, 1);
+  assert.notEqual(app.getDrafts()[0].serverId, original);
+  const requests = server.requests.filter((r) => ["POST", "DELETE"].includes(r.method));
+  assert.equal(requests.at(-2).method, "POST");
+  assert.equal(requests.at(-1).method, "DELETE");
+});
+
+test("failed replacement cleanup is retried without creating another copy", async () => {
+  const server = scheduledServer(), { app } = draftClient(server);
+  app.saveDraft({ ...article });
+  await app.syncServerDraft(article.id);
+  app.saveDraft({ ...app.getDrafts()[0], body: "Updated" });
+  server.fail = ({ method }) => method === "DELETE" && "Try later";
+  await assert.rejects(app.syncServerDraft(article.id));
+  assert.equal(server.statuses.size, 2);
+  assert.equal(app.getDrafts()[0].serverPreviousIds.length, 1);
+  server.fail = null;
+  await app.syncServerDraft(article.id);
+  assert.equal(server.statuses.size, 1);
+  assert.equal(server.requests.filter((r) => r.method === "POST").length, 2);
+});
+
+test("editing while a server request is pending preserves newer local text and server identity", async () => {
+  const server = scheduledServer(), { app, context } = draftClient(server);
+  elements(context);
+  app.state.view = "editor";
+  app.state.draft = { ...article };
+  app.saveDraft(app.state.draft);
+  let release, started;
+  const entered = new Promise((resolve) => { started = resolve; });
+  server.beforeCreate = () => { started(); return new Promise((resolve) => { release = resolve; }); };
+  const saving = app.syncServerDraft(article.id);
+  await entered;
+  app.state.draft.body = "Typed while saving";
+  app.saveDraft(app.state.draft);
+  release();
+  await saving;
+  assert.equal(app.getDrafts()[0].body, "Typed while saving");
+  assert.equal(app.state.draft.serverId, app.getDrafts()[0].serverId);
+  assert.match(app.serverDraftLabel(app.state.draft), /pending/);
+  server.beforeCreate = null;
+  await app.syncServerDraft(article.id);
+  assert.equal(server.statuses.size, 1);
+  assert.match([...server.statuses.values()][0].params.text, /Typed while saving/);
+});
+
+test("a stale client cannot overwrite remote edits and refresh retains both versions", async () => {
+  const server = scheduledServer(), first = draftClient(server), second = draftClient(server);
+  first.app.saveDraft({ ...article });
+  await first.app.syncServerDraft(article.id);
+  await second.app.loadServerDrafts();
+  first.app.saveDraft({ ...first.app.getDrafts()[0], body: "First device" });
+  await first.app.syncServerDraft(article.id);
+  second.app.saveDraft({ ...second.app.getDrafts()[0], body: "Offline second device" });
+  await assert.rejects(second.app.syncServerDraft(article.id));
+  await second.app.loadServerDrafts();
+  assert.deepEqual(Array.from(second.app.getDrafts(), (d) => d.body).sort(), ["First device", "Offline second device"]);
+  assert.equal(new Set(second.app.getDrafts().map((d) => d.id)).size, 2);
+});
+
+test("a clean copy deleted elsewhere stays deleted after refresh", async () => {
+  const server = scheduledServer(), { app } = draftClient(server);
+  app.saveDraft({ ...article });
+  await app.syncServerDraft(article.id);
+  server.statuses.clear();
+  await app.loadServerDrafts();
+  assert.equal(app.getDrafts().length, 0);
+});
+
+test("late draft responses stay scoped to the original account", async () => {
+  const server = scheduledServer(), { app } = draftClient(server);
+  app.saveDraft({ ...article });
+  const key = app.draftKey();
+  let release, started;
+  const entered = new Promise((resolve) => { started = resolve; });
+  server.beforeCreate = () => { started(); return new Promise((resolve) => { release = resolve; }); };
+  const saving = app.syncServerDraft(article.id);
+  await entered;
+  app.state.session = { ...app.state.session, account: { id: "other" } };
+  app.state.api = new app.API("https://example.org", "other");
+  release();
+  await saving;
+  assert.equal(app.getDrafts().length, 0);
+  assert.ok(app.readStore(key, [])[0].serverId);
+});
+
+test("erasing a synced draft also removes its server copy", async () => {
+  const server = scheduledServer(), { app, context } = draftClient(server);
+  elements(context);
+  app.state.draft = { ...article };
+  app.saveDraft(app.state.draft);
+  await app.syncServerDraft(article.id);
+  Object.assign(app.state.draft, { title: "", subtitle: "", body: "" });
+  assert.equal(app.flushDraft(), true);
+  await app.syncServerDraft(article.id);
+  assert.equal(server.statuses.size, 0);
+  assert.equal(app.getDrafts().length, 0);
+});
+
+test("server limits include draft metadata and leave an exportable local copy", async () => {
+  const server = scheduledServer(), { app } = draftClient(server);
+  app.state.session.maxChars = 100;
+  app.saveDraft({ ...article });
+  await assert.rejects(app.syncServerDraft(article.id), /metadata exceed/);
+  assert.equal(server.requests.some((r) => r.method === "POST"), false);
+  assert.equal(app.getDrafts()[0].body, article.body);
+});
+
+test("schedule validation rejects missing, invalid, past and too-near dates before sending", async () => {
+  const server = scheduledServer(), { app } = draftClient(server);
+  for (const time of [undefined, null, "", "never", "2000-01-01T00:00:00Z", new Date(Date.now() + 60000).toISOString()]) {
+    await assert.rejects(app.state.api.createScheduledStatus("text", "public", "", "text/plain", time, "key"), /five minutes/);
+  }
+  assert.equal(server.requests.length, 0);
+});
+
+test("explicit scheduling sends publish-ready content, removes server drafts and supports rescheduling", async () => {
+  const server = scheduledServer(), { app, context } = draftClient(server);
+  elements(context);
+  app.state.view = "editor";
+  app.state.draft = { ...article };
+  app.saveDraft(app.state.draft);
+  await app.syncServerDraft(article.id);
+  const when = new Date(Date.now() + 3600000).toISOString();
+  await app.scheduleDraft(when);
+  assert.equal(app.state.draft, null);
+  assert.equal(app.getDrafts().length, 0);
+  assert.equal(server.statuses.size, 1);
+  let remote = [...server.statuses.values()][0];
+  assert.equal(remote.scheduled_at, when);
+  assert.equal(remote.params.text, app.draftMarkdown(article));
+  assert.equal(remote.params.content_type, "text/markdown");
+  assert.doesNotMatch(remote.params.text, /fedistack-draft/);
+  const later = new Date(Date.now() + 7200000).toISOString();
+  await app.state.api.rescheduleStatus(remote.id, later);
+  await app.loadServerDrafts();
+  assert.equal(app.state.scheduledPosts[0].scheduled_at, later);
+  assert.match(app.scheduledPostsView(), /Change time/);
+  await app.state.api.deleteScheduledStatus(remote.id);
+  await app.loadServerDrafts();
+  assert.equal(app.state.scheduledPosts.length, 0);
+});
+
+test("failed scheduling retains the local draft and reuses its idempotency key", async () => {
+  const server = scheduledServer(), { app, context } = draftClient(server);
+  elements(context);
+  app.state.view = "editor";
+  app.state.draft = { ...article };
+  server.fail = ({ method }) => method === "POST" && "Rejected";
+  const when = new Date(Date.now() + 3600000).toISOString();
+  await assert.rejects(app.scheduleDraft(when), /Rejected/);
+  assert.equal(app.getDrafts()[0].body, article.body);
+  const originalKey = app.getDrafts()[0].scheduleKey;
+  server.fail = null;
+  await app.scheduleDraft(when);
+  const posts = server.requests.filter((r) => r.method === "POST");
+  assert.equal(posts.length, 2);
+  assert.equal(posts[0].headers["Idempotency-Key"], originalKey);
+  assert.equal(posts[1].headers["Idempotency-Key"], originalKey);
+});
+
+test("schedules from other clients, media posts and unrecognized data are never adopted as drafts", async () => {
+  const server = scheduledServer(), { app } = draftClient(server);
+  const base = { params: { text: app.encodeServerDraft(article), visibility: "public" }, media_attachments: [] };
+  server.statuses.set("1", { ...base, id: "1", scheduled_at: "9999-01-01T00:00:00Z", media_attachments: [{}] });
+  server.statuses.set("2", { ...base, id: "2", scheduled_at: new Date(Date.now() + 3600000).toISOString() });
+  server.statuses.set("3", { ...base, id: "3", scheduled_at: "9999-01-01T00:00:00Z", params: { text: "<!-- broken -->" } });
+  await app.loadServerDrafts();
+  assert.equal(app.getDrafts().length, 0);
+  assert.equal(app.state.scheduledPosts.length, 3);
+  assert.equal(server.requests.every((r) => r.method === "GET"), true);
+});
+
+test("simultaneous server revisions remain individually editable and deletable", async () => {
+  const server = scheduledServer(), { app } = draftClient(server);
+  for (const [id, body] of [["a", "First revision"], ["b", "Second revision"]]) {
+    server.statuses.set(id, { id, scheduled_at: app.serverDraftTime(article.id),
+      params: { text: app.encodeServerDraft({ ...article, body }), visibility: "public" }, media_attachments: [] });
+  }
+  await app.loadServerDrafts();
+  assert.equal(app.getDrafts().length, 2);
+  assert.equal(new Set(app.getDrafts().map((d) => d.id)).size, 2);
+  await app.loadServerDrafts();
+  assert.equal(app.getDrafts().length, 2);
+  const copy = app.getDrafts().find((d) => d.serverId === "b");
+  app.saveDraft({ ...copy, body: "Edited second revision" });
+  await app.syncServerDraft(copy.id);
+  assert.equal(server.statuses.size, 2);
+  await app.deleteSyncedDraft(copy.id);
+  assert.equal(server.statuses.size, 1);
+  assert.equal(server.statuses.has("a"), true);
+});
+
+test("a background refresh leaves the active editor and its pending local changes untouched", async () => {
+  const server = scheduledServer(), { app, context } = draftClient(server);
+  elements(context);
+  app.saveDraft({ ...article });
+  await app.syncServerDraft(article.id);
+  app.state.draft = { ...app.getDrafts()[0], body: "Still typing" };
+  app.state.view = "editor";
+  await app.loadServerDrafts();
+  assert.equal(app.state.draft.body, "Still typing");
+  app.flushDraft();
+  assert.equal(app.getDrafts()[0].body, "Still typing");
+});
+
+test("a server draft rescheduled elsewhere cannot be overwritten or erased by autosave", async () => {
+  const server = scheduledServer(), { app, context } = draftClient(server);
+  elements(context);
+  app.state.draft = { ...article };
+  app.saveDraft(app.state.draft);
+  await app.syncServerDraft(article.id);
+  const remote = [...server.statuses.values()][0];
+  remote.scheduled_at = new Date(Date.now() + 3600000).toISOString();
+  Object.assign(app.state.draft, { title: "", subtitle: "", body: "" });
+  app.flushDraft();
+  await assert.rejects(app.syncServerDraft(article.id), /scheduled or changed elsewhere/);
+  assert.equal(server.statuses.size, 1);
+});
+
+test("the scheduled API paginates and rejects an unconfirmed server timestamp", async () => {
+  let count = 0;
+  const { app } = setup(async (url, options) => {
+    if (options.method === "POST") return Response.json({ id: "oops", params: { text: "text" }, scheduled_at: null });
+    count++;
+    return Response.json([{ id: String(count) }], count === 1 ? {
+      headers: { Link: '<https://example.org/api/v1/scheduled_statuses?max_id=2>; rel="next"' },
+    } : {});
+  });
+  const api = new app.API("https://example.org", "token");
+  assert.equal((await api.scheduledStatuses()).length, 2);
+  assert.equal(count, 2);
+  await assert.rejects(api.createScheduledStatus("text", "public", "", "text/plain",
+    new Date(Date.now() + 3600000).toISOString(), "key"), /did not confirm/);
+});
+
+test("continued typing shares the pending 30-second upload and sends the latest draft", async () => {
+  const server = scheduledServer(), { app, context } = draftClient(server);
+  const timers = [];
+  context.setTimeout = (run, delay) => {
+    timers.push({ run, delay, cancelled: false });
+    return timers.length;
+  };
+  context.clearTimeout = (id) => { if (timers[id - 1]) timers[id - 1].cancelled = true; };
+  app.saveDraft({ ...article });
+  app.saveDraft({ ...article, body: "Latest text after continued typing" });
+  assert.equal(server.requests.length, 0);
+  assert.equal(timers.length, 1, "typing must not postpone the pending upload");
+  assert.equal(timers[0].delay, 30000);
+  assert.equal(timers[0].cancelled, false);
+  timers[0].run();
+  await app.syncServerDraft(article.id);
+  assert.equal(server.requests.filter((r) => r.method === "POST").length, 1);
+  assert.match([...server.statuses.values()][0].params.text, /Latest text after continued typing/);
+});

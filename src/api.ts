@@ -292,6 +292,51 @@ namespace Fedi {
         "DELETE",
       );
     }
+    async scheduledStatuses(): Promise<ScheduledStatus[]> {
+      const statuses: ScheduledStatus[] = [];
+      let next: string | undefined = "/api/v1/scheduled_statuses?limit=40";
+      const visited = new Set<string>();
+      while (next && !visited.has(next)) {
+        visited.add(next);
+        const page: { data: ScheduledStatus[]; next?: string } =
+          await this.request<ScheduledStatus[]>(next);
+        statuses.push(...page.data);
+        next = page.next;
+      }
+      return statuses;
+    }
+    async scheduledStatus(id: string): Promise<ScheduledStatus> {
+      return this.get(`/api/v1/scheduled_statuses/${encodeURIComponent(id)}`);
+    }
+    async deleteScheduledStatus(id: string): Promise<void> {
+      try {
+        await this.request(`/api/v1/scheduled_statuses/${encodeURIComponent(id)}`, "DELETE");
+      } catch (error) {
+        if (!(error instanceof APIError) || error.status !== 404) throw error;
+      }
+    }
+    async createScheduledStatus(
+      text: string, visibility: Visibility, warning: string,
+      format: PostFormat, scheduledAt: string, key: string,
+    ): Promise<ScheduledStatus> {
+      // Never allow a missing/invalid date to fall through to immediate publishing.
+      validateScheduleTime(scheduledAt);
+      const result = await this.post<ScheduledStatus>("/api/v1/statuses", {
+        status: text, visibility, spoiler_text: warning,
+        content_type: format, scheduled_at: scheduledAt,
+      }, key);
+      if (!result.id || !result.params ||
+          Date.parse(result.scheduled_at || "") !== Date.parse(scheduledAt))
+        throw new Error("The server did not confirm the requested schedule. Check your server before retrying.");
+      return result;
+    }
+    async rescheduleStatus(id: string, scheduledAt: string): Promise<void> {
+      validateScheduleTime(scheduledAt);
+      const { data } = await this.request<ScheduledStatus>(
+        `/api/v1/scheduled_statuses/${encodeURIComponent(id)}`, "PUT", { scheduled_at: scheduledAt });
+      if (Date.parse(data.scheduled_at || "") !== Date.parse(scheduledAt))
+        throw new Error("The server did not confirm the new publication time.");
+    }
     async createStatus(
       text: string,
       visibility: Visibility,

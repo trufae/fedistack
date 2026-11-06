@@ -73,10 +73,12 @@ namespace Fedi {
         )
       : [];
   }
-  export function saveDraft(draft: Draft): boolean {
+  export function saveDraft(draft: Draft, sync = true): boolean {
     const drafts = getDrafts().filter((d) => d.id !== draft.id);
     drafts.unshift(draft);
-    return writeStore(draftKey(), drafts);
+    const saved = writeStore(draftKey(), drafts);
+    if (saved && sync) queueDraftSync(draft);
+    return saved;
   }
   export function removeDraft(id: string): boolean {
     return writeStore(

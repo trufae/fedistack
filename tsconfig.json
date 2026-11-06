@@ -18,6 +18,7 @@
     "src/ui.ts",
     "src/app.ts",
     "src/editor.ts",
+    "src/server-drafts.ts",
     "src/messages.ts",
     "src/interests.ts",
     "src/main.ts"

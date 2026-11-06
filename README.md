@@ -15,7 +15,7 @@ If you have a [Mastodon](https://mastodon.social/) account all your data will re
 - **Find your next read.** Browse your following, local, and federated feeds. Discover topics and languages, and save favorites for later.
 - **Give your ideas space.** Write articles in Markdown, preview before publishing, and settle into Zen mode when you need to focus.
 - **Stay in the conversation.** Post notes, reply to readers, follow authors, and browse your direct messages.
-- **Keep working at your own pace.** Autosave drafts on your device, pick them up from Your writing, and export them as Markdown.
+- **Keep working at your own pace.** Autosave drafts on your device and sync them to your server, resume on another device, and export Markdown backups. Schedule publications for automatic release.
 - **Read comfortably anywhere.** A responsive layout, light and dark themes, and a reading focus mode for phones and desktops.
 - **Host it yourself.** A static site with zero runtime dependencies, no analytics, and no application server to maintain.
 

@@ -56,10 +56,13 @@ namespace Fedi {
       : d.title || d.body || d.subtitle
         ? "pending"
         : "empty";
-    return `<div class="draft-save-state"><span class="draft-badge">${d.editingId ? "Editing published writing · unsent changes" : "Draft · unpublished"}</span><span id="save-status" role="status" aria-live="polite" data-state="${status}" title="Drafts are saved only in this browser">${saved ? savedLabel(d.updated) : status === "empty" ? "Not saved yet · start writing" : "Unsaved changes"}</span></div>`;
+    return `<div class="draft-save-state"><span class="draft-badge">${d.editingId ? "Editing published writing · unsent changes" : "Draft · unpublished"}</span><span id="save-status" role="status" aria-live="polite" data-state="${status}">${saved ? savedLabel(d.updated) : status === "empty" ? "Not saved yet · start writing" : "Unsaved changes"}</span>${state.session ? `<span id="server-save-status" role="status" aria-live="polite">${escapeHTML(serverDraftLabel(d))}</span>` : ""}</div>`;
   }
   function publicationSettings(d: Draft): string {
     return `<details class="publishing-options"><summary>${d.kind === "post" ? "Audience & content warning" : "Publication settings"} ${icon("down")}</summary><div><label>Who can read this?${d.editingId ? " (unchanged when editing)" : ""}<select id="draft-visibility" ${d.editingId ? "disabled" : ""}><option value="public" ${d.visibility === "public" ? "selected" : ""}>Everyone · public</option><option value="unlisted" ${d.visibility === "unlisted" ? "selected" : ""}>Unlisted · visible by link</option><option value="private" ${d.visibility === "private" ? "selected" : ""}>Followers only</option></select></label><label>Content warning (optional)<input id="draft-warning" value="${escapeHTML(d.warning)}" placeholder="Let readers choose before opening"></label></div>${d.kind === "post" ? action("export-current", "Export draft .md", "", "text-button") : ""}</details>`;
+  }
+  function scheduleButton(d: Draft): string {
+    return state.session && !d.editingId ? action("schedule", "Schedule", "", "button subtle") : "";
   }
   function noteComposerView(d: Draft): string {
     const me = state.session?.account || demoMe;
@@ -68,7 +71,7 @@ namespace Fedi {
       <label class="sr-only" for="draft-body">Note text</label><textarea id="draft-body" class="note-input" placeholder="What's on your mind?" spellcheck="true">${escapeHTML(d.body)}</textarea>
       ${publicationSettings(d)}
       <div class="note-save-row">${draftStatus(d)}<span id="character-count"></span></div>
-      <footer class="note-footer"><a class="text-button" href="#drafts">Save & close</a><button id="note-publish" class="button primary" data-action="publish-note" ${!d.body.trim() ? "disabled" : ""}>${d.editingId ? "Update note" : "Note"}</button></footer>
+      <footer class="note-footer"><a class="text-button" href="#drafts">Save & close</a>${scheduleButton(d)}<button id="note-publish" class="button primary" data-action="publish-note" ${!d.body.trim() ? "disabled" : ""}>${d.editingId ? "Update note" : "Note"}</button></footer>
     </section>`;
   }
   export function editorView(): string {
@@ -87,7 +90,7 @@ namespace Fedi {
     ];
     const toolbar = `<div class="editor-toolbar" role="toolbar" aria-label="Markdown formatting">${tools.map(([name, label, title]) => `<button type="button" data-action="format" data-id="${name}" title="${title}" aria-label="${title}">${label}</button>`).join("")}<span>MARKDOWN</span></div>`;
     return `<header class="page-top editor-top"><a class="text-button" href="#drafts">${icon("back")} Your writing</a><div>${draftStatus(d)}${state.preview ? '<button class="zen-preview-edit text-button" data-action="preview">Edit</button>' : ""}<button class="button subtle small-button zen-toggle" data-action="focus" aria-label="${state.focus ? "Exit" : "Enter"} Zen mode" aria-pressed="${state.focus}" title="Zen mode (⌘/Ctrl+Shift+F)">${icon("expand")}<span data-zen-label>${state.focus ? "Exit Zen" : "Zen mode"}</span></button></div></header>
-      <div class="editor-controls"><span class="editor-kind">Article</span><div><button class="button subtle" data-action="preview">${icon(state.preview ? "edit" : "eye")} ${state.preview ? "Edit" : "Preview"}</button><button class="button primary" data-action="publish">${d.editingId ? "Update article" : state.session ? "Publish" : "Publish in demo"} ${icon("arrow")}</button></div></div>
+      <div class="editor-controls"><span class="editor-kind">Article</span><div><button class="button subtle" data-action="preview">${icon(state.preview ? "edit" : "eye")} ${state.preview ? "Edit" : "Preview"}</button>${scheduleButton(d)}<button class="button primary" data-action="publish">${d.editingId ? "Update article" : state.session ? "Publish" : "Publish in demo"} ${icon("arrow")}</button></div></div>
       <div class="editor-paper">${
         state.preview
           ? `<div class="article-preview-heading"><span class="eyebrow">READING PREVIEW</span><h1>${escapeHTML(d.title || "Untitled article")}</h1>${d.subtitle ? `<p class="reader-subtitle">${escapeHTML(d.subtitle)}</p>` : ""}<div class="post-byline">${avatar(state.session?.account || demoMe)}<div><strong>${escapeHTML(state.session?.account.name || "You")}</strong><div class="byline-sub">${readingTime(d.body)} min read</div></div></div></div><div class="prose reading-prose">${markdown(d.body) || '<p class="muted">Your story will take shape here.</p>'}</div>`
@@ -159,8 +162,11 @@ namespace Fedi {
     if (
       before !==
       JSON.stringify([d.title, d.subtitle, d.body, d.warning, d.visibility])
-    )
+    ) {
       d.publishKey = undefined;
+      d.scheduleKey = undefined;
+      d.scheduleTime = undefined;
+    }
     saveIndicator("Unsaved changes · saving…", "pending");
     clearTimeout(saveTimer);
     saveTimer = setTimeout(flushDraft, 300);
@@ -168,10 +174,11 @@ namespace Fedi {
   }
   export function flushDraft(): boolean {
     clearTimeout(saveTimer);
+    if (publishing) return true;
     const d = state.draft;
     if (!d) return true;
     const empty = !d.title.trim() && !d.body.trim() && !d.subtitle.trim();
-    const success = empty ? removeDraft(d.id) : saveDraft(d);
+    const success = empty && !d.serverId && !d.serverSaveKey ? removeDraft(d.id) : saveDraft(d);
     saveIndicator(
       success
         ? empty
@@ -180,6 +187,8 @@ namespace Fedi {
         : "Save failed · export a copy",
       success ? (empty ? "empty" : "saved") : "error",
     );
+    const serverStatus = document.getElementById("server-save-status");
+    if (serverStatus) serverStatus.textContent = serverDraftLabel(d);
     return success;
   }
   export function formatSelection(kind: string): void {
@@ -279,10 +288,12 @@ namespace Fedi {
     publishing = true;
     try {
       d.publishKey ||= uid();
-      if (!saveDraft(d))
+      if (!saveDraft(d, false))
         throw new Error(
           "Could not save your draft before publishing. Export a copy first and free up browser storage.",
         );
+      await deleteSyncedDraft(d.id, true);
+      if (state.api !== api) return;
       let post: Post;
       if (api && session)
         post = d.editingId
@@ -356,6 +367,32 @@ namespace Fedi {
             : "Published in your offline demo.",
       );
       navigate(`read/${encodeURIComponent(post.id)}`);
+    } finally {
+      publishing = false;
+    }
+  }
+  export async function scheduleDraft(scheduledAt: string): Promise<void> {
+    validateScheduleTime(scheduledAt);
+    const d = state.draft, api = state.api, session = state.session, key = draftKey();
+    if (publishing || !d || !api || !session) throw new Error("Open a draft and connect an account before scheduling.");
+    if (d.editingId) throw new Error("Updates to published posts cannot be scheduled.");
+    const problem = publishProblem(d, session);
+    if (problem) throw new Error(problem);
+    publishing = true;
+    try {
+      if (d.scheduleTime !== scheduledAt) d.scheduleKey = undefined;
+      d.scheduleKey ||= uid();
+      d.scheduleTime = scheduledAt;
+      if (!saveDraft(d, false)) throw new Error("Could not save your draft before scheduling. Export a copy first.");
+      await deleteSyncedDraft(d.id, true);
+      if (state.api !== api) return;
+      await api.createScheduledStatus(publicationPayload(d, session.format), d.visibility,
+        d.warning, session.format, scheduledAt, d.scheduleKey);
+      if (!writeStore(key, readStore<Draft[]>(key, []).filter((x) => x.id !== d.id)))
+        throw new Error("Publication is scheduled, but the local draft could not be removed. Check Scheduled before retrying.");
+      if (state.api !== api) return;
+      state.draft = null;
+      toast("Publication scheduled. Your server will publish it automatically.");
     } finally {
       publishing = false;
     }

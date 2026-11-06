@@ -22,6 +22,7 @@ make test
 | `src/api.ts`      | Transport, capabilities, OAuth, rate limits, response mapping |
 | `src/markdown.ts` | Escaped Markdown rendering and HTML conversion                |
 | `src/storage.ts`  | Defensive browser storage and account-scoped drafts           |
+| `src/server-drafts.ts` | Server draft synchronization and scheduled-post management |
 | `src/app.ts`      | Routes, state, feed, reader, library, settings                |
 | `src/editor.ts`   | Draft lifecycle, formatting, preview, single-post publishing  |
 | `src/messages.ts` | Conversation loading, participants, private replies           |
@@ -32,7 +33,7 @@ make test
 
 TypeScript namespaces compile into one classic script with `tsc --outFile`; ES-module loading is deliberately avoided so opening the distribution from disk remains possible. Styling and local SVG illustrations are original to this project.
 
-Tests cover publishing limits, Markdown escaping, account-scoped drafts, keyboard formatting, API transport, OAuth state/PKCE, file-origin login, rate limiting, DM audiences, view rendering, and static serving. Browser visual QA and authenticated end-to-end actions require a browser session and a real account; the automated tests use mock API responses and do not publish to an account.
+Tests cover publishing limits, Markdown escaping, account-scoped drafts, server draft round-trips and conflicts, scheduled publishing and retries, keyboard formatting, API transport, OAuth state/PKCE, file-origin login, rate limiting, DM audiences, view rendering, and static serving. Browser visual QA and authenticated end-to-end actions require a browser session and a real account; the automated tests use mock API responses and do not publish to an account.
 
 ## Continuous integration
 

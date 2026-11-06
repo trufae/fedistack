@@ -1168,12 +1168,14 @@ footer p {
   padding-top: 13px;
   padding-bottom: 13px;
 }
-.draft-save-state #save-status {
+.draft-save-state #save-status,
+.draft-save-state #server-save-status {
   font-size: 11px;
   color: var(--muted);
   display: inline-flex;
   gap: 6px;
   align-items: center;
+  overflow-wrap: anywhere;
 }
 .draft-save-state {
   min-width: 0;
@@ -2215,7 +2217,8 @@ summary {
   .editor-top .zen-toggle {
     flex-shrink: 0;
   }
-  .draft-save-state #save-status {
+  .draft-save-state #save-status,
+  .draft-save-state #server-save-status {
     font-size: 9px;
   }
   .editor-controls {
@@ -2595,6 +2598,7 @@ label.language-add select {
 }
 .note-footer {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 20px;

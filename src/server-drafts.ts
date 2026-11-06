@@ -298,12 +298,15 @@ namespace Fedi {
     return state.scheduledPosts.map((s) => `<article class="draft-card"><div><span class="eyebrow">${s.scheduled_at ? `Scheduled · ${escapeHTML(new Date(s.scheduled_at).toLocaleString())}` : "No publication date"}</span><h2>${escapeHTML(plainText(s.params.text).slice(0, 100) || "Scheduled publication")}</h2><p>${escapeHTML(s.params.spoiler_text || "")}</p></div><div class="draft-actions">${action("reschedule", "Change time", s.id, "button subtle")}${action("cancel-schedule", "Cancel publication", s.id, "text-button muted")}</div></article>`).join("") || emptyState("Writing for later", "Choose Schedule in the editor to have your server publish automatically, even when this browser is closed.");
   }
 
-  export function scheduleDialog(id = ""): void {
+  export async function scheduleDialog(id = ""): Promise<void> {
     if (!state.api || !state.session) throw new Error("Connect an account to schedule a publication.");
     if (!id) {
       captureDraft();
       if (!flushDraft()) throw new Error("Save or export your draft before scheduling.");
       if (!state.draft || state.draft.editingId) throw new Error("Only new publications can be scheduled.");
+      const d = state.draft, api = state.api, session = state.session;
+      await refreshSessionCapabilities();
+      if (state.draft !== d || state.api !== api || state.session !== session) return;
       const problem = publishProblem(state.draft, state.session);
       if (problem) throw new Error(problem);
     }

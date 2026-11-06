@@ -292,7 +292,7 @@ namespace Fedi {
         formatSelection(id);
         break;
       case "publish":
-        reviewPublication();
+        await reviewPublication();
         break;
       case "publish-note":
         captureDraft();
@@ -325,10 +325,10 @@ namespace Fedi {
         render();
         break;
       case "schedule":
-        scheduleDialog();
+        await scheduleDialog();
         break;
       case "reschedule":
-        scheduleDialog(id);
+        await scheduleDialog(id);
         break;
       case "refresh-server-drafts":
         await loadServerDrafts();
@@ -572,6 +572,10 @@ namespace Fedi {
         formError(error);
       }
     } else {
+      // Saved sessions retain credentials, but server support is not permanent.
+      void refreshSessionCapabilities().catch(() => {
+        // Allow offline reading and writing; publishing checks again before sending.
+      });
       void loadServerDrafts().then(() => {
         if (state.view === "drafts") render();
       });

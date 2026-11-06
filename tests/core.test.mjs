@@ -95,6 +95,170 @@ const article = {
   updated: new Date().toISOString(),
 };
 
+function staleCapabilityClient({ formats = ["text/plain", "text/html", "text/markdown"], remember = false, metadata } = {}) {
+  const requests = [], localStorage = storage(), sessionStorage = storage();
+  const session = {
+    server: "https://nyap.example", token: "test-token", account: { id: "me" },
+    maxChars: 32768, format: "text/plain", software: "4.2.0+nyap.0.1.0", remember,
+  };
+  (remember ? localStorage : sessionStorage).setItem("fedistack:session", JSON.stringify(session));
+  const info = { version: session.software, configuration: { statuses: {
+    max_characters: 32768, supported_mime_types: formats,
+  } } };
+  const client = setup(async (url, options) => {
+    const path = new URL(url).pathname;
+    requests.push({ path, ...options });
+    if (/^\/api\/v[12]\/instance$/.test(path))
+      return metadata ? metadata(path, info) : Response.json(info);
+    if (["/api/v1/lists", "/api/v1/scheduled_statuses"].includes(path)) return Response.json([]);
+    if (options.method === "POST" && path === "/api/v1/statuses" ||
+        options.method === "PUT" && path === "/api/v1/statuses/existing") {
+      const body = JSON.parse(options.body);
+      if (body.scheduled_at) return Response.json({
+        id: "scheduled", scheduled_at: body.scheduled_at, media_attachments: [],
+        params: { text: body.status, content_type: body.content_type, visibility: body.visibility },
+      });
+      return Response.json({
+        id: "published", content: body.status, created_at: new Date().toISOString(),
+        account: { id: "me", username: "writer", acct: "writer", note: "", avatar: "", url: "https://nyap.example/@writer" },
+        visibility: body.visibility || "public", favourites_count: 0, replies_count: 0,
+      });
+    }
+    throw new Error(`Unexpected request: ${options.method} ${path}`);
+  }, { localStorage, sessionStorage });
+  const { app, context } = client, { get } = elements(context);
+  const modal = get("modal");
+  modal.querySelector = () => null;
+  modal.showModal = () => { modal.open = true; };
+  modal.close = () => { modal.open = false; };
+  app.htmlToMarkdown = (text) => text;
+  app.state.api = new app.API(session.server, session.token);
+  app.state.draft = { ...article };
+  return { ...client, get, requests };
+}
+
+for (const remember of [false, true]) test(`restoring a ${remember ? "remembered" : "tab"} session refreshes stale publishing capabilities`, async () => {
+  const { app, context, get, requests } = staleCapabilityClient({ remember });
+  const draft = app.state.draft;
+  context.document.addEventListener = () => {};
+  context.window = { addEventListener() {} };
+  context.matchMedia = () => ({ matches: false, addEventListener() {} });
+  get("modal").addEventListener = () => {};
+  app.route = async () => {};
+  await app.boot();
+  await new Promise(setImmediate);
+  assert.equal(app.state.session.format, "text/markdown");
+  assert.equal(app.state.session.maxChars, 32768);
+  assert.equal(app.state.session.token, "test-token");
+  assert.equal(app.state.draft, draft);
+  assert.equal(app.loadSession().format, "text/markdown");
+  assert.equal((remember ? context.sessionStorage : context.localStorage).getItem("fedistack:session"), null);
+  const metadata = requests.filter((r) => r.path.endsWith("/instance"));
+  assert.deepEqual(metadata.map((r) => r.path).sort(), ["/api/v1/instance", "/api/v2/instance"]);
+  assert.ok(metadata.every((r) => r.cache === "no-store"));
+});
+
+for (const format of ["text/html", "text/markdown"]) test(`a stale plain-text session can review and publish an article as ${format}`, async () => {
+  const { app, context, get, requests } = staleCapabilityClient({ formats: ["text/plain", format] });
+  app.state.view = "editor";
+  const note = { textContent: "Plain text only" };
+  context.document.querySelector = (selector) => selector === ".editor-note" ? note : null;
+  await app.reviewPublication();
+  assert.match(get("modal").innerHTML, /Ready to share your writing/);
+  assert.doesNotMatch(get("toast").textContent, /does not advertise/);
+  assert.match(note.textContent, format === "text/html" ? /Rich text/ : /Native Markdown/);
+  assert.equal(app.getDrafts()[0].body, article.body);
+  // Confirmation must also refresh, even if the saved session is stale again.
+  app.state.session.format = "text/plain";
+  await app.publishDraft();
+  const writes = requests.filter((r) => r.method === "POST");
+  assert.equal(writes.length, 1);
+  const body = JSON.parse(writes[0].body);
+  assert.equal(body.content_type, format);
+  assert.match(body.status, format === "text/html" ? /<h1>An independent publication<\/h1>/ : /^# An independent publication\n/);
+  assert.match(body.status, format === "text/html" ? /<strong>Hello<\/strong>/ : /\*\*Hello\*\*/);
+  assert.equal(app.state.draft, null);
+});
+
+test("publishing an edit refreshes its format before sending the update", async () => {
+  const { app, requests } = staleCapabilityClient();
+  app.state.draft.editingId = "existing";
+  await app.publishDraft();
+  const updates = requests.filter((r) => r.method === "PUT");
+  assert.equal(updates.length, 1);
+  assert.equal(JSON.parse(updates[0].body).content_type, "text/markdown");
+  assert.equal(requests.some((r) => r.method === "POST"), false);
+});
+
+test("scheduling refreshes stale capabilities both before the dialog and before sending", async () => {
+  const { app, get, requests } = staleCapabilityClient();
+  await app.scheduleDialog();
+  assert.match(get("modal").innerHTML, /Schedule publication/);
+  app.state.session.format = "text/plain";
+  const time = new Date(Date.now() + 3600000).toISOString();
+  await app.scheduleDraft(time);
+  const writes = requests.filter((r) => r.method === "POST");
+  assert.equal(writes.length, 1);
+  const body = JSON.parse(writes[0].body);
+  assert.equal(body.content_type, "text/markdown");
+  assert.equal(body.scheduled_at, time);
+  assert.match(body.status, /^# An independent publication\n/);
+  assert.equal(app.state.draft, null);
+});
+
+test("a server that still advertises only plain text retains the article and sends no publication", async () => {
+  const { app, get, requests } = staleCapabilityClient({ formats: ["text/plain"] });
+  await app.reviewPublication();
+  assert.match(get("toast").textContent, /does not advertise Markdown or HTML/);
+  await assert.rejects(app.publishDraft(), /does not advertise Markdown or HTML/);
+  assert.equal(requests.some((r) => r.method !== "GET"), false);
+  assert.equal(app.getDrafts()[0].body, article.body);
+});
+
+test("failed capability refresh preserves cached support and saves the draft before publishing", async () => {
+  const { app, requests } = staleCapabilityClient({ metadata: () => new Response(null, { status: 503 }) });
+  app.state.session.format = "text/html";
+  await assert.rejects(app.publishDraft(), /Could not read this server’s publishing capabilities/);
+  assert.equal(app.state.session.format, "text/html");
+  assert.equal(app.state.draft.body, article.body);
+  assert.equal(app.getDrafts()[0].body, article.body);
+  assert.equal(requests.some((r) => r.method !== "GET"), false);
+});
+
+test("a capability response after logout cannot restore the session or publish its draft", async () => {
+  let release;
+  const waiting = new Promise((resolve) => { release = resolve; });
+  const { app, context, requests } = staleCapabilityClient({ metadata: async (_, info) => {
+    await waiting;
+    return Response.json(info);
+  } });
+  const publishing = app.publishDraft();
+  app.clearSession();
+  app.state.api = null;
+  app.state.session = null;
+  app.state.draft = null;
+  release();
+  await publishing;
+  assert.equal(app.state.session, null);
+  assert.equal(app.loadSession(), null);
+  assert.equal(context.localStorage.getItem("fedistack:session"), null);
+  assert.equal(requests.some((r) => r.method !== "GET"), false);
+});
+
+test("repeated publish clicks during capability refresh create one publication", async () => {
+  let release;
+  const waiting = new Promise((resolve) => { release = resolve; });
+  const { app, requests } = staleCapabilityClient({ metadata: async (_, info) => {
+    await waiting;
+    return Response.json(info);
+  } });
+  const first = app.publishDraft();
+  await app.publishDraft();
+  release();
+  await first;
+  assert.equal(requests.filter((r) => r.method === "POST").length, 1);
+});
+
 test("the distribution uses local classic scripts and assets, with no module/file fetch requirement", () => {
   const html = readFileSync(
     new URL("../dist/index.html", import.meta.url),
@@ -2822,6 +2986,7 @@ test("Notes preserve literal text on plain-text servers and retain drafts if pub
   };
   let reject = true;
   app.state.api = {
+    capabilities: async () => ({ ...longServer, format: "text/plain" }),
     createStatus: async (text, visibility, reply, warning, key, format) => {
       assert.equal(text, body);
       assert.equal(visibility, "private");
@@ -2903,6 +3068,11 @@ function scheduledServer() {
       requests.push({ path, method, body, headers: options.headers });
       const failure = server.fail?.({ path, method, body });
       if (failure) return new Response(JSON.stringify({ error: failure }), { status: 422 });
+      if (/^\/api\/v[12]\/instance$/.test(path))
+        return Response.json({ configuration: { statuses: {
+          max_characters: longServer.maxChars,
+          supported_mime_types: ["text/plain", longServer.format],
+        } } });
       if (method === "POST" && path === "/api/v1/statuses") {
         await server.beforeCreate?.();
         const key = options.headers["Idempotency-Key"];

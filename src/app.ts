@@ -645,6 +645,18 @@ namespace Fedi {
     );
   }
 
+  export async function refreshSessionCapabilities(): Promise<void> {
+    const api = state.api, session = state.session;
+    if (!api || !session) return;
+    const capabilities = await api.capabilities();
+    if (state.api !== api || state.session !== session) return;
+    Object.assign(session, capabilities);
+    // Keep the existing account, drafts, and choice of sign-in storage.
+    writeStore("session", session, session.remember !== true);
+    if (state.view === "settings") render();
+    if (state.view === "editor") updateEditorMeta();
+  }
+
   export async function setSession(session: Session): Promise<void> {
     if (!flushDraft())
       throw new Error(

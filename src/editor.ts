@@ -119,6 +119,9 @@ namespace Fedi {
   export function updateEditorMeta(): void {
     const d = state.draft;
     if (!d) return;
+    const note = document.querySelector(".editor-note");
+    if (note && state.session)
+      note.textContent = `${state.session.maxChars.toLocaleString()} characters per publication · ${state.session.format === "text/markdown" ? "Native Markdown" : state.session.format === "text/html" ? "Rich text" : "Plain text only"}`;
     const words = d.body.trim() ? d.body.trim().split(/\s+/).length : 0;
     const count = Array.from(
       publicationPayload(d, state.session?.format || "text/markdown") +
@@ -249,10 +252,12 @@ namespace Fedi {
         : "Welcome back.",
     );
   }
-  export function reviewPublication(): void {
+  export async function reviewPublication(): Promise<void> {
     flushDraft();
-    const d = state.draft;
+    const d = state.draft, api = state.api, session = state.session;
     if (!d) return;
+    await refreshSessionCapabilities();
+    if (state.draft !== d || state.api !== api || state.session !== session) return;
     const capabilities = state.session || {
       maxChars: 100000,
       format: "text/markdown" as const,
@@ -278,15 +283,6 @@ namespace Fedi {
       api = state.api,
       session = state.session,
       key = draftKey();
-    const problem = publishProblem(
-      d,
-      session || {
-        maxChars: 100000,
-        format: "text/markdown",
-        software: "demo",
-      },
-    );
-    if (problem) throw new Error(problem);
     publishing = true;
     try {
       d.publishKey ||= uid();
@@ -294,6 +290,17 @@ namespace Fedi {
         throw new Error(
           "Could not save your draft before publishing. Export a copy first and free up browser storage.",
         );
+      await refreshSessionCapabilities();
+      if (state.draft !== d || state.api !== api || state.session !== session) return;
+      const problem = publishProblem(
+        d,
+        session || {
+          maxChars: 100000,
+          format: "text/markdown",
+          software: "demo",
+        },
+      );
+      if (problem) throw new Error(problem);
       await deleteSyncedDraft(d.id, true);
       if (state.api !== api) return;
       let post: Post;
@@ -380,14 +387,16 @@ namespace Fedi {
     const d = state.draft, api = state.api, session = state.session, key = draftKey();
     if (publishing || !d || !api || !session) throw new Error("Open a draft and connect an account before scheduling.");
     if (d.editingId) throw new Error("Updates to published posts cannot be scheduled.");
-    const problem = publishProblem(d, session);
-    if (problem) throw new Error(problem);
     publishing = true;
     try {
       if (d.scheduleTime !== scheduledAt) d.scheduleKey = undefined;
       d.scheduleKey ||= uid();
       d.scheduleTime = scheduledAt;
       if (!saveDraft(d, false)) throw new Error("Could not save your draft before scheduling. Export a copy first.");
+      await refreshSessionCapabilities();
+      if (state.draft !== d || state.api !== api || state.session !== session) return;
+      const problem = publishProblem(d, session);
+      if (problem) throw new Error(problem);
       await deleteSyncedDraft(d.id, true);
       if (state.api !== api) return;
       await api.createScheduledStatus(publicationPayload(d, session.format), d.visibility,

@@ -131,6 +131,8 @@ namespace Fedi {
           credentials: "omit",
           redirect: "error",
           referrerPolicy: "no-referrer",
+          // Instance capabilities can change while an account stays signed in.
+          cache: /^\/api\/v[12]\/instance$/.test(url.pathname) ? "no-store" : "default",
         });
         if (!response.ok) {
           const detail = responseError(

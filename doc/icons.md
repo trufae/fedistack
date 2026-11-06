@@ -32,14 +32,15 @@ To export elsewhere, pass an output directory; relative paths are resolved from 
 ./scripts/generate-icons.sh /tmp/fedistack-icons
 ```
 
-The script renders each PNG directly from the SVG, preserving transparent corners. It then packs the small PNGs into a multi-resolution ICO.
+The script renders each PNG directly from the SVG, preserving transparent corners in the general exports. The Apple touch icon fills those corners with orange so iOS can apply its own rounded mask. The script also packs the small PNGs into a multi-resolution ICO.
 
 | Output in `public/assets/` | Size / purpose |
 | --- | --- |
 | `icon-16.png`, `icon-32.png`, `icon-48.png` | Browser and desktop icons |
 | `icon-64.png`, `icon-128.png`, `icon-256.png`, `icon-512.png` | General app and project artwork |
-| `icon-180.png` | Apple touch icon |
+| `icon-180.png` | 180-pixel export with transparent corners |
+| `apple-touch-icon.png` | Opaque 180-pixel Apple Home Screen icon |
 | `icon-192.png` | Mobile icon export |
 | `favicon.ico` | 16, 32, and 48 pixel images in one file |
 
-Commit the regenerated files with SVG changes. `make` copies them into `dist/assets/`; it does not need the image tools. The page declares the SVG, ICO fallback, 32-pixel PNG, and Apple touch icon. CI also runs the generator before building and testing.
+Commit the regenerated files with SVG changes. `make` copies them into `dist/assets/`; it does not need the image tools. The page declares the SVG, ICO fallback, 32-pixel PNG, and Apple touch icon. The web app manifest declares the 192- and 512-pixel PNGs and standalone launch mode. CI also runs the generator before building and testing.

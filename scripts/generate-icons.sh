@@ -29,6 +29,9 @@ for size in 16 32 48 64 128 180 192 256 512; do
   rsvg-convert --width "$size" --height "$size" \
     --output "$output_dir/icon-$size.png" "$source_icon"
 done
+# iOS supplies the rounded mask; fill the source's transparent corners.
+rsvg-convert --width 180 --height 180 --background-color '#d75b34' \
+  --output "$output_dir/apple-touch-icon.png" "$source_icon"
 "$imagemagick" "$output_dir/icon-16.png" "$output_dir/icon-32.png" \
   "$output_dir/icon-48.png" "$output_dir/favicon.ico"
 

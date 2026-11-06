@@ -7,7 +7,7 @@ all: dist
 dist:
 	mkdir -p dist/assets
 	$(TSC) --project tsconfig.json
-	cp public/index.html public/styles.css dist/
+	cp public/index.html public/styles.css public/manifest.webmanifest dist/
 	cp public/assets/*.svg public/assets/*.png public/assets/*.ico dist/assets/
 
 icons:

@@ -30,10 +30,14 @@ test("the local server serves the complete static distribution and blocks traver
     ["/", "text/html"],
     ["/app.js", "text/javascript"],
     ["/styles.css", "text/css"],
+    ["/manifest.webmanifest", "application/manifest+json"],
     ["/assets/slow-web.svg", "image/svg+xml"],
     ["/assets/favicon.svg", "image/svg+xml"],
     ["/assets/icon-32.png", "image/png"],
     ["/assets/icon-180.png", "image/png"],
+    ["/assets/apple-touch-icon.png", "image/png"],
+    ["/assets/icon-192.png", "image/png"],
+    ["/assets/icon-512.png", "image/png"],
     ["/assets/favicon.ico", "image/x-icon"],
   ]) {
     const response = await fetch(origin + path);

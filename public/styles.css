@@ -2530,8 +2530,8 @@ label.language-add select {
   background: transparent;
   font-size: 18px;
   line-height: 1.6;
-  min-height: 180px;
-  height: clamp(180px, 35vh, 360px);
+  min-height: 120px;
+  height: 120px;
   resize: vertical;
 }
 .note-input:focus-visible {

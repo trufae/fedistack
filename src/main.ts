@@ -79,7 +79,9 @@ namespace Fedi {
     );
   }
   async function checkServer(button: HTMLButtonElement): Promise<void> {
-    const input = document.querySelector<HTMLInputElement>('[name="server"]');
+    const input = document.getElementById(
+      "fediverse-server",
+    ) as HTMLInputElement | null;
     if (!input?.value) {
       input?.focus();
       throw new Error("Enter your server’s domain first.");
@@ -106,6 +108,9 @@ namespace Fedi {
         break;
       case "connect":
         connectDialog();
+        break;
+      case "connect-token":
+        connectTokenDialog();
         break;
       case "account":
         navigate("settings");
@@ -312,12 +317,12 @@ namespace Fedi {
       navigate("discover");
       return;
     }
-    if (form.id === "connect-form") {
-      const token = value("token");
-      if (token)
-        await setSession(await new API(value("server"), token).verify());
-      else await startOAuth(value("server"), data.has("manual"));
-    }
+    if (form.id === "connect-form")
+      await startOAuth(value("fediverse-server"), data.has("manual"));
+    if (form.id === "token-connect-form")
+      await setSession(
+        await new API(form.dataset.server!, value("token")).verify(),
+      );
     if (form.id === "oauth-form")
       await setSession(await finishOAuth(value("code")));
     if (form.id === "recipient-form") await findRecipient(value("recipient"));

@@ -152,6 +152,72 @@ test("server addresses only allow HTTPS origins without credentials or paths", (
     assert.throws(() => app.serverURL(url));
 });
 
+test("the server picker contains no password field and validates the host before token entry", () => {
+  const { app, context } = setup();
+  const { get } = elements(context);
+  const modal = get("modal");
+  modal.querySelector = () => null;
+  modal.showModal = () => { modal.open = true; };
+  app.connectDialog();
+  const picker = modal.innerHTML;
+  assert.doesNotMatch(picker, /type="password"/);
+  assert.match(picker, /name="fediverse-server"/);
+  const server = get("fediverse-server");
+  server.reportValidity = () => false;
+  app.connectTokenDialog();
+  assert.equal(modal.innerHTML, picker);
+  server.reportValidity = () => true;
+  server.value = "https://example.org/unexpected-path";
+  assert.throws(() => app.connectTokenDialog());
+  assert.equal(modal.innerHTML, picker);
+  server.value = " EXAMPLE.org ";
+  app.connectTokenDialog();
+  assert.match(modal.innerHTML, /id="token-connect-form" data-server="https:\/\/example.org"/);
+  assert.match(modal.innerHTML, /type="password" name="token" required/);
+  assert.doesNotMatch(modal.innerHTML, /name="fediverse-server"/);
+});
+
+test("server submission starts OAuth while token submission verifies the chosen server", async () => {
+  const { app, context } = setup();
+  const { get } = elements(context);
+  const listeners = new Map();
+  context.document.addEventListener = (name, listener) => listeners.set(name, listener);
+  context.window = { addEventListener() {} };
+  context.matchMedia = () => ({ matches: false, addEventListener() {} });
+  context.FormData = class {
+    constructor(form) { return new Map(form.fields); }
+  };
+  get("modal").addEventListener = () => {};
+  app.route = async () => {};
+  await app.boot();
+  const oauth = [], sessions = [], errors = [];
+  app.startOAuth = async (...args) => { oauth.push(args); };
+  app.setSession = async (session) => { sessions.push(session); };
+  app.formError = (error) => { errors.push(error); };
+  app.API.prototype.verify = async function () {
+    return { server: this.server, token: this.token };
+  };
+  const submit = async (id, fields, dataset = {}) => {
+    const form = { id, fields, dataset, querySelector: () => null };
+    listeners.get("submit")({ target: form, preventDefault() {} });
+    await new Promise(setImmediate);
+    assert.equal(form.dataset.busy, undefined);
+  };
+  await submit("connect-form", [
+    ["fediverse-server", " EXAMPLE.org "],
+    ["manual", "on"],
+    ["token", "unrelated-autofill"],
+  ]);
+  assert.deepEqual(oauth, [["EXAMPLE.org", true]]);
+  assert.equal(sessions.length, 0);
+  await submit("token-connect-form", [["token", " application-token "]], {
+    server: "https://example.org",
+  });
+  assert.deepEqual(sessions, [{ server: "https://example.org", token: "application-token" }]);
+  assert.equal(oauth.length, 1);
+  assert.deepEqual(errors, []);
+});
+
 test("infosec.exchange and Akkoma capabilities enable single long Markdown publications", () => {
   const { app } = setup();
   const glitch = app.detectCapabilities(undefined, {

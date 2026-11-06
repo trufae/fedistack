@@ -1403,6 +1403,261 @@ test("Settings language controls add, deduplicate, remove, and clear choices", a
   assert.deepEqual(Array.from(app.state.discoveryLanguages), []);
 });
 
+function interestsFixture(fetch) {
+  const { app, context } = setup(fetch);
+  const { get } = elements(context);
+  const modal = get("modal");
+  modal.open = false;
+  modal.showModal = () => { modal.open = true; };
+  modal.close = () => { modal.open = false; };
+  modal.querySelector = (selector) => selector === ".form-error" ? get("interest-error") : null;
+  context.document.querySelector = (selector) => selector === "#modal" ? modal : null;
+  app.htmlToMarkdown = (value) => value;
+  app.state.session = { ...longServer, server: "https://example.org", token: "test", account: app.demoMe };
+  app.state.api = new app.API("https://example.org", "test");
+  app.state.view = "settings";
+  return { app, context, get, modal };
+}
+
+test("interest APIs encode identifiers, preserve list options, and use server pagination", async () => {
+  const calls = [];
+  const { app } = setup(async (url, options) => {
+    calls.push({ url: new URL(url), ...options, body: options.body ? JSON.parse(options.body) : undefined });
+    const data = url.includes("followed_tags") ? [{ name: "Art" }] :
+      url.includes("/accounts") || url.includes("/timelines/") || url.endsWith("/older") ? [] : {};
+    return Response.json(data, { headers: { Link: '<https://example.org/older>; rel="next"' } });
+  });
+  const api = new app.API("https://example.org", "test");
+  assert.equal((await api.followedTags()).next, "https://example.org/older");
+  await api.followedTags("https://example.org/older");
+  await api.followTag("café/test");
+  await api.followTag("café/test", true);
+  await api.saveList("New list");
+  await api.saveList("Renamed", { id: "a/b", replies_policy: "none", exclusive: true });
+  await api.listMembers("a/b");
+  await api.listMembers("a/b", "https://example.org/older");
+  await api.setListMember("a/b", "person");
+  await api.setListMember("a/b", "person", true);
+  await api.deleteList("a/b");
+  await api.searchFollowing("name & surname");
+  await api.timeline("tag:café/test");
+  assert.equal(calls[0].url.pathname, "/api/v1/followed_tags");
+  assert.equal(calls[1].url.pathname, "/older");
+  assert.equal(calls[2].url.pathname, "/api/v1/tags/caf%C3%A9%2Ftest/follow");
+  assert.equal(calls[3].url.pathname, "/api/v1/tags/caf%C3%A9%2Ftest/unfollow");
+  assert.equal(calls[3].method, "POST");
+  assert.deepEqual(calls[4].body, { title: "New list" });
+  assert.equal(calls[5].method, "PUT");
+  assert.equal(calls[5].url.pathname, "/api/v1/lists/a%2Fb");
+  assert.deepEqual(calls[5].body, { title: "Renamed", replies_policy: "none", exclusive: true });
+  assert.equal(calls[6].url.pathname, "/api/v1/lists/a%2Fb/accounts");
+  assert.equal(calls[7].url.pathname, "/older");
+  assert.deepEqual(calls[8].body, { account_ids: ["person"] });
+  assert.equal(calls[8].method, "POST");
+  assert.equal(calls[9].method, "DELETE");
+  assert.equal(calls[10].method, "DELETE");
+  assert.equal(calls[11].url.searchParams.get("following"), "true");
+  assert.equal(calls[11].url.searchParams.get("q"), "name & surname");
+  assert.equal(calls[12].url.pathname, "/api/v1/timelines/tag/caf%C3%A9%2Ftest");
+  assert.equal(calls[12].url.searchParams.get("limit"), "20");
+  await assert.rejects(api.followedTags("https://untrusted.example/older"), /unsafe API URL/);
+  assert.equal(calls.length, 13);
+});
+
+test("hashtag subscriptions paginate, follow once, retain failed removals, and open a tag timeline", async () => {
+  const calls = [];
+  let reject = true;
+  const { app, context, get, modal } = interestsFixture(async (url, options) => {
+    const path = new URL(url).pathname;
+    calls.push(path);
+    if (path === "/api/v1/followed_tags") return Response.json([{ name: "Art" }], {
+      headers: { Link: '<https://example.org/older>; rel="next"' },
+    });
+    if (path === "/older") return Response.json([{ name: "Art" }, { name: "Nature" }]);
+    if (path.endsWith("/unfollow") && reject) return Response.json({ error: "Try later" }, { status: 503 });
+    assert.equal(options.method, "POST");
+    return Response.json({ name: decodeURIComponent(path.split("/")[4]), following: !path.endsWith("/unfollow") });
+  });
+  await app.showInterests("tags");
+  assert.match(modal.innerHTML, /#Art/);
+  assert.match(modal.innerHTML, /Load more hashtags/);
+  await app.interestAction("more-interests", "");
+  assert.match(modal.innerHTML, /#Nature/);
+  assert.equal((modal.innerHTML.match(/aria-label="Unfollow #Art"/g) || []).length, 1);
+  await app.submitInterestForm("follow-tag-form", " #café ");
+  assert.match(modal.innerHTML, /#café/);
+  const count = calls.length;
+  await app.submitInterestForm("follow-tag-form", "#CAFÉ");
+  assert.equal(calls.length, count);
+  await app.submitInterestForm("follow-tag-form", "two tags");
+  assert.equal(calls.length, count);
+  assert.match(get("interest-error").textContent, /Enter one hashtag/);
+  await app.interestAction("unfollow-tag", "café");
+  assert.match(modal.innerHTML, /#café/);
+  assert.match(get("interest-error").textContent, /Try later/);
+  reject = false;
+  await app.interestAction("unfollow-tag", "café");
+  assert.doesNotMatch(modal.innerHTML, /#café/);
+  app.state.query = "old search";
+  await app.interestAction("read-tag", "Nature");
+  assert.equal(app.state.timeline, "tag:Nature");
+  assert.equal(app.state.query, "");
+  assert.equal(context.location.hash, "discover");
+  assert.equal(modal.open, false);
+});
+
+test("list management creates, renames, edits members, and requires confirmation before deletion", async () => {
+  const calls = [];
+  let rejectDelete = true;
+  const oldList = { id: "1", title: "Friends", replies_policy: "none", exclusive: true };
+  const account = (id) => ({ id, username: id, acct: id, display_name: id, note: "", avatar: "" });
+  const { app, get, modal } = interestsFixture(async (url, options) => {
+    const path = new URL(url).pathname;
+    const body = options.body ? JSON.parse(options.body) : undefined;
+    calls.push({ path, method: options.method, body });
+    if (path === "/api/v1/lists") return Response.json(options.method === "GET" ? [oldList] : { id: "2", title: body.title });
+    if (path === "/api/v1/lists/1" && options.method === "PUT") return Response.json({ id: "1", ...body });
+    if (path === "/api/v1/lists/1" && options.method === "DELETE") return rejectDelete
+      ? Response.json({ error: "Cannot delete now" }, { status: 503 }) : Response.json({});
+    if (path === "/api/v1/accounts/search") return Response.json([account("new-person")]);
+    if (path === "/api/v1/lists/1/accounts" && options.method === "GET") return Response.json([account("old-person")], {
+      headers: { Link: '<https://example.org/more-members>; rel="next"' },
+    });
+    if (path === "/more-members") return Response.json([account("another-person")]);
+    if (path === "/api/v1/lists/1/accounts") return Response.json({});
+    throw new Error(`Unexpected request: ${path}`);
+  });
+  await app.showInterests("lists");
+  await app.submitInterestForm("save-list-form", "Design");
+  assert.deepEqual(Array.from(app.state.lists, (list) => list.title), ["Friends", "Design"]);
+  await app.showInterests("members", "1");
+  await app.submitInterestForm("save-list-form", "Best friends");
+  assert.deepEqual(calls.find((call) => call.method === "PUT").body, { title: "Best friends", replies_policy: "none", exclusive: true });
+  assert.match(modal.innerHTML, /Best friends/);
+  await app.interestAction("more-interests", "");
+  assert.match(modal.innerHTML, /another-person/);
+  await app.submitInterestForm("list-member-search", "new");
+  await app.interestAction("add-list-member", "new-person");
+  assert.match(modal.innerHTML, /Remove @new-person from list/);
+  await app.interestAction("remove-list-member", "old-person");
+  assert.doesNotMatch(modal.innerHTML, /old-person/);
+  await app.interestAction("delete-list-confirm", "");
+  assert.equal(calls.some((call) => call.path === "/api/v1/lists/1" && call.method === "DELETE"), false);
+  await app.interestAction("delete-list", "");
+  assert.match(modal.innerHTML, /keeps your follows/);
+  await app.interestAction("delete-list-confirm", "");
+  assert.equal(app.state.lists.length, 2);
+  assert.match(get("interest-error").textContent, /Cannot delete now/);
+  rejectDelete = false;
+  app.state.timeline = "list:1";
+  app.state.next = "stale-list-page";
+  await app.interestAction("delete-list-confirm", "");
+  assert.deepEqual(Array.from(app.state.lists, (list) => list.id), ["2"]);
+  assert.equal(app.state.timeline, "home");
+  assert.equal(app.state.next, undefined);
+  assert.doesNotMatch(modal.innerHTML, /Best friends/);
+  assert.equal(calls.some((call) => /\/accounts\/.*\/(?:unfollow|follow)$/.test(call.path)), false);
+});
+
+test("interest dialogs report missing server support and ignore closed or replaced sessions", async () => {
+  const { app, get, modal } = interestsFixture(async () => Response.json({ error: "Not found" }, { status: 404 }));
+  await app.showInterests("tags");
+  assert.match(get("interest-error").textContent, /does not support hashtag subscriptions/);
+  assert.doesNotMatch(modal.innerHTML, /follow-tag-form/);
+  let finish;
+  app.state.api.followedTags = () => new Promise((resolve) => { finish = resolve; });
+  const pending = app.showInterests("tags");
+  app.closeModal();
+  finish({ tags: [{ name: "late" }] });
+  await pending;
+  assert.equal(modal.open, false);
+  assert.doesNotMatch(modal.innerHTML, /#late/);
+  const oldAPI = app.state.api;
+  oldAPI.get = () => new Promise((resolve) => { finish = resolve; });
+  const lists = app.showInterests("lists");
+  app.state.api = new app.API("https://other.example", "new");
+  app.state.lists = [{ id: "new", title: "New account list" }];
+  finish([{ id: "old", title: "Old account list" }]);
+  await lists;
+  assert.deepEqual(Array.from(app.state.lists, (list) => list.id), ["new"]);
+  assert.doesNotMatch(modal.innerHTML, /Old account list/);
+});
+
+test("interest management remains reachable with no lists and escapes names returned by the server", async () => {
+  const { app, get, modal } = interestsFixture(async () => Response.json([{ id: 'x"', title: '<img src=x onerror="bad()">' }]));
+  app.render();
+  assert.match(get("app").innerHTML, /data-action="manage-hashtags"/);
+  assert.match(get("app").innerHTML, /data-action="manage-lists"/);
+  app.state.view = "home";
+  app.render();
+  assert.match(get("app").innerHTML, /<option value="manage">Manage lists…/);
+  await app.showInterests("lists");
+  assert.doesNotMatch(modal.innerHTML, /<img src=x/);
+  assert.match(modal.innerHTML, /&lt;img/);
+  app.state.session = null;
+  app.state.api = null;
+  assert.match(app.interestsSettings(), /Connect your account to manage/);
+  assert.doesNotMatch(app.interestsSettings(), /data-action="manage-/);
+});
+
+test("pending interest edits prevent duplicate requests and never reopen another dialog", async () => {
+  const { app, get, modal } = interestsFixture(async () => Response.json([]));
+  await app.showInterests("lists");
+  get("interest-title").value = "Draft list name";
+  let finish, writes = 0;
+  app.state.api.saveList = () => {
+    writes++;
+    return new Promise((resolve) => { finish = resolve; });
+  };
+  const saving = app.submitInterestForm("save-list-form", "Draft list name");
+  assert.match(modal.innerHTML, /disabled aria-busy="true"/);
+  assert.match(modal.innerHTML, /value="Draft list name"/);
+  await app.submitInterestForm("save-list-form", "Duplicate");
+  assert.equal(writes, 1);
+  app.showModal("Another dialog", "Keep this dialog open");
+  finish({ id: "new", title: "Draft list name" });
+  await saving;
+  assert.match(modal.innerHTML, /Keep this dialog open/);
+  assert.equal(app.state.lists[0].title, "Draft list name");
+});
+
+test("interest buttons, forms, and list selection are wired through application events", async () => {
+  const { app, context, get } = interestsFixture(async () => Response.json([]));
+  const listeners = new Map(), opened = [], submitted = [];
+  context.document.addEventListener = (name, listener) => listeners.set(name, listener);
+  context.window = { addEventListener() {} };
+  context.matchMedia = () => ({ matches: false, addEventListener() {} });
+  context.FormData = class { constructor(form) { return new Map(form.fields); } };
+  get("modal").addEventListener = () => {};
+  app.route = async () => {};
+  await app.boot();
+  app.showInterests = async (...args) => { opened.push(args); };
+  app.submitInterestForm = async (...args) => { submitted.push(args); };
+  for (const [action, id] of [["manage-hashtags", ""], ["manage-lists", ""], ["manage-list-members", "1"]]) {
+    const button = { dataset: { action, id }, disabled: false };
+    listeners.get("click")({ target: { closest: () => button } });
+    await new Promise(setImmediate);
+  }
+  app.state.timeline = "list:1";
+  const select = { id: "list-select", value: "manage" };
+  listeners.get("change")({ target: select });
+  assert.equal(select.value, "list:1");
+  assert.deepEqual(opened, [["tags"], ["lists"], ["members", "1"], ["lists"]]);
+  for (const [id, field, value] of [["follow-tag-form", "tag", "#nature"], ["save-list-form", "title", "Friends"], ["list-member-search", "query", "person"]]) {
+    listeners.get("submit")({
+      target: { id, fields: [[field, value]], dataset: {}, querySelector: () => null },
+      preventDefault() {},
+    });
+    await new Promise(setImmediate);
+  }
+  assert.deepEqual(submitted, [["follow-tag-form", "#nature"], ["save-list-form", "Friends"], ["list-member-search", "person"]]);
+  app.state.view = "bookmarks";
+  app.state.query = "stale search";
+  listeners.get("change")({ target: { id: "list-select", value: "list:1" } });
+  assert.equal(context.location.hash, "home");
+  assert.equal(app.state.query, "");
+});
+
 test("API mapping uses the original publication's language when it is boosted", () => {
   const { app } = setup();
   app.htmlToMarkdown = (text) => text;

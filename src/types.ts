@@ -5,7 +5,8 @@ namespace Fedi {
     | "local"
     | "federated"
     | "bookmarks"
-    | `list:${string}`;
+    | `list:${string}`
+    | `tag:${string}`;
   export type View =
     | "home"
     | "discover"
@@ -87,6 +88,16 @@ namespace Fedi {
     id: string;
     following: boolean;
     requested: boolean;
+  }
+  export interface UserList {
+    id: string;
+    title: string;
+    replies_policy?: "followed" | "list" | "none";
+    exclusive?: boolean;
+  }
+  export interface FollowedTag {
+    name: string;
+    following?: boolean;
   }
   export interface MastodonAccount {
     id: string;

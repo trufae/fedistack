@@ -1720,6 +1720,61 @@ summary {
 .form-error:empty {
   display: none;
 }
+.interest-manager {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.interest-manager > p {
+  color: var(--muted);
+  font-size: 13px;
+}
+.interest-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.interest-rows {
+  margin: 22px 0;
+}
+.interest-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.interest-name {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.interest-name small {
+  display: block;
+  color: var(--muted);
+}
+.interest-link {
+  color: var(--heading);
+  text-decoration: underline;
+}
+.interest-row > .button,
+.interest-row > .avatar {
+  flex-shrink: 0;
+}
+.interest-manager button,
+.interest-buttons button {
+  min-height: 44px;
+}
+.interest-delete {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+.interest-delete p {
+  margin-bottom: 12px;
+}
 .profile-card {
   text-align: center;
   padding: 10px 0;

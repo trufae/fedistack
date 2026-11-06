@@ -115,6 +115,27 @@ namespace Fedi {
       case "account":
         navigate("settings");
         break;
+      case "manage-hashtags":
+        await showInterests("tags");
+        break;
+      case "manage-lists":
+        await showInterests("lists");
+        break;
+      case "manage-list-members":
+        await showInterests("members", id);
+        break;
+      case "reload-interests":
+      case "more-interests":
+      case "read-tag":
+      case "read-list":
+      case "unfollow-tag":
+      case "add-list-member":
+      case "remove-list-member":
+      case "delete-list":
+      case "delete-list-cancel":
+      case "delete-list-confirm":
+        await interestAction(name, id);
+        break;
       case "check-server":
         await checkServer(button);
         break;
@@ -313,6 +334,10 @@ namespace Fedi {
   async function submit(form: HTMLFormElement): Promise<void> {
     const data = new FormData(form),
       value = (key: string) => String(data.get(key) || "").trim();
+    if (["follow-tag-form", "save-list-form", "list-member-search"].includes(form.id)) {
+      await submitInterestForm(form.id, value(form.id === "follow-tag-form" ? "tag" : form.id === "save-list-form" ? "title" : "query"));
+      return;
+    }
     if (form.id === "search-form" || form.id === "discover-search") {
       state.query = value("query");
       state.timeline = "federated";
@@ -449,8 +474,15 @@ namespace Fedi {
         updateFeedFilters();
       }
       if (el.id === "list-select" && el.value) {
-        state.timeline = el.value as Timeline;
-        void loadFeed();
+        if (el.value === "manage") {
+          el.value = state.timeline.startsWith("list:") ? state.timeline : "";
+          void showInterests("lists").catch(formError);
+        } else {
+          state.timeline = el.value as Timeline;
+          state.query = "";
+          if (state.view === "bookmarks") navigate("home");
+          else void loadFeed();
+        }
       }
       if (el.id === "draft-visibility") captureDraft();
       if (el.id === "settings-language" && el.value)
@@ -501,7 +533,7 @@ namespace Fedi {
       const api = state.api;
       try {
         const lists =
-          await api.get<{ id: string; title: string }[]>("/api/v1/lists");
+          await api.get<UserList[]>("/api/v1/lists");
         if (state.api === api) {
           state.lists = lists;
           if (["home", "discover", "bookmarks"].includes(state.view)) render();

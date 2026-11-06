@@ -19,6 +19,7 @@
     "src/app.ts",
     "src/editor.ts",
     "src/messages.ts",
+    "src/interests.ts",
     "src/main.ts"
   ]
 }

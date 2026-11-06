@@ -227,7 +227,9 @@ namespace Fedi {
       };
       const path = timeline.startsWith("list:")
         ? `/api/v1/timelines/list/${encodeURIComponent(timeline.slice(5))}`
-        : paths[timeline];
+        : timeline.startsWith("tag:")
+          ? `/api/v1/timelines/tag/${encodeURIComponent(timeline.slice(4))}`
+          : paths[timeline];
       const result = await this.request<MastodonStatus[]>(
         next || `${path}${path.includes("?") ? "&" : "?"}limit=20`,
       );
@@ -339,6 +341,38 @@ namespace Fedi {
       return this.post<Relationship>(
         `/api/v1/accounts/${encodeURIComponent(id)}/${unfollow ? "unfollow" : "follow"}`,
       );
+    }
+    async followedTags(next?: string): Promise<{ tags: FollowedTag[]; next?: string }> {
+      const result = await this.request<FollowedTag[]>(next || "/api/v1/followed_tags?limit=100");
+      return { tags: result.data, next: result.next };
+    }
+    async followTag(name: string, unfollow = false): Promise<FollowedTag> {
+      return this.post<FollowedTag>(`/api/v1/tags/${encodeURIComponent(name)}/${unfollow ? "unfollow" : "follow"}`);
+    }
+    async saveList(title: string, list?: UserList): Promise<UserList> {
+      return (await this.request<UserList>(
+        list ? `/api/v1/lists/${encodeURIComponent(list.id)}` : "/api/v1/lists",
+        list ? "PUT" : "POST",
+        { title, ...(list?.replies_policy ? { replies_policy: list.replies_policy } : {}),
+          ...(list?.exclusive !== undefined ? { exclusive: list.exclusive } : {}) },
+      )).data;
+    }
+    async deleteList(id: string): Promise<void> {
+      await this.request(`/api/v1/lists/${encodeURIComponent(id)}`, "DELETE");
+    }
+    async listMembers(id: string, next?: string): Promise<{ accounts: Account[]; next?: string }> {
+      const result = await this.request<MastodonAccount[]>(next || `/api/v1/lists/${encodeURIComponent(id)}/accounts?limit=80`);
+      return { accounts: result.data.map(mapAccount), next: result.next };
+    }
+    async setListMember(listId: string, accountId: string, remove = false): Promise<void> {
+      await this.request(`/api/v1/lists/${encodeURIComponent(listId)}/accounts`,
+        remove ? "DELETE" : "POST", { account_ids: [accountId] });
+    }
+    async searchFollowing(query: string): Promise<Account[]> {
+      const result = await this.get<MastodonAccount[]>(`/api/v1/accounts/search?${new URLSearchParams({
+        q: query, following: "true", limit: "20",
+      })}`);
+      return result.map(mapAccount);
     }
     async search(
       query: string,

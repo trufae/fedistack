@@ -25,6 +25,7 @@ make test
 | `src/app.ts`      | Routes, state, feed, reader, library, settings                |
 | `src/editor.ts`   | Draft lifecycle, formatting, preview, single-post publishing  |
 | `src/messages.ts` | Conversation loading, participants, private replies           |
+| `src/interests.ts` | Hashtag subscriptions, list management, and list membership   |
 | `src/ui.ts`       | Shared components, icons, dialogs, notifications              |
 | `src/demo.ts`     | Explicitly fictional offline content                          |
 | `src/main.ts`     | Event delegation and application startup                      |
@@ -45,4 +46,4 @@ See [icons and exports](icons.md) to edit the SVG and regenerate the PNG and ICO
 
 The architecture was informed by source review of [Elk's API setup](https://github.com/elk-zone/elk/blob/main/app/composables/masto/masto.ts), [drafts](https://github.com/elk-zone/elk/blob/main/app/composables/masto/statusDrafts.ts), [navigation](https://github.com/elk-zone/elk/blob/main/app/components/nav/NavSide.vue), [Phanpy's authentication](https://github.com/cheeaun/phanpy/blob/main/src/utils/auth.js), and [Pinafore's OAuth flow](https://github.com/nolanlawson/pinafore/blob/master/src/routes/_api/oauth.js). This is an independent implementation, not a fork or a vendor copy of those clients.
 
-API references: [Mastodon OAuth](https://docs.joinmastodon.org/methods/oauth/), [statuses](https://docs.joinmastodon.org/methods/statuses/), [conversations](https://docs.joinmastodon.org/methods/conversations/), [Pleroma extensions](https://docs.pleroma.social/backend/development/API/differences_in_mastoapi_responses/), and [Mastodon's registration rate limit](https://github.com/mastodon/mastodon/blob/main/config/initializers/rack_attack.rb).
+API references: [Mastodon OAuth](https://docs.joinmastodon.org/methods/oauth/), [statuses](https://docs.joinmastodon.org/methods/statuses/), [conversations](https://docs.joinmastodon.org/methods/conversations/), [followed hashtags](https://docs.joinmastodon.org/methods/followed_tags/), [hashtag subscriptions](https://docs.joinmastodon.org/methods/tags/), [lists](https://docs.joinmastodon.org/methods/lists/), [Pleroma extensions](https://docs.pleroma.social/backend/development/API/differences_in_mastoapi_responses/), and [Mastodon's registration rate limit](https://github.com/mastodon/mastodon/blob/main/config/initializers/rack_attack.rb).

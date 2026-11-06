@@ -2,7 +2,9 @@
 
 [Documentation](README.md) · [Fedistack](../README.md)
 
-- Following, local, federated, bookmarks, and existing server-list timelines, with pagination.
+- Following, local, federated, bookmarks, hashtag, and server-list timelines, with pagination.
+- Open **Settings → Hashtags & lists → Manage hashtags** to follow or unfollow topics. Tap a subscribed hashtag to read its timeline. Subscriptions are saved on your server and bring matching posts into Following when supported by the server.
+- **Your lists → Manage lists…** or **Settings → Hashtags & lists → Manage lists** lets you create lists, rename them, search people you already follow to add them, and remove members. Lists group accounts; hashtag subscriptions follow topics. Tap a list name to read its timeline. Deleting a list asks for confirmation and keeps your account follows. Unsupported server features show an explanation in the management dialog.
 - Articles/notes filters, following-only filtering, search, topic search, follows and follow requests.
 - Timeline loads and **Load older posts** automatically scan up to 10 server pages (20 posts requested per page), aiming for 10 new publications that match the content, language, and following filters. Matches appear as pages arrive. Scanning stops at the end of the timeline, on an error, or at the page limit; use **Load older posts** to continue. Changing filters also fills sparse results from older pages. Search uses the server's returned results without this extra scanning.
 - Use **Add language** in **Settings → Discovery languages** to choose one or more languages. On phones, open Settings beside your profile avatar. Tap a language chip to remove it, or **Show all languages** to clear the list. Discover shows posts matching any selected language, including regional variants, using your server's language labels. Unlabeled posts are hidden while filters are selected; load older posts for more results. Your choices are saved on this device, and an older single-language preference carries over. Home and Saved keep all languages.

@@ -201,7 +201,9 @@ namespace Fedi {
     toastTimer = setTimeout(() => el.classList.remove("visible"), 5000);
   }
   let modalFocus: HTMLElement | null = null;
+  export let modalVersion = 0;
   export function showModal(title: string, body: string): void {
+    modalVersion++;
     const dialog = document.getElementById("modal") as HTMLDialogElement;
     if (!dialog.open) modalFocus = document.activeElement as HTMLElement;
     dialog.innerHTML = `<div class="modal-header"><h2 id="modal-title">${escapeHTML(title)}</h2>${action("close-modal", icon("close"), "", "icon-button")}</div>${body}<p class="form-error" role="alert"></p>`;
@@ -211,6 +213,7 @@ namespace Fedi {
     if (!dialog.open) dialog.showModal();
   }
   export function closeModal(): void {
+    modalVersion++;
     (document.getElementById("modal") as HTMLDialogElement).close();
     modalFocus?.focus();
   }

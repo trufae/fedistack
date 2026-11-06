@@ -1,6 +1,6 @@
 namespace Fedi {
   export const state = {
-    session: readStore<Session | null>("session", null, true),
+    session: loadSession(),
     api: null as API | null,
     view: "home" as View,
     timeline: "home" as Timeline,
@@ -456,14 +456,18 @@ namespace Fedi {
   function settingsView(): string {
     const session = state.session;
     return `<header class="page-top"><span>MAKE YOURSELF AT HOME</span></header><div class="page-intro"><h1>The little details<span class="accent">.</span></h1><p>Your reading room, your way.</p></div><div class="settings-content"><section><h2>Appearance</h2><div class="theme-options">${["light", "dark", "system"].map((t) => `<button class="button ${state.theme === t ? "primary" : "subtle"}" data-action="set-theme" data-id="${t}" aria-pressed="${state.theme === t}">${icon(t === "dark" ? "moon" : t === "light" ? "sun" : "settings")} ${t[0].toUpperCase() + t.slice(1)}</button>`).join("")}</div></section>
-      <section><h2>Discovery language</h2><p>Show only publications in your chosen language when exploring Discover. Home and Saved keep all languages.</p>${languageSelector("settings-language")}<p class="muted">This uses language labels supplied by your server. Posts without a label are excluded when a language is selected. Your preference is saved on this device.</p></section><section><h2>Your connection</h2>${session ? `<p>Connected as <strong>${escapeHTML(session.account.acct)}</strong></p><div class="capability-card"><strong>${session.maxChars.toLocaleString()} characters per publication</strong><p>${session.format === "text/markdown" ? "Native Markdown publishing" : session.format === "text/html" ? "Rich HTML publishing from Markdown" : "Plain-text publishing only"}</p><span>${supportsArticles(session) ? "Ready for long-form writing" : "Reading and notes available. Articles need a rich-text server with a 5,000+ character limit."}</span></div>${action("disconnect", "Disconnect this account", "", "button subtle")}` : `<p>Choose an Akkoma, Pleroma, or compatible instance with long posts and rich text. Fedistack checks the server’s capabilities before you write.</p>${action("connect", "Connect your account", "", "button primary")}`}</section>
-      <section><h2>Made for the open web</h2><p>Fedistack is a quiet place to read and publish independent writing. Your instance hosts your posts and handles your followers. This website is just your reading room.</p><p>No analytics. No external fonts. No runtime dependencies.</p><p class="muted">Sessions are kept in this browser tab’s session storage. Drafts are stored locally. Direct messages are private mentions handled by your server, and are not end-to-end encrypted.</p></section><section><h2>Keyboard shortcuts</h2><div class="shortcut-list"><span>Bold / italic</span><kbd>⌘ / Ctrl B · I</kbd><span>Insert a link</span><kbd>⌘ / Ctrl K</kbd><span>Save draft</span><kbd>⌘ / Ctrl S</kbd><span>Zen editing / reading focus</span><kbd>⌘ / Ctrl Shift F</kbd><span>Leave Zen / focus mode</span><kbd>Esc</kbd></div></section></div>`;
+      <section><h2>Discovery language</h2><p>Show only publications in your chosen language when exploring Discover. Home and Saved keep all languages.</p>${languageSelector("settings-language")}<p class="muted">This uses language labels supplied by your server. Posts without a label are excluded when a language is selected. Your preference is saved on this device.</p></section><section><h2>Your connection</h2>${session ? `<p>Connected as <strong>${escapeHTML(session.account.acct)}</strong></p><div class="capability-card"><strong>${session.maxChars.toLocaleString()} characters per publication</strong><p>${session.format === "text/markdown" ? "Native Markdown publishing" : session.format === "text/html" ? "Rich HTML publishing from Markdown" : "Plain-text publishing only"}</p><span>${supportsArticles(session) ? "Ready for long-form writing" : "Reading and notes available. Articles need a rich-text server with a 5,000+ character limit."}</span></div>${action("disconnect", "Log out", "", "button subtle")}` : `<p>Choose an Akkoma, Pleroma, or compatible instance with long posts and rich text. Fedistack checks the server’s capabilities before you write.</p>${action("connect", "Connect your account", "", "button primary")}`}</section>
+      <section><h2>Made for the open web</h2><p>Fedistack is a quiet place to read and publish independent writing. Your instance hosts your posts and handles your followers. This website is just your reading room.</p><p>No analytics. No external fonts. No runtime dependencies.</p><p class="muted">Choose “Keep me signed in” when connecting to save your sign-in on this device. Log out to remove it. Drafts are stored locally. Direct messages are private mentions handled by your server, and are not end-to-end encrypted.</p></section><section><h2>Keyboard shortcuts</h2><div class="shortcut-list"><span>Bold / italic</span><kbd>⌘ / Ctrl B · I</kbd><span>Insert a link</span><kbd>⌘ / Ctrl K</kbd><span>Save draft</span><kbd>⌘ / Ctrl S</kbd><span>Zen editing / reading focus</span><kbd>⌘ / Ctrl Shift F</kbd><span>Leave Zen / focus mode</span><kbd>Esc</kbd></div></section></div>`;
+  }
+
+  function rememberSessionOption(checked = false): string {
+    return `<label class="manual-option"><input id="remember-session" type="checkbox" name="remember" ${checked ? "checked" : ""}> Keep me signed in on this device</label>`;
   }
 
   export function connectDialog(): void {
     showModal(
       "Your writing, your server.",
-      `<p>Connect an existing Fediverse account. For articles, choose a server with <strong>5,000+ characters and Markdown or HTML support</strong>, such as infosec.exchange, or a suitably configured Akkoma or Pleroma instance.</p>${location.protocol === "file:" ? '<div class="local-file-notice"><strong>Opened as a local file</strong><p>Mastodon servers require localhost or HTTPS for sign-in. Run <code>make serve</code>, then open <a href="http://127.0.0.1:8080" target="_blank" rel="noopener noreferrer">http://127.0.0.1:8080</a>. Offline reading and drafts work here.</p></div>' : ""}<form id="connect-form" autocomplete="off"><label for="fediverse-server">Your server<input id="fediverse-server" name="fediverse-server" type="text" inputmode="url" placeholder="infosec.exchange" required autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"></label><div id="server-capabilities"></div><div class="form-buttons"><button type="button" class="button subtle" data-action="check-server">Check compatibility</button><button class="button primary" type="submit">Connect ${icon("arrow")}</button></div><details class="token-details"><summary>Other sign-in options</summary><label class="manual-option"><input type="checkbox" name="manual"> Use a manual authorization code</label><button type="button" class="button subtle" data-action="connect-token">Connect with token</button></details></form><p class="fine-print">Mastodon sign-in and publishing need localhost or HTTPS. Some other servers support the manual code flow from a local file. No application backend is required.</p>`,
+      `<p>Connect an existing Fediverse account. For articles, choose a server with <strong>5,000+ characters and Markdown or HTML support</strong>, such as infosec.exchange, or a suitably configured Akkoma or Pleroma instance.</p>${location.protocol === "file:" ? '<div class="local-file-notice"><strong>Opened as a local file</strong><p>Mastodon servers require localhost or HTTPS for sign-in. Run <code>make serve</code>, then open <a href="http://127.0.0.1:8080" target="_blank" rel="noopener noreferrer">http://127.0.0.1:8080</a>. Offline reading and drafts work here.</p></div>' : ""}<form id="connect-form" autocomplete="off"><label for="fediverse-server">Your server<input id="fediverse-server" name="fediverse-server" type="text" inputmode="url" placeholder="infosec.exchange" required autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"></label><div id="server-capabilities"></div>${rememberSessionOption()}<div class="form-buttons"><button type="button" class="button subtle" data-action="check-server">Check compatibility</button><button class="button primary" type="submit">Connect ${icon("arrow")}</button></div><details class="token-details"><summary>Other sign-in options</summary><label class="manual-option"><input type="checkbox" name="manual"> Use a manual authorization code</label><button type="button" class="button subtle" data-action="connect-token">Connect with token</button></details></form><p class="fine-print">Mastodon sign-in and publishing need localhost or HTTPS. Some other servers support the manual code flow from a local file. No application backend is required.</p>`,
     );
   }
 
@@ -471,9 +475,12 @@ namespace Fedi {
     const input = document.getElementById("fediverse-server") as HTMLInputElement;
     if (!input.reportValidity()) return;
     const server = serverURL(input.value);
+    const remember = (
+      document.getElementById("remember-session") as HTMLInputElement | null
+    )?.checked;
     showModal(
       "Connect with an access token",
-      `<p>Create an application on <strong>${escapeHTML(server)}</strong> with read, write, and follow permissions. Tokens stay in this tab’s session storage.</p><form id="token-connect-form" data-server="${escapeHTML(server)}" autocomplete="off"><label>Access token<input type="password" name="token" required autocomplete="off" placeholder="Paste your access token"></label><button type="submit" class="button primary">Connect ${icon("arrow")}</button></form>`,
+      `<p>Create an application on <strong>${escapeHTML(server)}</strong> with read, write, and follow permissions.</p><form id="token-connect-form" data-server="${escapeHTML(server)}" autocomplete="off"><label>Access token<input type="password" name="token" required autocomplete="off" placeholder="Paste your access token"></label>${rememberSessionOption(remember)}<button type="submit" class="button primary">Connect ${icon("arrow")}</button></form>`,
     );
   }
 
@@ -482,12 +489,13 @@ namespace Fedi {
       throw new Error(
         "Export your current draft before switching accounts; browser storage is unavailable.",
       );
+    const saved = saveSession(session);
     state.draft = null;
     state.session = session;
     state.api = new API(session.server, session.token);
-    if (!writeStore("session", session, true))
+    if (!saved)
       toast(
-        "Session storage is unavailable. You will need to reconnect after reloading.",
+        "Your sign-in could not be saved. You will need to reconnect after reloading.",
       );
     state.posts = [];
     state.accounts = [];

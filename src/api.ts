@@ -486,10 +486,12 @@ namespace Fedi {
     state: string;
     verifier: string;
     created: number;
+    remember?: boolean;
   }
   export async function startOAuth(
     server: string,
     manual = false,
+    remember = false,
   ): Promise<void> {
     const api = new API(server);
     if (location.protocol === "file:") {
@@ -554,6 +556,7 @@ namespace Fedi {
       state: uid(),
       verifier,
       created: Date.now(),
+      remember,
     };
     if (!writeStore("oauth", pending, true))
       throw new Error(
@@ -600,6 +603,9 @@ namespace Fedi {
         "The server did not return an access token. Please connect again.",
       );
     writeStore("oauth", null, true);
-    return new API(pending.server, token.access_token).verify();
+    return {
+      ...(await new API(pending.server, token.access_token).verify()),
+      remember: pending.remember === true,
+    };
   }
 }

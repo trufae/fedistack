@@ -121,12 +121,11 @@ namespace Fedi {
       case "disconnect":
         if (!flushDraft())
           throw new Error(
-            "Export your current draft before disconnecting; browser storage is unavailable.",
+            "Export your current draft before logging out; browser storage is unavailable.",
           );
+        clearSession();
         state.session = null;
         state.api = null;
-        writeStore("session", null, true);
-        writeStore("oauth", null, true);
         state.posts = [];
         state.ownPosts = [];
         state.ownNext = undefined;
@@ -318,11 +317,16 @@ namespace Fedi {
       return;
     }
     if (form.id === "connect-form")
-      await startOAuth(value("fediverse-server"), data.has("manual"));
-    if (form.id === "token-connect-form")
-      await setSession(
-        await new API(form.dataset.server!, value("token")).verify(),
+      await startOAuth(
+        value("fediverse-server"),
+        data.has("manual"),
+        data.has("remember"),
       );
+    if (form.id === "token-connect-form")
+      await setSession({
+        ...(await new API(form.dataset.server!, value("token")).verify()),
+        remember: data.has("remember"),
+      });
     if (form.id === "oauth-form")
       await setSession(await finishOAuth(value("code")));
     if (form.id === "recipient-form") await findRecipient(value("recipient"));

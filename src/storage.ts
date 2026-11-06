@@ -28,6 +28,28 @@ namespace Fedi {
     }
   }
 
+  export function loadSession(): Session | null {
+    return (
+      readStore<Session | null>("session", null, true) ||
+      readStore<Session | null>("session", null)
+    );
+  }
+
+  export function clearSession(): void {
+    const localCleared = writeStore("session", null);
+    const tabCleared = writeStore("session", null, true);
+    const oauthCleared = writeStore("oauth", null, true);
+    if (!localCleared || !tabCleared || !oauthCleared)
+      throw new Error(
+        "Could not clear saved sign-in data. Clear this site's browser data to finish logging out.",
+      );
+  }
+
+  export function saveSession(session: Session): boolean {
+    clearSession();
+    return writeStore("session", session, session.remember !== true);
+  }
+
   export function uid(): string {
     return crypto.randomUUID
       ? crypto.randomUUID()

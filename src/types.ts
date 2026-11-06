@@ -81,6 +81,7 @@ namespace Fedi {
     server: string;
     token: string;
     account: Account;
+    remember?: boolean;
   }
   export interface Relationship {
     id: string;

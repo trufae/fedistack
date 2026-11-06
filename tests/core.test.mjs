@@ -18,6 +18,7 @@ function setup(
   fetch = async () => {
     throw new Error("Unexpected network request");
   },
+  stores = {},
 ) {
   const context = vm.createContext({
     URL,
@@ -29,8 +30,8 @@ function setup(
     crypto: webcrypto,
     btoa,
     fetch,
-    localStorage: storage(),
-    sessionStorage: storage(),
+    localStorage: stores.localStorage || storage(),
+    sessionStorage: stores.sessionStorage || storage(),
     setTimeout: (...args) => {
       const timer = setTimeout(...args);
       timer.unref();
@@ -162,6 +163,7 @@ test("the server picker contains no password field and validates the host before
   const picker = modal.innerHTML;
   assert.doesNotMatch(picker, /type="password"/);
   assert.match(picker, /name="fediverse-server"/);
+  assert.doesNotMatch(picker, /name="remember"[^>]*checked/);
   const server = get("fediverse-server");
   server.reportValidity = () => false;
   app.connectTokenDialog();
@@ -171,10 +173,12 @@ test("the server picker contains no password field and validates the host before
   assert.throws(() => app.connectTokenDialog());
   assert.equal(modal.innerHTML, picker);
   server.value = " EXAMPLE.org ";
+  get("remember-session").checked = true;
   app.connectTokenDialog();
   assert.match(modal.innerHTML, /id="token-connect-form" data-server="https:\/\/example.org"/);
   assert.match(modal.innerHTML, /type="password" name="token" required/);
   assert.doesNotMatch(modal.innerHTML, /name="fediverse-server"/);
+  assert.match(modal.innerHTML, /name="remember" checked/);
 });
 
 test("server submission starts OAuth while token submission verifies the chosen server", async () => {
@@ -206,16 +210,64 @@ test("server submission starts OAuth while token submission verifies the chosen 
   await submit("connect-form", [
     ["fediverse-server", " EXAMPLE.org "],
     ["manual", "on"],
+    ["remember", "on"],
     ["token", "unrelated-autofill"],
   ]);
-  assert.deepEqual(oauth, [["EXAMPLE.org", true]]);
+  assert.deepEqual(oauth, [["EXAMPLE.org", true, true]]);
   assert.equal(sessions.length, 0);
   await submit("token-connect-form", [["token", " application-token "]], {
     server: "https://example.org",
   });
-  assert.deepEqual(sessions, [{ server: "https://example.org", token: "application-token" }]);
+  await submit("token-connect-form", [["token", "remembered-token"], ["remember", "on"]], {
+    server: "https://example.org",
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(sessions)), [
+    { server: "https://example.org", token: "application-token", remember: false },
+    { server: "https://example.org", token: "remembered-token", remember: true },
+  ]);
   assert.equal(oauth.length, 1);
   assert.deepEqual(errors, []);
+});
+
+test("only an opted-in session survives reopening, and switching to temporary sign-in removes it", () => {
+  const { app, context } = setup();
+  const session = { server: "https://example.org", token: "access", account: { id: "me" } };
+  assert.equal(app.saveSession(session), true);
+  assert.equal(context.localStorage.getItem("fedistack:session"), null);
+  assert.equal(setup(undefined, context).app.state.session.token, "access");
+  assert.equal(setup(undefined, { localStorage: context.localStorage }).app.state.session, null);
+  assert.equal(app.saveSession({ ...session, remember: true }), true);
+  assert.equal(context.sessionStorage.getItem("fedistack:session"), null);
+  assert.equal(setup(undefined, { localStorage: context.localStorage }).app.state.session.token, "access");
+  assert.equal(app.saveSession({ ...session, token: "temporary", remember: false }), true);
+  assert.equal(app.loadSession().token, "temporary");
+  assert.equal(setup(undefined, { localStorage: context.localStorage }).app.state.session, null);
+});
+
+test("clearing sign-in removes persistent, legacy tab, and pending OAuth data without deleting drafts", () => {
+  const { app, context } = setup();
+  app.writeStore("session", { token: "persistent" });
+  app.writeStore("session", { token: "temporary" }, true);
+  app.writeStore("oauth", { verifier: "pending" }, true);
+  app.writeStore("drafts:https://example.org:me", [article]);
+  app.clearSession();
+  assert.equal(app.loadSession(), null);
+  assert.equal(context.localStorage.getItem("fedistack:session"), null);
+  assert.equal(context.sessionStorage.getItem("fedistack:session"), null);
+  assert.equal(context.sessionStorage.getItem("fedistack:oauth"), null);
+  assert.equal(app.readStore("drafts:https://example.org:me", [])[0].id, article.id);
+});
+
+test("failed sign-in storage does not restore an older account or claim a successful logout", () => {
+  const { app, context } = setup();
+  app.writeStore("session", { token: "old-account", remember: true });
+  context.localStorage.setItem = () => { throw new Error("Storage full"); };
+  assert.equal(app.saveSession({ token: "new-account", remember: true }), false);
+  assert.equal(app.loadSession(), null);
+  context.localStorage.removeItem = () => { throw new Error("Storage unavailable"); };
+  app.writeStore("session", { token: "temporary" }, true);
+  assert.throws(() => app.clearSession(), /Could not clear saved sign-in/);
+  assert.equal(context.sessionStorage.getItem("fedistack:session"), null);
 });
 
 test("infosec.exchange and Akkoma capabilities enable single long Markdown publications", () => {
@@ -452,6 +504,7 @@ test("OAuth registration is form encoded, cached, and bound to PKCE and state", 
   assert.equal(body.get("scopes"), "read write");
   const authorization = new URL(context.location.assigned);
   const pending = app.readStore("oauth", null, true);
+  assert.equal(pending.remember, false);
   assert.equal(authorization.searchParams.get("state"), pending.state);
   const digest = await webcrypto.subtle.digest(
     "SHA-256",
@@ -462,7 +515,8 @@ test("OAuth registration is form encoded, cached, and bound to PKCE and state", 
     Buffer.from(digest).toString("base64url"),
   );
   assert.equal(context.localStorage.getItem("fedistack:oauth"), null);
-  await app.startOAuth("infosec.exchange");
+  await app.startOAuth("infosec.exchange", false, true);
+  assert.equal(app.readStore("oauth", null, true).remember, true);
   assert.equal(
     requests.length,
     1,
@@ -520,17 +574,36 @@ test("OAuth token exchange keeps the exact callback and code verifier", async ()
       client_id: "client",
       client_secret: "secret",
       created: Date.now(),
+      remember: true,
     },
     true,
   );
   app.API.prototype.verify = async () => ({ account: { id: "me" } });
-  await app.finishOAuth("authorization-code", "expected");
+  const session = await app.finishOAuth("authorization-code", "expected");
+  assert.equal(session.remember, true);
   const body = new URLSearchParams(request.options.body);
   assert.equal(body.get("redirect_uri"), "https://reader.example/fedistack/");
   assert.equal(body.get("code_verifier"), "test-verifier");
   assert.equal(body.get("code"), "authorization-code");
   assert.equal(body.get("grant_type"), "authorization_code");
   assert.equal(app.readStore("oauth", null, true), null);
+});
+
+test("manual OAuth keeps the remember choice through authorization without persisting the pending credentials", async () => {
+  for (const remember of [false, true]) {
+    const { app, context } = setup(async (url) =>
+      Response.json(url.endsWith("/api/v1/apps")
+        ? { client_id: "client", client_secret: "secret" }
+        : { access_token: "access" }),
+    );
+    app.showModal = () => {};
+    app.API.prototype.verify = async () => ({ account: { id: "me" } });
+    await app.startOAuth("example.org", true, remember);
+    assert.equal(context.localStorage.getItem("fedistack:oauth"), null);
+    const session = await app.finishOAuth("manual-code");
+    assert.equal(session.remember, remember);
+    assert.equal(context.sessionStorage.getItem("fedistack:oauth"), null);
+  }
 });
 
 test("DM contexts only accept direct messages with the exact participant set", () => {

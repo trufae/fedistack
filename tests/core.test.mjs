@@ -62,6 +62,7 @@ function elements(context) {
         textContent: "",
         dataset: {},
         focus() {},
+        querySelectorAll: () => [],
         classList: { toggle() {}, add() {}, remove() {} },
       });
     return nodes.get(id);
@@ -684,6 +685,97 @@ test("all major views render using only bundled data", () => {
     assert.match(get("app").innerHTML, /<main id="main"/);
     assert.doesNotMatch(get("app").innerHTML, /\bundefined\b/);
   }
+});
+
+function avatarRenderFixture() {
+  const { app, context } = setup();
+  const image = (src, key = "author") => ({
+    src,
+    key,
+    getAttribute(name) { return name === "src" ? this.src : this.key; },
+    removeAttribute(name) { assert.equal(name, "src"); this.src = null; },
+    replaceWith(previous) {
+      // Replacement must happen in the live document, not the inert template.
+      assert.equal(root.images.includes(this), true);
+      root.images[root.images.indexOf(this)] = previous;
+    },
+  });
+  const select = (images, selector) => {
+    assert.equal(selector, ".avatar img");
+    return images;
+  };
+  const root = {
+    images: [],
+    querySelectorAll(selector) { return select(this.images, selector); },
+    replaceChildren(content) { this.images = [...content.images]; },
+  };
+  const content = {
+    images: [],
+    querySelectorAll(selector) { return select(this.images, selector); },
+  };
+  context.document = {
+    createElement(tag) {
+      assert.equal(tag, "template");
+      return { content };
+    },
+  };
+  return { app, root, content, image };
+}
+
+test("rerenders retain each avatar image without resetting its source or loading state", () => {
+  const { app, root, content, image } = avatarRenderFixture();
+  const first = image("https://example.org/avatar.png");
+  const duplicate = image(first.src);
+  const other = image("https://example.org/other.png");
+  first.complete = true;
+  duplicate.complete = false;
+  root.images = [first, duplicate, other];
+  const placeholders = [image(other.src), image(first.src), image(first.src)];
+  content.images = placeholders;
+
+  app.renderHTML(root, "updated posts and follow buttons");
+  assert.deepEqual(root.images, [other, first, duplicate]);
+  assert.equal(first.src, "https://example.org/avatar.png");
+  assert.equal(duplicate.src, first.src);
+  assert.equal(first.complete, true);
+  assert.equal(duplicate.complete, false);
+  assert.ok(placeholders.every((placeholder) => placeholder.src === null));
+
+  content.images = root.images.map((old) => image(old.src));
+  app.renderHTML(root, "late list response");
+  assert.deepEqual(root.images, [other, first, duplicate]);
+});
+
+test("new and changed avatar URLs load normally and removed images are not cached", () => {
+  const { app, root, content, image } = avatarRenderFixture();
+  const previous = image("https://example.org/old.png");
+  const changed = image("https://example.org/new.png");
+  const additional = image(changed.src);
+  root.images = [previous];
+  content.images = [changed, additional];
+  app.renderHTML(root, "changed avatar plus another appearance");
+  assert.deepEqual(root.images, [changed, additional]);
+  assert.equal(changed.src, "https://example.org/new.png");
+  assert.equal(additional.src, changed.src);
+
+  const returning = image(previous.src);
+  content.images = [image(changed.src), returning];
+  app.renderHTML(root, "a previously removed avatar returns");
+  assert.deepEqual(root.images, [changed, returning]);
+  assert.notEqual(root.images[1], previous);
+});
+
+test("appending another post by the same author keeps the suggestion avatar in its own slot", () => {
+  const { app, root, content, image } = avatarRenderFixture();
+  const src = "https://example.org/avatar.png";
+  const firstPost = image(src, "post:first");
+  const suggestion = image(src, "suggested:author");
+  const newPost = image(src, "post:second");
+  root.images = [firstPost, suggestion];
+  content.images = [image(src, firstPost.key), newPost, image(src, suggestion.key)];
+  app.renderHTML(root, "another post before the suggestions panel");
+  assert.deepEqual(root.images, [firstPost, newPost, suggestion]);
+  assert.equal(newPost.src, src);
 });
 
 test("opening and leaving a chat switches the viewport layout and keeps its draft", () => {

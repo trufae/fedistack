@@ -91,13 +91,44 @@ namespace Fedi {
   export function icon(name: string): string {
     return `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.book}</svg>`;
   }
-  export function avatar(account: Account, small = false): string {
+  export function avatar(account: Account, small = false, key = account.id): string {
     const initials = account.name
       .split(/\s/)
       .map((w) => w[0] || "")
       .slice(0, 2)
       .join("");
-    return `<span class="avatar ${small ? "small" : ""} ${escapeHTML(account.color || "sage")}">${account.avatar ? `<img src="${escapeHTML(safeURL(account.avatar, true))}" alt="" loading="lazy" referrerpolicy="no-referrer">` : escapeHTML(initials)}</span>`;
+    return `<span class="avatar ${small ? "small" : ""} ${escapeHTML(account.color || "sage")}">${account.avatar ? `<img data-avatar-key="${escapeHTML(key)}" src="${escapeHTML(safeURL(account.avatar, true))}" alt="" loading="lazy" referrerpolicy="no-referrer">` : escapeHTML(initials)}</span>`;
+  }
+  export function renderHTML(element: HTMLElement, html: string): void {
+    const avatars = new Map<string, HTMLImageElement[]>();
+    const key = (image: HTMLImageElement): string => JSON.stringify([
+      image.getAttribute("data-avatar-key"), image.getAttribute("src"),
+    ]);
+    element.querySelectorAll<HTMLImageElement>(".avatar img").forEach((image) => {
+      const id = key(image);
+      const matches = avatars.get(id) || [];
+      matches.push(image);
+      avatars.set(id, matches);
+    });
+    if (!avatars.size) {
+      element.innerHTML = html;
+      return;
+    }
+    // Parse inertly so replacement images cannot start duplicate requests.
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    const retained: [HTMLImageElement, HTMLImageElement][] = [];
+    template.content.querySelectorAll<HTMLImageElement>(".avatar img").forEach((image) => {
+      const previous = avatars.get(key(image))?.shift();
+      if (previous) {
+        image.removeAttribute("src");
+        retained.push([image, previous]);
+      }
+    });
+    element.replaceChildren(template.content);
+    // Reuse only after insertion: moving images into the template's separate
+    // document would reset their loading state. Keep their src untouched.
+    retained.forEach(([placeholder, image]) => placeholder.replaceWith(image));
   }
   export function relativeDate(date: string): string {
     const hours = Math.max(
@@ -165,7 +196,7 @@ namespace Fedi {
     return `<article class="post-card ${featured ? "featured" : ""} ${post.kind}">
       ${post.boostedBy ? `<p class="boost-label">${icon("refresh")} Shared by ${escapeHTML(post.boostedBy)}</p>` : ""}
       ${post.replyTo ? `<p class="reply-context"><a href="#read/${encodeURIComponent(post.replyTo)}">${icon("comment")} View conversation ${icon("arrow")}</a></p>` : ""}
-      <div class="post-byline">${avatar(post.author)}<div><button class="author-link" data-action="profile" data-id="${escapeHTML(post.author.id)}">${escapeHTML(post.author.name)}</button><div class="byline-sub">${escapeHTML(post.author.publication || post.author.acct)} <span>· ${relativeDate(post.created)}</span></div></div>${followButton(post.author)}</div>
+      <div class="post-byline">${avatar(post.author, false, `post:${post.id}`)}<div><button class="author-link" data-action="profile" data-id="${escapeHTML(post.author.id)}">${escapeHTML(post.author.name)}</button><div class="byline-sub">${escapeHTML(post.author.publication || post.author.acct)} <span>· ${relativeDate(post.created)}</span></div></div>${followButton(post.author)}</div>
       ${
         hidden
           ? `<div class="content-warning">${icon("eye")}<strong>${escapeHTML(post.warning)}</strong>${action("reveal", "Show content", post.id, "button subtle")}</div>`
@@ -182,7 +213,7 @@ namespace Fedi {
     const owned =
       post.author.id === (state.session?.account.id || "you") &&
       post.visibility !== "direct";
-    return `<div class="comment">${avatar(post.author, true)}<div><div class="comment-header"><div><strong>${escapeHTML(post.author.name)}</strong><span class="byline-sub"> · ${relativeDate(post.created)}</span></div>${owned ? action("delete-publication", "Delete comment", post.id, "text-button delete-link") : ""}</div>${post.warning ? `<details><summary>${escapeHTML(post.warning)}</summary><div class="prose">${markdown(post.markdown)}</div></details>` : `<div class="prose">${markdown(post.markdown)}</div>`}</div></div>`;
+    return `<div class="comment">${avatar(post.author, true, `post:${post.id}`)}<div><div class="comment-header"><div><strong>${escapeHTML(post.author.name)}</strong><span class="byline-sub"> · ${relativeDate(post.created)}</span></div>${owned ? action("delete-publication", "Delete comment", post.id, "text-button delete-link") : ""}</div>${post.warning ? `<details><summary>${escapeHTML(post.warning)}</summary><div class="prose">${markdown(post.markdown)}</div></details>` : `<div class="prose">${markdown(post.markdown)}</div>`}</div></div>`;
   }
 
   export function emptyState(
@@ -206,7 +237,10 @@ namespace Fedi {
     modalVersion++;
     const dialog = document.getElementById("modal") as HTMLDialogElement;
     if (!dialog.open) modalFocus = document.activeElement as HTMLElement;
-    dialog.innerHTML = `<div class="modal-header"><h2 id="modal-title">${escapeHTML(title)}</h2>${action("close-modal", icon("close"), "", "icon-button")}</div>${body}<p class="form-error" role="alert"></p>`;
+    renderHTML(
+      dialog,
+      `<div class="modal-header"><h2 id="modal-title">${escapeHTML(title)}</h2>${action("close-modal", icon("close"), "", "icon-button")}</div>${body}<p class="form-error" role="alert"></p>`,
+    );
     dialog
       .querySelector('[data-action="close-modal"]')
       ?.setAttribute("aria-label", "Close dialog");

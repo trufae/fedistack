@@ -44,7 +44,7 @@ namespace Fedi {
           .map((c) => {
             const a = c.accounts[0],
               last = c.messages[c.messages.length - 1];
-            return `<a href="#messages/${encodeURIComponent(c.id)}" class="conversation-item ${current?.id === c.id ? "selected" : ""}">${a ? avatar(a) : icon("mail")}<div><strong>${escapeHTML(c.accounts.map((a) => a.name).join(", ") || "Conversation")}</strong><p>${escapeHTML(last ? plainText(last.markdown).slice(0, 65) : "Start a conversation")}</p><small>${last ? relativeDate(last.created) : "New"}</small></div>${c.unread ? '<span class="unread-dot"></span>' : ""}</a>`;
+            return `<a href="#messages/${encodeURIComponent(c.id)}" class="conversation-item ${current?.id === c.id ? "selected" : ""}">${a ? avatar(a, false, `conversation:${c.id}`) : icon("mail")}<div><strong>${escapeHTML(c.accounts.map((a) => a.name).join(", ") || "Conversation")}</strong><p>${escapeHTML(last ? plainText(last.markdown).slice(0, 65) : "Start a conversation")}</p><small>${last ? relativeDate(last.created) : "New"}</small></div>${c.unread ? '<span class="unread-dot"></span>' : ""}</a>`;
           })
           .join("") ||
         '<p class="muted conversation-empty">Your conversations will appear here.</p>'

@@ -31,6 +31,8 @@ namespace Fedi {
     theme: readStore<string>("theme", "system"),
   };
   let loadVersion = 0;
+  const feedTarget = 10;
+  const feedPageLimit = 10;
   export const demoState = readStore<{
     posts: Post[];
     follows: string[];
@@ -153,15 +155,9 @@ namespace Fedi {
     state.discoveryLanguage = language;
     if (!writeStore("discovery-language", language))
       toast("Language preference is only saved for this tab.");
-    if (state.view === "discover") render();
+    if (state.view === "discover") updateFeedFilters();
   }
-  function feedView(): string {
-    const title =
-      state.view === "bookmarks"
-        ? "Your reading list"
-        : state.view === "discover"
-          ? "A world of good writing"
-          : "Your reading room";
+  function visibleFeedPosts(): Post[] {
     let posts = state.posts.filter(
       (p) => state.filter === "all" || p.kind === state.filter,
     );
@@ -177,6 +173,23 @@ namespace Fedi {
           .toLowerCase()
           .includes(state.query.toLowerCase().replace(/^#/, "")),
       );
+    return posts;
+  }
+  export function updateFeedFilters(): void {
+    render();
+    const missing = feedTarget - visibleFeedPosts().length;
+    if (state.api && !state.query && state.next && !state.loading && missing > 0)
+      void loadFeed(true, missing);
+  }
+  function feedView(): string {
+    const title =
+      state.view === "bookmarks"
+        ? "Your reading list"
+        : state.view === "discover"
+          ? "A world of good writing"
+          : "Your reading room";
+    const posts = visibleFeedPosts();
+    const language = state.view === "discover" ? state.discoveryLanguage : "";
     return `<header class="page-top"><span>${state.view === "bookmarks" ? "SAVED FOR A QUIET MOMENT" : new Date().toLocaleDateString("en", { weekday: "long", month: "long", day: "numeric" }).toUpperCase()}</span><div>${!state.session ? '<span class="demo-badge">DEMO</span>' : '<span class="connected-dot">Connected</span>'}${action("refresh", icon("refresh"), "", "icon-button refresh-button")}</div></header>
       <div class="page-intro"><h1>${title}<span class="accent">.</span></h1><p>${state.view === "bookmarks" ? "Good things are worth coming back to." : "Independent voices. A little more perspective."}</p></div>
       <div class="timeline-tabs" aria-label="Timelines">${(["home", "local", "federated"] as Timeline[]).map((t, i) => `<button data-action="timeline" data-id="${t}" class="${state.timeline === t ? "active" : ""}" aria-pressed="${state.timeline === t}">${["Following", "Local", "Federated"][i]}</button>`).join("")}${state.lists.length ? `<select id="list-select" aria-label="Your lists"><option value="">Your lists</option>${state.lists.map((l) => `<option value="list:${escapeHTML(l.id)}" ${state.timeline === `list:${l.id}` ? "selected" : ""}>${escapeHTML(l.title)}</option>`).join("")}</select>` : ""}</div>
@@ -186,13 +199,20 @@ namespace Fedi {
       ${state.query ? `<div class="search-summary">Results for “${escapeHTML(state.query)}” ${action("clear-search", "Clear", "", "text-button")}</div>` : ""}
       ${state.accounts.length ? `<div class="account-results">${state.accounts.map((a) => `<div class="recommended">${avatar(a)}<div><button class="author-link" data-action="profile" data-id="${escapeHTML(a.id)}">${escapeHTML(a.name)}</button><p>${escapeHTML(a.acct)}</p></div>${followButton(a)}</div>`).join("")}</div>` : ""}
       ${state.error ? `<div class="error-panel" role="alert">${escapeHTML(state.error)}${action("refresh", "Try again", "", "button subtle")}</div>` : ""}
-      <div class="feed">${posts.map((p, i) => postCard(p, i === 0 && p.kind === "article")).join("")}${!posts.length && !state.loading && !state.error ? emptyState("A little quiet here", language ? "No posts in this language match the loaded results. Load older posts or choose all languages." : state.filter !== "all" ? "No matching writing in this page. Try another filter or load older posts." : "Follow a writer, explore another timeline, or start a conversation.", language ? action("clear-language", "Show all languages", "", "button subtle") : action("discover", "Explore the fediverse", "", "button subtle")) : ""}</div>
+      <div class="feed">${posts.map((p, i) => postCard(p, i === 0 && p.kind === "article")).join("")}${!posts.length && !state.loading && !state.error ? emptyState("A little quiet here", language ? "No posts in this language match the loaded results. Load older posts or choose all languages." : state.filter !== "all" ? "No matching writing in the loaded posts. Try another filter or load older posts." : "Follow a writer, explore another timeline, or start a conversation.", language ? action("clear-language", "Show all languages", "", "button subtle") : action("discover", "Explore the fediverse", "", "button subtle")) : ""}</div>
       ${state.loading ? '<div class="loading" role="status">Gathering your reading…</div>' : state.next ? `<div class="load-more">${action("load-more", "Load older posts", "", "button subtle")}</div>` : posts.length ? '<div class="end-note">You’re all caught up. Go make a little something.</div>' : ""}`;
   }
 
-  export async function loadFeed(append = false): Promise<void> {
+  export async function loadFeed(
+    append = false,
+    target = feedTarget,
+  ): Promise<void> {
+    if (append && !state.next) return;
     const version = ++loadVersion,
       api = state.api;
+    const existing = new Set(append ? state.posts.map((p) => p.id) : []);
+    const visited = new Set<string>();
+    const timeline = state.view === "bookmarks" ? "bookmarks" : state.timeline;
     state.loading = true;
     state.error = "";
     if (!append) {
@@ -238,32 +258,42 @@ namespace Fedi {
         if (version !== loadVersion) return;
         posts = result.posts;
         state.accounts = result.accounts;
-      } else {
-        const result = await api.timeline(
-          state.view === "bookmarks" ? "bookmarks" : state.timeline,
-          append ? state.next : undefined,
-        );
-        if (version !== loadVersion) return;
-        posts = result.posts;
-        state.next = result.next;
-      }
-      if (version !== loadVersion) return;
-      state.posts = [
-        ...new Map(
-          [...(append ? state.posts : []), ...posts].map((p) => [p.id, p]),
-        ).values(),
-      ];
-      if (api) {
-        try {
-          const relations = await api.relationships([
-            ...state.posts.map((p) => p.author.id),
-            ...state.accounts.map((a) => a.id),
-          ]);
+      } else posts = [];
+      const paginated = !!api && !state.query;
+      for (let page = 0; page < feedPageLimit; page++) {
+        if (api && paginated) {
+          const cursor = state.next;
+          if (cursor) visited.add(cursor);
+          const result = await api.timeline(timeline, cursor);
           if (version !== loadVersion) return;
-          relations.forEach((r) => state.relationships.set(r.id, r));
-        } catch {
-          /* Reading does not depend on the relationships endpoint. */
+          posts = result.posts;
+          state.next =
+            result.next && !visited.has(result.next) ? result.next : undefined;
         }
+        if (version !== loadVersion) return;
+        state.posts = [
+          ...new Map([...state.posts, ...posts].map((p) => [p.id, p])).values(),
+        ];
+        if (api) {
+          try {
+            const relations = await api.relationships([
+              ...posts.map((p) => p.author.id),
+              ...state.accounts.map((a) => a.id),
+            ]);
+            if (version !== loadVersion) return;
+            relations.forEach((r) => state.relationships.set(r.id, r));
+          } catch {
+            /* Reading does not depend on the relationships endpoint. */
+          }
+        }
+        if (version !== loadVersion) return;
+        if (
+          !paginated ||
+          !state.next ||
+          visibleFeedPosts().filter((p) => !existing.has(p.id)).length >= target
+        )
+          break;
+        render();
       }
     } catch (error) {
       if (version === loadVersion) state.error = (error as Error).message;

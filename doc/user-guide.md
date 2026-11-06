@@ -4,6 +4,7 @@
 
 - Following, local, federated, bookmarks, and existing server-list timelines, with pagination.
 - Articles/notes filters, following-only filtering, search, topic search, follows and follow requests.
+- Timeline loads and **Load older posts** automatically scan up to 10 server pages (20 posts requested per page), aiming for 10 new publications that match the content, language, and following filters. Matches appear as pages arrive. Scanning stops at the end of the timeline, on an error, or at the page limit; use **Load older posts** to continue. Changing filters also fills sparse results from older pages. Search uses the server's returned results without this extra scanning.
 - Choose a language in **Settings → Discovery language** or directly in **Discover**. The device-local preference filters loaded Discover posts using server language labels, including regional variants. Unlabeled posts are hidden when a language is selected; load older posts for more results. Home and Saved keep all languages.
 - Likes, comments preserving the parent visibility, content warnings, and canonical publication sharing. Your own comments have a visible **Delete comment** action with confirmation.
 - Visible **Edit** and **Delete** controls on your own publications. Editing loads the server's original source, autosaves unpublished changes, and updates the same post with its link and audience preserved. Deletion requires confirmation.

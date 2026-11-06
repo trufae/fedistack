@@ -11,7 +11,8 @@ For example, infosec.exchange advertised **11,000 characters, Markdown, and HTML
 - Plain-text instances remain usable for reading and short posts. They cannot publish articles from this editor.
 - The length check includes title, subtitle, source formatting, and content warning. It is conservative: some servers count rendered text or normalized links differently. The server remains authoritative.
 - The reader converts incoming HTML into the supported Markdown subset before rendering. Raw HTML and unsafe URL schemes are not inserted into the page.
-- Article detection uses a heading, a link-preview title, the `article` tag, or a body longer than 900 characters. The Mastodon API has no universal article type, so this is a reading filter, not a claim about the underlying ActivityPub object.
+- The Articles filter includes publications with an H1 heading, an `article` tag (case-insensitive), or a body longer than 900 characters after conversion to plain text. All other publications appear under Notes. A link-preview title alone does not make a short post an article. This reading cutoff is separate from the 5,000-character server capability required by the article editor.
+- The Mastodon API has no universal article type, so this classification is a reading filter, not a claim about the underlying ActivityPub object.
 - Linked articles show the text provided by the instance plus a link to the original; Fedistack does not scrape paywalled or external article bodies.
 
 See the [user guide](user-guide.md) for drafts, editing, unpublishing, and keyboard shortcuts.

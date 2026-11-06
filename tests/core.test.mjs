@@ -1351,6 +1351,212 @@ test("API mapping uses the original publication's language when it is boosted", 
   );
 });
 
+test("article classification uses the 900-character boundary or explicit markers, not link previews", () => {
+  const { app } = setup();
+  app.htmlToMarkdown = (text) => text;
+  const status = {
+    id: "original",
+    content: "x".repeat(900),
+    visibility: "public",
+    account: { id: "writer", username: "writer", acct: "writer", note: "" },
+    created_at: new Date().toISOString(),
+    favourites_count: 0,
+    replies_count: 0,
+  };
+  assert.equal(app.mapStatus(status).kind, "post");
+  assert.equal(app.mapStatus({ ...status, content: "x".repeat(901) }).kind, "article");
+  assert.equal(app.mapStatus({ ...status, content: "# Title\n\nShort body" }).kind, "article");
+  assert.equal(app.mapStatus({ ...status, content: "Short body", tags: [{ name: "Article" }] }).kind, "article");
+  const linked = {
+    ...status,
+    content: "A short link post",
+    card: { type: "link", title: "A linked page", description: "x".repeat(1000), url: "https://example.org/article" },
+  };
+  const mapped = app.mapStatus(linked);
+  assert.equal(mapped.kind, "post");
+  assert.equal(mapped.title, "");
+  assert.equal(mapped.source, linked.card.url);
+  assert.equal(app.mapStatus({ ...status, reblog: linked }).kind, "post");
+  assert.equal(app.mapStatus({ ...linked, content: "x".repeat(901) }).kind, "article");
+});
+
+function feedFixture() {
+  const { app, context } = setup();
+  const { get } = elements(context);
+  const post = (id, extra = {}) => ({ ...app.demoPosts[0], id, ...extra });
+  const requests = [];
+  app.state.api = {
+    async timeline(timeline, next) {
+      requests.push({ timeline, next });
+      return { posts: [] };
+    },
+    async relationships() { return []; },
+  };
+  return { app, context, get, post, requests };
+}
+
+test("sparse timelines scan past notes and duplicate boosts for ten new articles per load", async () => {
+  const { app, get, post, requests } = feedFixture();
+  const articles = Array.from({ length: 20 }, (_, i) => post(`article-${i}`));
+  const note = post("note", { kind: "post", markdown: "A short note" });
+  const pages = [
+    [note],
+    articles.slice(0, 5),
+    [articles[0], ...articles.slice(5, 10)],
+    articles.slice(0, 10),
+    articles.slice(10),
+  ];
+  app.state.api.timeline = async (timeline, next) => {
+    requests.push({ timeline, next });
+    return { posts: pages[requests.length - 1], next: `page-${requests.length}` };
+  };
+  await app.loadFeed();
+  assert.equal(requests.length, 3);
+  assert.equal(app.state.posts.length, 11);
+  assert.equal(app.state.next, "page-3");
+  assert.doesNotMatch(get("app").innerHTML, /A short note/);
+  await app.loadFeed(true);
+  assert.equal(requests.length, 5);
+  assert.equal(app.state.posts.length, 21);
+  assert.equal(requests[3].next, "page-3");
+  assert.equal(app.state.next, "page-5");
+  assert.equal(app.state.loading, false);
+});
+
+test("automatic scanning is bounded and the next load resumes after the scanned pages", async () => {
+  const { app, post, requests } = feedFixture();
+  app.state.api.timeline = async (timeline, next) => {
+    requests.push({ timeline, next });
+    return {
+      posts: requests.length <= 10 ? [] : [post("found")],
+      next: requests.length <= 10 ? `page-${requests.length}` : undefined,
+    };
+  };
+  await app.loadFeed();
+  assert.equal(requests.length, 10);
+  assert.equal(app.state.next, "page-10");
+  await app.loadFeed(true);
+  assert.equal(requests.length, 11);
+  assert.equal(requests[10].next, "page-10");
+  assert.equal(app.state.posts[0].id, "found");
+  assert.equal(app.state.next, undefined);
+  await app.loadFeed(true);
+  assert.equal(requests.length, 11);
+});
+
+test("scanning counts only articles that match the language and following filters", async () => {
+  const { app, post, requests } = feedFixture();
+  app.state.view = "discover";
+  app.state.discoveryLanguage = "en";
+  app.state.followingOnly = true;
+  const author = (id) => ({ ...app.demoAuthors[0], id });
+  const pages = [
+    Array.from({ length: 10 }, (_, i) => post(`spanish-${i}`, { language: "es", author: author("friend") })),
+    Array.from({ length: 10 }, (_, i) => post(`stranger-${i}`, { language: "en", author: author("stranger") })),
+    Array.from({ length: 10 }, (_, i) => post(`match-${i}`, { language: "en-US", author: author("friend") })),
+  ];
+  app.state.api.timeline = async (timeline, next) => {
+    requests.push({ timeline, next });
+    return { posts: pages[requests.length - 1], next: `page-${requests.length}` };
+  };
+  app.state.api.relationships = async (ids) => ids.map((id) => ({ id, following: id === "friend" }));
+  await app.loadFeed();
+  assert.equal(requests.length, 3);
+  assert.equal(app.state.posts.length, 30);
+  assert.equal(app.state.next, "page-3");
+});
+
+test("cyclic pagination stops without repeatedly fetching the same page", async () => {
+  const { app, requests } = feedFixture();
+  app.state.api.timeline = async (timeline, next) => {
+    requests.push({ timeline, next });
+    return { posts: [], next: next === "older" ? "oldest" : "older" };
+  };
+  await app.loadFeed();
+  assert.equal(requests.length, 3);
+  assert.equal(app.state.next, undefined);
+  assert.equal(app.state.loading, false);
+});
+
+test("a server error stops scanning but retains partial results and the failed cursor for retry", async () => {
+  const { app, get, post, requests } = feedFixture();
+  app.state.api.timeline = async (timeline, next) => {
+    requests.push({ timeline, next });
+    if (requests.length === 2) throw new app.APIError("Rate limited", 429);
+    return { posts: [post(requests.length === 1 ? "first" : "last")], next: requests.length === 1 ? "older" : undefined };
+  };
+  await app.loadFeed();
+  assert.equal(requests.length, 2);
+  assert.equal(app.state.posts[0].id, "first");
+  assert.equal(app.state.next, "older");
+  assert.equal(app.state.error, "Rate limited");
+  assert.equal(app.state.loading, false);
+  assert.match(get("app").innerHTML, /Rate limited/);
+  await app.loadFeed(true);
+  assert.equal(requests[2].next, "older");
+  assert.deepEqual(Array.from(app.state.posts, (p) => p.id), ["first", "last"]);
+  assert.equal(app.state.error, "");
+});
+
+test("switching timelines discards pending results and stops the old scan", async () => {
+  const { app, post, requests } = feedFixture();
+  let finishOld;
+  app.state.api.timeline = async (timeline, next) => {
+    requests.push({ timeline, next });
+    if (timeline === "home") return new Promise((resolve) => { finishOld = resolve; });
+    return { posts: [post("local")] };
+  };
+  const oldLoad = app.loadFeed();
+  app.state.timeline = "local";
+  await app.loadFeed();
+  finishOld({ posts: [post("stale")], next: "stale-page" });
+  await oldLoad;
+  assert.equal(requests.length, 2);
+  assert.deepEqual(Array.from(app.state.posts, (p) => p.id), ["local"]);
+  assert.equal(app.state.next, undefined);
+  assert.equal(app.state.loading, false);
+});
+
+test("changing a filter tops up sparse results without discarding already loaded posts", async () => {
+  const { app, post, requests } = feedFixture();
+  app.state.posts = [post("old-note", { kind: "post" }), post("old-article")];
+  app.state.next = "older";
+  app.state.api.timeline = async (timeline, next) => {
+    requests.push({ timeline, next });
+    return { posts: Array.from({ length: 9 }, (_, i) => post(`new-${i}`)), next: "more" };
+  };
+  app.updateFeedFilters();
+  await new Promise(setImmediate);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].next, "older");
+  assert.equal(app.state.posts.length, 11);
+  app.updateFeedFilters();
+  assert.equal(requests.length, 1);
+});
+
+test("All and Saved stop when enough posts are visible, while search remains a single request", async () => {
+  const { app, post, requests } = feedFixture();
+  app.state.filter = "all";
+  app.state.view = "bookmarks";
+  app.state.api.timeline = async (timeline, next) => {
+    requests.push({ timeline, next });
+    return { posts: Array.from({ length: 20 }, (_, i) => post(`note-${i}`, { kind: "post" })), next: "older" };
+  };
+  await app.loadFeed();
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].timeline, "bookmarks");
+  let searches = 0;
+  app.state.api.search = async () => {
+    searches++;
+    return { posts: [post("search-result")], accounts: [] };
+  };
+  app.state.query = "topic";
+  await app.loadFeed();
+  assert.equal(searches, 1);
+  assert.equal(requests.length, 1);
+  assert.equal(app.state.next, undefined);
+});
+
 test("Zen mode preserves the editor and Escape dismisses a dialog before leaving Zen", () => {
   const { app, context } = setup();
   const { get } = elements(context);

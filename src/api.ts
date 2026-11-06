@@ -436,9 +436,11 @@ namespace Fedi {
     const content = htmlToMarkdown(s.content),
       tags = (s.tags || []).map((t) => t.name);
     const card = s.card?.type === "link" && s.card.title ? s.card : undefined;
-    const title = /^#\s+(.+)$/m.exec(content)?.[1] || card?.title || "";
+    const heading = /^#\s+(.+)$/m.exec(content)?.[1];
+    const title = heading || card?.title || "";
+    // A link preview describes the linked page, not the length or kind of this post.
     const article =
-      !!title ||
+      !!heading ||
       tags.some((t) => t.toLowerCase() === "article") ||
       plainText(content).length > 900;
     const media = s.media_attachments?.find((m) => m.type === "image");

@@ -167,7 +167,7 @@ namespace Fedi {
         break;
       case "filter":
         state.filter = id as typeof state.filter;
-        render();
+        updateFeedFilters();
         break;
       case "refresh":
         await loadFeed();
@@ -443,7 +443,7 @@ namespace Fedi {
       const el = event.target as HTMLInputElement;
       if (el.id === "following-only") {
         state.followingOnly = el.checked;
-        render();
+        updateFeedFilters();
       }
       if (el.id === "list-select" && el.value) {
         state.timeline = el.value as Timeline;

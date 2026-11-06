@@ -1,14 +1,14 @@
-<p align="center">
-  <img src="public/assets/favicon.svg" width="96" height="96" alt="Fedistack icon">
-</p>
 
-# Fedistack
+  <img align=left src="public/assets/favicon.svg" width="96" height="96" alt="Fedistack icon">
 
-**Independent voices, connected.**
+**Fedistack** // *Independent voices, connected.*
 
 [![CI](https://github.com/trufae/fedistack/actions/workflows/ci.yml/badge.svg)](https://github.com/trufae/fedistack/actions/workflows/ci.yml)
 
+<h2></h2>
 A quiet place to read and write on the fediverse. Follow independent voices, publish your next essay, share a quick note, and keep the conversation going — all with your existing fediverse account.
+
+If you have a [Mastodon](https://mastodon.social/) account all your data will remain there, your credentials in the browser so can try it online at https://radare.org/fedistack
 
 ## Make room for good writing
 
@@ -28,8 +28,7 @@ With Node.js and Make installed:
 ```sh
 git clone https://github.com/trufae/fedistack.git
 cd fedistack
-npm ci
-make serve
+make && make serve
 ```
 
 Open **http://127.0.0.1:8080** to explore the built-in demo, or connect your account. Ready to host your own copy? Run `make` and upload the contents of `dist/` to a static host.

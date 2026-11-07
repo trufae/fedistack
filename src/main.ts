@@ -188,6 +188,7 @@ namespace Fedi {
         break;
       case "timeline":
         state.timeline = id as Timeline;
+        if (id === "federated") state.filter = "all";
         state.query = "";
         if (state.view === "bookmarks") navigate("home");
         else await loadFeed();
@@ -205,11 +206,13 @@ namespace Fedi {
       case "discover":
         state.query = "";
         state.timeline = "federated";
+        state.filter = "all";
         navigate("discover");
         break;
       case "topic":
         state.query = state.session ? "#" + id : id;
         state.timeline = "federated";
+        state.filter = "all";
         navigate("discover");
         break;
       case "clear-search":
@@ -376,6 +379,7 @@ namespace Fedi {
     if (form.id === "search-form" || form.id === "discover-search") {
       state.query = value("query");
       state.timeline = "federated";
+      state.filter = "all";
       navigate("discover");
       return;
     }

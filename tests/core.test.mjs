@@ -2759,6 +2759,38 @@ function feedFixture() {
   return { app, context, get, post, requests };
 }
 
+test("federated browsing and new searches show remote notes before optional filtering", async () => {
+  const { app, context, get, post } = feedFixture();
+  const listeners = new Map();
+  context.document.addEventListener = (name, listener) => listeners.set(name, listener);
+  context.window = { addEventListener() {} };
+  context.matchMedia = () => ({ matches: false, addEventListener() {} });
+  context.FormData = class { constructor(form) { return new Map(form.fields); } };
+  get("modal").addEventListener = () => {};
+  app.route = async () => {};
+  await app.boot();
+  const remote = post("remote-note", { kind: "post", title: "", markdown: "Remote note from another instance",
+    author: { ...app.demoAuthors[0], id: "remote", acct: "writer@remote.example" } });
+  app.state.api.timeline = async () => ({ posts: [post("local-article"), remote] });
+  const click = async (action, id) => {
+    listeners.get("click")({ target: { closest: () => ({ dataset: { action, id }, disabled: false }) } });
+    await new Promise(setImmediate);
+  };
+  assert.equal(app.state.filter, "article");
+  await click("timeline", "federated");
+  assert.equal(app.state.filter, "all");
+  assert.match(get("app").innerHTML, /Remote note from another instance/);
+  await click("filter", "article");
+  assert.doesNotMatch(get("app").innerHTML, /Remote note from another instance/);
+  app.navigate = () => {};
+  app.state.api.search = async () => ({ accounts: [], posts: [remote] });
+  listeners.get("submit")({ target: { id: "discover-search", fields: [["query", "remote"]], dataset: {}, querySelector: () => null }, preventDefault() {} });
+  await new Promise(setImmediate);
+  assert.equal(app.state.filter, "all");
+  await app.loadFeed();
+  assert.match(get("app").innerHTML, /Remote note from another instance/);
+});
+
 test("sparse timelines scan past notes and duplicate boosts for ten new articles per load", async () => {
   const { app, get, post, requests } = feedFixture();
   const articles = Array.from({ length: 20 }, (_, i) => post(`article-${i}`));

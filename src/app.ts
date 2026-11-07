@@ -529,8 +529,10 @@ namespace Fedi {
       render();
       return;
     }
-    if (state.view === "discover" && state.timeline === "home")
+    if (state.view === "discover" && state.timeline === "home") {
       state.timeline = "federated";
+      state.filter = "all";
+    }
     if (state.view !== "discover") state.query = "";
     await loadFeed();
   }

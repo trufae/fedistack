@@ -527,9 +527,10 @@ namespace Fedi {
       tags = (s.tags || []).map((t) => t.name);
     const card = s.card?.type === "link" && s.card.title ? s.card : undefined;
     const heading = /^#\s+(.+)$/m.exec(content)?.[1];
-    const title = heading || card?.title || "";
+    const title = s.title || heading || card?.title || "";
     // A link preview describes the linked page, not the length or kind of this post.
     const article =
+      s.object_type === "Article" ||
       !!heading ||
       tags.some((t) => t.toLowerCase() === "article") ||
       plainText(content).length > 900;

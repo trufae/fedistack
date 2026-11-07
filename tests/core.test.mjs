@@ -2701,6 +2701,20 @@ test("API mapping uses the original publication's language when it is boosted", 
   );
 });
 
+test("remote Article metadata preserves short and untitled articles", () => {
+  const { app } = setup();
+  app.htmlToMarkdown = (text) => text;
+  const status = { id: "remote-article", object_type: "Article", title: "Remote headline",
+    content: "Short body", visibility: "public", created_at: new Date().toISOString(),
+    favourites_count: 0, replies_count: 0,
+    account: { id: "remote", username: "writer", acct: "writer@remote.example", note: "" } };
+  assert.equal(app.mapStatus(status).kind, "article");
+  assert.equal(app.mapStatus(status).title, "Remote headline");
+  assert.equal(app.mapStatus({ ...status, title: null }).kind, "article");
+  assert.equal(app.mapStatus({ ...status, object_type: "Note", title: null }).kind, "post");
+  assert.equal(app.mapStatus({ ...status, reblog: status }).kind, "article");
+});
+
 test("article classification uses the 900-character boundary or explicit markers, not link previews", () => {
   const { app } = setup();
   app.htmlToMarkdown = (text) => text;

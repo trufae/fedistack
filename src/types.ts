@@ -136,6 +136,8 @@ namespace Fedi {
     statuses_count?: number;
   }
   export interface MastodonStatus {
+    object_type?: string;
+    title?: string | null;
     language?: string | null;
     id: string;
     account: MastodonAccount;

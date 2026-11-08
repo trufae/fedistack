@@ -1,5 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40" role="img" aria-labelledby="title">
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
   <title id="title">Fedistack</title>
-  <rect width="40" height="40" rx="10" fill="#d75b34"/>
-  <path d="M10 11h20M10 17h20M10 23h20v10l-10-5-10 5z" fill="none" stroke="#fff8ee" stroke-width="3"/>
+  <desc id="desc">A warm orange tile with a stack of three cream pancakes topped with a pat of butter.</desc>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#d45c34"/>
+      <stop offset=".55" stop-color="#c9512c"/>
+      <stop offset="1" stop-color="#bf4525"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#tile)"/>
+  <path d="M10 37a22 6.5 0 0 0 44 0v4.5a22 6.5 0 0 1-44 0Z" fill="#f6dfc0"/>
+  <path d="M10 30a22 6.5 0 0 0 44 0v4.5a22 6.5 0 0 1-44 0Z" fill="#f6dfc0"/>
+  <path d="M10 23a22 6.5 0 0 0 44 0v4.5a22 6.5 0 0 1-44 0Z" fill="#f6dfc0"/>
+  <ellipse cx="32" cy="23" rx="22" ry="6.5" fill="#fff6e8"/>
+  <g transform="rotate(-7 32 20)" fill="#f3b64b">
+    <rect x="25" y="16" width="14" height="8" rx="2.2"/>
+    <path d="M25 19.2v-.9a2.2 2.2 0 0 1 2.2-2.2h9.6a2.2 2.2 0 0 1 2.2 2.2v.9Z" fill="#ffd684"/>
+  </g>
 </svg>

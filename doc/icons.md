@@ -4,7 +4,7 @@
 
 <img src="../public/assets/favicon.svg" width="96" height="96" alt="Fedistack icon">
 
-The [SVG source](../public/assets/favicon.svg) is the Fedistack mark: stacked lines and a bookmark on a warm orange tile. It is used in the app and README and is the source for every raster export. Edit this file, then regenerate the assets.
+The [SVG source](../public/assets/favicon.svg) is the Fedistack mark: three cream pancakes and a pat of butter on a warm orange tile. The orange matches the `--accent` color in `public/styles.css`; the pancake layers are broad, symmetric shapes with even negative-space gaps that stay legible at 16×16. It is used in the app and README and is the source for every raster export. Edit this file, then regenerate the assets. If the tile color changes, update the Apple touch icon background in `scripts/generate-icons.sh` and the theme color in `public/manifest.webmanifest` to match.
 
 ## Generate PNGs and ICO
 
@@ -32,7 +32,7 @@ To export elsewhere, pass an output directory; relative paths are resolved from 
 ./scripts/generate-icons.sh /tmp/fedistack-icons
 ```
 
-The script renders each PNG directly from the SVG, preserving transparent corners in the general exports. The Apple touch icon fills those corners with orange so iOS can apply its own rounded mask. The script also packs the small PNGs into a multi-resolution ICO.
+The script renders each PNG directly from the SVG, preserving transparent corners in the general exports. The Apple touch icon fills those corners with the same orange as the tile so iOS can apply its own rounded mask. The script also packs the small PNGs into a multi-resolution ICO.
 
 | Output in `public/assets/` | Size / purpose |
 | --- | --- |

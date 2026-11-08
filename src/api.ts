@@ -460,14 +460,15 @@ namespace Fedi {
     async accountPosts(
       id: string, tab: "posts" | "replies" | "boosts" | "writing", next?: string, signal?: AbortSignal,
     ): Promise<{ posts: Post[]; next?: string }> {
-      // Mastodon has no portable boosts-only endpoint. Filter each page of
-      // account activity and keep its cursor, including pages with no matches.
+      // Keep cursors for pages with no matches. Servers may still return self-replies.
       const result = await this.request<MastodonStatus[]>(next ||
-        `/api/v1/accounts/${encodeURIComponent(id)}/statuses?exclude_replies=false&exclude_reblogs=${tab !== "boosts"}&limit=40`, "GET", undefined, undefined, signal);
+        `/api/v1/accounts/${encodeURIComponent(id)}/statuses?exclude_replies=${tab === "posts"}&exclude_reblogs=${tab !== "boosts"}&limit=40`, "GET", undefined, undefined, signal);
       return {
-        posts: result.data.filter((s) => visibleStatus(s) &&
-          (tab === "boosts" ? !!s.reblog : !s.reblog) &&
-          (tab !== "replies" || !!s.in_reply_to_id || !!s.is_reply)).map(mapStatus),
+        posts: result.data.filter((s) => {
+          if (!visibleStatus(s) || !!s.reblog !== (tab === "boosts")) return false;
+          const reply = !!(s.in_reply_to_id || s.is_reply);
+          return tab === "posts" ? !reply : tab !== "replies" || reply;
+        }).map(mapStatus),
         next: result.next,
       };
     }

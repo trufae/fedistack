@@ -56,6 +56,7 @@ namespace Fedi {
     url?: string;
     source?: string;
     replyTo?: string;
+    isReply?: boolean;
     boostedBy?: string;
     tags: string[];
     local?: boolean;
@@ -169,6 +170,7 @@ namespace Fedi {
     sensitive?: boolean;
     url: string;
     in_reply_to_id?: string;
+    is_reply?: boolean;
     reblog?: MastodonStatus;
     mentions?: { id: string; acct: string }[];
     tags?: { name: string }[];

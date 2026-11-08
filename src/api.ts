@@ -399,12 +399,11 @@ namespace Fedi {
       // Mastodon has no portable boosts-only endpoint. Filter each page of
       // account activity and keep its cursor, including pages with no matches.
       const result = await this.request<MastodonStatus[]>(next ||
-        `/api/v1/accounts/${encodeURIComponent(id)}/statuses?exclude_replies=${tab === "posts"}&exclude_reblogs=${tab !== "boosts"}&limit=40`);
+        `/api/v1/accounts/${encodeURIComponent(id)}/statuses?exclude_replies=false&exclude_reblogs=${tab !== "boosts"}&limit=40`);
       return {
         posts: result.data.filter((s) => visibleStatus(s) &&
           (tab === "boosts" ? !!s.reblog : !s.reblog) &&
-          (tab !== "replies" || !!s.in_reply_to_id) &&
-          (tab !== "posts" || !s.in_reply_to_id)).map(mapStatus),
+          (tab !== "replies" || !!s.in_reply_to_id || !!s.is_reply)).map(mapStatus),
         next: result.next,
       };
     }
@@ -610,6 +609,7 @@ namespace Fedi {
       url: safeURL(s.url),
       source: card ? safeURL(card.url) : undefined,
       replyTo: s.in_reply_to_id,
+      isReply: !!s.in_reply_to_id || !!s.is_reply,
       boostedBy: input.reblog
         ? input.account.display_name || input.account.username
         : undefined,

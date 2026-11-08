@@ -243,8 +243,8 @@ namespace Fedi {
     if (state.view === "discover") updateFeedFilters();
     else render();
   }
-  function visibleFeedPosts(): Post[] {
-    let posts = state.posts.filter(
+  function visibleFeedPosts(source = state.posts): Post[] {
+    let posts = source.filter(
       (p) => state.filter === "all" || p.kind === state.filter,
     );
     if (state.view === "discover") posts = filterByLanguages(posts, state.discoveryLanguages);
@@ -320,11 +320,14 @@ namespace Fedi {
     const timeline = state.view === "bookmarks" ? "bookmarks" : state.timeline;
     const key = !state.query ? feedCacheKey(timeline) : undefined;
     const generation = feedCacheGeneration();
+    const cached = key ? readFeedCache(key) : undefined;
+    let updated = cached?.updated || 0;
+    let loaded: Post[] = append ? state.posts : [];
     const current = () => version === loadVersion && state.api === api;
     const save = () => {
-      if (key && current() && generation === feedCacheGeneration()) {
+      if (key && current() && state.posts === loaded && generation === feedCacheGeneration()) {
         const authors = new Set(state.posts.map((post) => post.author.id));
-        writeFeedCache({ key, posts: state.posts, next: state.next, updated: Date.now(),
+        writeFeedCache({ key, posts: state.posts, next: state.next, updated,
           relationships: [...state.relationships.values()].filter((r) => authors.has(r.id)) });
       }
     };
@@ -334,7 +337,6 @@ namespace Fedi {
     state.loading = true;
     state.error = "";
     if (!append) {
-      const cached = key ? readFeedCache(key) : undefined;
       if (cached) {
         state.posts = cached.posts;
         state.next = cached.next;
@@ -345,7 +347,7 @@ namespace Fedi {
       }
       state.accounts = [];
       feedSource = key;
-      if (cached && !force && Date.now() - cached.updated < 60000) {
+      if (cached && !force && Date.now() - cached.updated < (cached.posts.length ? 60000 : 5000)) {
         state.loading = false;
         reuseCache = true;
       }
@@ -398,14 +400,16 @@ namespace Fedi {
           const result = await api.timeline(timeline, cursor);
           if (!current()) return;
           posts = result.posts;
+          if (page === 0 && !append) updated = Date.now();
           state.next =
             result.next && !visited.has(result.next) ? result.next : undefined;
           cursor = state.next;
         }
         if (!current()) return;
-        state.posts = [
-          ...new Map([...(page === 0 && !append ? [] : state.posts), ...posts].map((p) => [p.id, p])).values(),
-        ];
+        loaded = [...new Map([...loaded, ...posts].map((p) => [p.id, p])).values()];
+        // Keep readable cached articles while scanning note-only fresh pages.
+        if (append || visibleFeedPosts(loaded).length || !visibleFeedPosts().length)
+          state.posts = loaded;
         if (!paginated) state.next = undefined;
         save();
         render();
@@ -429,11 +433,13 @@ namespace Fedi {
         if (
           !paginated ||
           !state.next ||
-          visibleFeedPosts().filter((p) => !existing.has(p.id)).length >= target
+          visibleFeedPosts(loaded).filter((p) => !existing.has(p.id)).length >= target
         )
           break;
         render();
       }
+      state.posts = loaded;
+      save();
     } catch (error) {
       if (current()) {
         state.error = (error as Error).message;
@@ -451,7 +457,7 @@ namespace Fedi {
     }
   }
 
-  export async function route(): Promise<void> {
+  export async function route(force = false): Promise<void> {
     if (state.view === "editor") {
       if (!flushDraft()) {
         history.replaceState(
@@ -487,7 +493,7 @@ namespace Fedi {
     state.readerServer = "";
     state.profile = null;
     if (page === "profile") {
-      await openProfile(id || state.session?.account.id || demoMe.id, query);
+      await openProfile(id || state.session?.account.id || demoMe.id, query, force);
       return;
     }
     if (page === "write" || page === "note") {

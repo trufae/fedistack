@@ -13,8 +13,30 @@ namespace Fedi {
     visited: Set<string>;
     loading: boolean;
     error: string;
+    updated: number;
+    generation: number;
+    cacheKey: string;
   }
   const profileTabs: ProfileTab[] = ["posts", "replies", "likes", "boosts", "followers", "following"];
+
+  type ProfileCache = Pick<ProfileState, "account" | "posts" | "people" | "next" | "updated" | "generation">;
+  const profileCache = new Map<string, ProfileCache>();
+  function saveProfile(p: ProfileState): void {
+    if (p.generation !== feedCacheGeneration() || p.posts.length > 200 || p.people.length > 200) return;
+    profileCache.delete(p.cacheKey);
+    profileCache.set(p.cacheKey, { account: p.account, posts: p.posts, people: p.people, next: p.next,
+      updated: p.updated, generation: p.generation });
+    while (profileCache.size > 12) profileCache.delete(profileCache.keys().next().value!);
+  }
+  function profileRelationships(p: ProfileState, ids: string[]): void {
+    const api = state.api;
+    if (!api || p.server) return;
+    void api.relationships(ids.filter((id) => id !== state.session?.account.id)).then((relations) => {
+      if (!currentProfile(p, api)) return;
+      relations.forEach((r) => state.relationships.set(r.id, r));
+      render();
+    }).catch(() => { /* Relationship metadata must not delay reading. */ });
+  }
 
   export function profilePath(id: string, tab = "posts", server = state.readerServer): string {
     const query = new URLSearchParams();
@@ -29,12 +51,14 @@ namespace Fedi {
     return `<a class="profile-avatar-link" href="#${escapeHTML(profilePath(account.id))}" aria-label="View ${escapeHTML(account.name)}’s profile">${avatar(account, small, key)}</a>`;
   }
   export function accountRow(account: Account, key = "account"): string {
-    return `<div class="recommended">${profileAvatar(account, false, `${key}:${account.id}`)}<div><a class="author-link" href="#${escapeHTML(profilePath(account.id))}">${escapeHTML(account.name)}</a><p>@${escapeHTML(account.acct)}</p>${account.bio ? `<p class="account-bio">${escapeHTML(account.bio)}</p>` : ""}</div>${followButton(account)}</div>`;
+    const r = state.readerServer ? undefined : state.relationships.get(account.id);
+    const direction = r?.following && r.followed_by ? "Mutual follow" : r?.followed_by ? "Follows you" : r?.following ? "You follow" : "";
+    return `<div class="recommended">${profileAvatar(account, false, `${key}:${account.id}`)}<div><a class="author-link" href="#${escapeHTML(profilePath(account.id))}">${escapeHTML(account.name)}</a><p>@${escapeHTML(account.acct)}</p>${direction ? `<p class="muted">${direction}</p>` : ""}${account.bio ? `<p class="account-bio">${escapeHTML(account.bio)}</p>` : ""}</div>${followButton(account)}</div>`;
   }
   function currentProfile(profile: ProfileState, api: API | null): boolean {
     return state.profile === profile && state.view === "profile" && state.api === api;
   }
-  export async function openProfile(id: string, query: string): Promise<void> {
+  export async function openProfile(id: string, query: string, force = false): Promise<void> {
     const params = new URLSearchParams(query), api = state.api;
     const source = params.get("server");
     let server = "", sourceError = "";
@@ -53,11 +77,18 @@ namespace Fedi {
       tab: profileTabs.includes(tab) && (tab !== "likes" || owner) ? tab : "posts",
       api: server ? new API(server) : api, server,
       posts: [], people: [], visited: new Set(), loading: true, error: "",
+      updated: 0, generation: feedCacheGeneration(), cacheKey: "",
     };
+    p.cacheKey = JSON.stringify([state.session?.server, state.session?.account.id, p.api?.server, id, p.tab]);
+    const saved = profileCache.get(p.cacheKey);
+    if (saved?.generation === p.generation) Object.assign(p, saved);
     state.profile = p;
     state.view = "profile";
     state.readerServer = server;
     render();
+    if (!force && saved?.generation === p.generation && Date.now() - p.updated < (p.posts.length || p.people.length ? 60000 : 5000)) {
+      p.loading = false; render(); return;
+    }
     try {
       if (sourceError) throw new Error(sourceError);
       p.account = p.api ? await p.api.account(id) : cached;
@@ -67,16 +98,13 @@ namespace Fedi {
         state.session.account = p.account;
         writeStore("session", state.session, state.session.remember !== true);
       }
-      if (!server && api && !owner) {
-        try {
-          const relationships = await api.relationships([id]);
-          if (!currentProfile(p, api)) return;
-          relationships.forEach((r) => state.relationships.set(r.id, r));
-        } catch { /* A profile remains readable without relationship metadata. */ }
-      }
+      if (!owner) profileRelationships(p, [id]);
     } catch (error) {
       if (!currentProfile(p, api)) return;
       p.error = (error as Error).message;
+      if (error instanceof APIError && [401, 403].includes(error.status)) {
+        clearFeedCache(); profileCache.clear(); p.posts = []; p.people = []; p.next = undefined;
+      }
       p.loading = false;
       render();
       return;
@@ -95,18 +123,17 @@ namespace Fedi {
     p.loading = true;
     p.error = "";
     if (!append) {
-      p.posts = [];
-      p.people = [];
-      p.next = undefined;
       p.visited.clear();
     }
     render();
+    let postsLoaded = append ? p.posts : [], peopleLoaded = append ? p.people : [];
+    let next = append ? p.next : undefined;
     try {
       if (!p.api) {
         const posts = demoProfilePosts();
         p.posts = posts.filter((post) => p.tab === "likes" ? post.liked :
           p.tab === "boosts" ? p.owner && post.reposted :
-          ["posts", "replies"].includes(p.tab) && post.author.id === p.id && !!post.replyTo === (p.tab === "replies"));
+          ["posts", "replies"].includes(p.tab) && post.author.id === p.id && (p.tab !== "replies" || !!post.replyTo || !!post.isReply));
         p.people = p.tab === "following" && p.owner
           ? demoAuthors.filter((a) => demoState.follows.includes(a.id))
           : p.tab === "followers" && !p.owner && demoState.follows.includes(p.id) ? [demoMe] : [];
@@ -118,7 +145,7 @@ namespace Fedi {
         // Bound scanning for sparse boosts/replies. The next cursor stays usable
         // even if none of the scanned pages contained matching activity.
         for (let page = 0; page < 4; page++) {
-          const cursor = p.next;
+          const cursor = next;
           if (cursor) p.visited.add(cursor);
           const result = p.tab === "followers" || p.tab === "following"
             ? await p.api.accountConnections(p.id, p.tab, cursor)
@@ -126,27 +153,30 @@ namespace Fedi {
               ? await p.api.favourites(cursor)
               : await p.api.accountPosts(p.id, p.tab, cursor);
           if (!currentProfile(p, api)) return;
-          p.next = result.next && !p.visited.has(result.next) ? result.next : undefined;
+          next = result.next && !p.visited.has(result.next) ? result.next : undefined;
+          if (page === 0 && !append) p.updated = Date.now();
           if ("accounts" in result) {
-            p.people = [...new Map([...p.people, ...result.accounts].map((a) => [a.id, a])).values()];
+            peopleLoaded = [...new Map([...peopleLoaded, ...result.accounts].map((a) => [a.id, a])).values()];
           } else {
             const posts = p.server ? result.posts.filter((post) => canRepost(post)) : result.posts;
-            p.posts = [...new Map([...p.posts, ...posts].map((post) => [post.id, post])).values()];
-            if (p.owner && p.tab === "boosts") p.posts.forEach((post) => { post.reposted = true; });
+            postsLoaded = [...new Map([...postsLoaded, ...posts].map((post) => [post.id, post])).values()];
+            if (p.owner && p.tab === "boosts") postsLoaded.forEach((post) => { post.reposted = true; });
           }
           const count = "accounts" in result ? result.accounts.length : result.posts.length;
-          if (count || !p.next) break;
+          if (count || !next) break;
         }
-        if (api && !p.server) {
-          try {
-            const relationships = await api.relationships([...p.people.map((a) => a.id), ...p.posts.map((post) => post.author.id)]);
-            if (!currentProfile(p, api)) return;
-            relationships.forEach((r) => state.relationships.set(r.id, r));
-          } catch { /* Reading does not require relationships. */ }
-        }
+        p.posts = postsLoaded; p.people = peopleLoaded; p.next = next;
+        saveProfile(p);
+        render();
+        profileRelationships(p, [...p.people.map((a) => a.id), ...p.posts.map((post) => post.author.id)]);
       }
     } catch (error) {
-      if (currentProfile(p, api)) p.error = (error as Error).message;
+      if (currentProfile(p, api)) {
+        p.error = (error as Error).message;
+        if (error instanceof APIError && [401, 403].includes(error.status)) {
+          clearFeedCache(); profileCache.clear(); p.posts = []; p.people = []; p.next = undefined;
+        }
+      }
     } finally {
       if (currentProfile(p, api)) { p.loading = false; render(); }
     }
@@ -154,10 +184,10 @@ namespace Fedi {
   export function profileView(): string {
     const p = state.profile, a = p?.account;
     if (!p || !a) return `<header class="page-top"><a href="#home" class="text-button">${icon("back")} Home</a></header>${emptyState(p?.loading ? "Opening profile…" : "Profile unavailable", p?.error || "", p && !p.loading ? action("profile-refresh", "Try again", "", "button subtle") : "")}`;
-    const tabs = profileTabs.filter((tab) => tab !== "likes" || p.owner);
+    const tabs = profileTabs.filter((tab) => tab !== "followers" && tab !== "following" && (tab !== "likes" || p.owner));
     const link = (tab: ProfileTab) => `#${escapeHTML(profilePath(p.id, tab, p.server))}`;
     const stats = ([['posts', a.statuses], ['followers', a.followers], ['following', a.following]] as const)
-      .map(([tab, count]) => `<a href="${link(tab)}"><strong>${count === undefined ? "—" : count.toLocaleString()}</strong><span>${tab}</span></a>`).join("");
+      .map(([tab, count]) => `<a href="${link(tab)}"${p.tab === tab ? ' aria-current="page"' : ""}><strong>${count === undefined ? "—" : count.toLocaleString()}</strong><span>${tab === "posts" ? "posts & replies" : tab}</span></a>`).join("");
     const joined = a.joined && Number.isFinite(Date.parse(a.joined))
       ? `Joined ${new Date(a.joined).toLocaleDateString(undefined, { month: "long", year: "numeric" })}` : "";
     const people = p.tab === "followers" || p.tab === "following";
@@ -177,7 +207,8 @@ namespace Fedi {
       <div class="profile-meta">${joined ? `<span>${joined}</span>` : ""}${a.url ? `<a href="${escapeHTML(safeURL(a.url))}" target="_blank" rel="noopener noreferrer">Original profile ${icon("external")}</a>` : ""}${!state.session && !p.server ? '<span>Fictional offline demo</span>' : ""}</div>
       <div class="profile-counts">${stats}</div></div></section>
       ${p.owner && p.tab === "posts" && p.posts.length ? `<section class="profile-insights" aria-label="Your post activity"><p>On these ${p.posts.length} loaded posts</p><div>${[["heart", "Likes received", "likes"], ["repost", "Boosts received", "reposts"], ["comment", "Replies received", "replies"]].map(([symbol, label, key]) => `<span>${icon(symbol)}<strong>${p.posts.reduce((n, post) => n + (post[key as "likes" | "reposts" | "replies"] || 0), 0).toLocaleString()}</strong> ${label}</span>`).join("")}</div></section>` : ""}
-      <nav class="timeline-tabs profile-tabs" aria-label="Profile activity">${tabs.map((tab) => `<a href="${link(tab)}"${p.tab === tab ? ' class="active" aria-current="page"' : ""}>${tab[0].toUpperCase() + tab.slice(1)}${tab === "likes" ? ` ${icon("lock")}` : ""}</a>`).join("")}</nav>
+      <nav class="timeline-tabs profile-tabs" aria-label="Profile activity">${tabs.map((tab) => `<a href="${link(tab)}"${p.tab === tab ? ' class="active" aria-current="page"' : ""}>${tab === "posts" ? "Posts & replies" : tab[0].toUpperCase() + tab.slice(1)}${tab === "likes" ? ` ${icon("lock")}` : ""}</a>`).join("")}</nav>
+      ${people ? `<p class="profile-notice">${p.tab === "followers" ? (p.owner ? "People who follow you" : "People who follow this account") : (p.owner ? "People you follow" : "People this account follows")}</p>` : ""}
       ${p.tab === "likes" ? '<p class="profile-notice">Your likes · Only visible to you</p>' : ""}
       <div class="${people ? "profile-people" : "feed"}">${people ? p.people.map((a) => accountRow(a, "profile-person")).join("") : p.posts.map((post) => postCard(post)).join("")}</div>
       ${p.error ? `<div class="error-panel" role="alert">${escapeHTML(p.error)}${action(p.next ? "profile-more" : "profile-refresh", "Try again", "", "button subtle")}</div>` : ""}

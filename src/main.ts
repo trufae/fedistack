@@ -245,7 +245,7 @@ namespace Fedi {
         navigate(profilePath(id));
         break;
       case "profile-refresh":
-        await route();
+        await route(true);
         break;
       case "profile-more":
         await loadProfilePage(true);

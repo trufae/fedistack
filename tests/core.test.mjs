@@ -3494,14 +3494,14 @@ test("own profile refreshes header and counts, shows loaded engagement and setti
   await app.route();
   assert.equal(app.state.profile.owner, true);
   assert.equal(app.state.session.account.followers, 124);
-  assert.equal(app.state.profile.posts.length, 1);
+  assert.equal(app.state.profile.posts.length, 2);
   assert.match(get("app").innerHTML, /fresh-header.png/);
-  assert.match(get("app").innerHTML, /On these 1 loaded posts/);
+  assert.match(get("app").innerHTML, /On these 2 loaded posts/);
   assert.match(get("app").innerHTML, /Likes received/);
   assert.match(get("app").innerHTML, /href="#settings" class="button subtle small-button"/);
   assert.match(get("app").innerHTML, /aria-label="Your profile" aria-current="page"/);
   await app.loadProfilePage(true);
-  assert.deepEqual(Array.from(app.state.profile.posts, (p) => p.id), ["newer", "older"]);
+  assert.deepEqual(Array.from(app.state.profile.posts, (p) => p.id), ["newer", "reply", "older"]);
   assert.equal(app.state.profile.next, undefined);
   assert.equal(calls.filter((u) => u.pathname.endsWith("/statuses")).length, 2);
 });
@@ -3849,4 +3849,97 @@ test("malformed feed caches are ignored without preventing fresh loading", async
     assert.equal(app.state.error, "");
     assert.equal(app.state.posts[0].id, "fresh");
   }
+});
+
+
+test("profile replies include unavailable parents and optional relationships do not delay posts", async () => {
+  let finish;
+  const { app, context, get } = await profileFixture(async (url) => {
+    const u = new URL(url);
+    if (u.pathname.endsWith("/relationships")) return new Promise((resolve) => { finish = resolve; });
+    if (u.pathname.endsWith("/statuses")) {
+      assert.equal(u.searchParams.get("exclude_replies"), "false");
+      return Response.json([sharedStatus({ id: "orphan", is_reply: true, in_reply_to_id: null, account: profileAccount("other") })]);
+    }
+    return Response.json(profileAccount("other"));
+  });
+  context.location.hash = "#profile/other?tab=replies";
+  await app.route();
+  assert.equal(app.state.profile.loading, false);
+  assert.deepEqual(Array.from(app.state.profile.posts, (p) => p.id), ["orphan"]);
+  assert.match(get("app").innerHTML, /Writer other/);
+  finish(Response.json([]));
+  await new Promise(setImmediate);
+});
+
+test("profile caches reuse fresh activity and retain it through failed refreshes", async () => {
+  let calls = 0, fail = false;
+  const { app, context, get } = await profileFixture(async (url) => {
+    calls++;
+    if (fail) throw new Error("Offline");
+    if (new URL(url).pathname.endsWith("/statuses")) return Response.json([sharedStatus({ id: "saved", content: "Profile cached content", account: profileAccount() })]);
+    return Response.json(profileAccount());
+  });
+  context.location.hash = "#profile";
+  await app.route();
+  const initial = calls;
+  await app.route();
+  assert.equal(calls, initial);
+  fail = true;
+  await app.route(true);
+  assert.equal(calls, initial + 1);
+  assert.match(get("app").innerHTML, /Profile cached content/);
+  assert.ok(app.state.profile.error);
+  app.clearFeedCache();
+  await app.route();
+  assert.equal(app.state.profile.posts.length, 0);
+});
+
+test("followers and following have one navigation link and explicit directions", async () => {
+  const calls = [];
+  const { app, context, get } = await profileFixture(async (url) => {
+    const path = new URL(url).pathname; calls.push(path);
+    if (/\/(followers|following|relationships)$/.test(path)) return Response.json([]);
+    return Response.json(profileAccount());
+  });
+  context.location.hash = "#profile?tab=followers";
+  await app.route();
+  assert.ok(calls.includes("/api/v1/accounts/me/followers"));
+  assert.match(get("app").innerHTML, /People who follow you/);
+  assert.equal((get("app").innerHTML.match(/href="#profile\/me\?tab=followers"/g) || []).length, 1);
+  context.location.hash = "#profile?tab=following";
+  await app.route();
+  assert.ok(calls.includes("/api/v1/accounts/me/following"));
+  assert.match(get("app").innerHTML, /People you follow/);
+});
+
+test("older pages preserve the head freshness timestamp", async () => {
+  const { app, post } = cachedFeedFixture();
+  app.state.api.timeline = async () => ({ posts: [post("head")], next: "older" });
+  await app.loadFeed(false, 1);
+  const saved = app.readStore("feed-cache", [], true);
+  saved[0].updated -= 61000;
+  const original = saved[0].updated;
+  app.writeStore("feed-cache", saved, true);
+  app.state.api.timeline = async () => ({ posts: [post("older")] });
+  await app.loadFeed(true, 1);
+  assert.equal(app.readFeedCache(app.feedCacheKey("home")).updated, original);
+});
+
+test("cached articles stay visible while fresh note pages are scanned", async () => {
+  const { app, get, post } = cachedFeedFixture();
+  app.state.filter = "article";
+  app.state.api.timeline = async () => ({ posts: [post("old", { title: "Readable cached article" })] });
+  await app.loadFeed(false, 1);
+  let finish;
+  app.state.api.timeline = async (_, cursor) => cursor
+    ? new Promise((resolve) => { finish = resolve; })
+    : { posts: [post("note", { kind: "post" })], next: "next" };
+  const loading = app.loadFeed(false, 1);
+  await new Promise(setImmediate);
+  assert.match(get("app").innerHTML, /Readable cached article/);
+  finish({ posts: [post("new", { title: "New readable article" })] });
+  await loading;
+  assert.match(get("app").innerHTML, /New readable article/);
+  assert.doesNotMatch(get("app").innerHTML, /Readable cached article/);
 });

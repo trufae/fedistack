@@ -204,7 +204,7 @@ namespace Fedi {
         if (id === "federated") state.filter = "all";
         state.query = "";
         if (state.view === "bookmarks") navigate("home");
-        else await loadFeed();
+        else await loadFeed(false, undefined, false);
         break;
       case "filter":
         state.filter = id as typeof state.filter;

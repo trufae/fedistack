@@ -40,7 +40,9 @@ namespace Fedi {
   };
   let loadVersion = 0;
   const feedTarget = 10;
-  const feedPageLimit = 10;
+  const feedPageLimit = 3;
+  let feedSource: string | undefined;
+  let feedInFlight: { key: string; api: API | null; promise: Promise<void> } | undefined;
   export const demoState = readStore<{
     posts: Post[];
     follows: string[];
@@ -284,12 +286,31 @@ namespace Fedi {
       ${state.accounts.length ? `<div class="account-results">${state.accounts.map((a) => accountRow(a, "search")).join("")}</div>` : ""}
       ${state.error ? `<div class="error-panel" role="alert">${escapeHTML(state.error)}${action("refresh", "Try again", "", "button subtle")}</div>` : ""}
       <div class="feed">${posts.map((p, i) => postCard(p, i === 0 && p.kind === "article") + (i === Math.min(2, posts.length - 1) ? recommendations : "")).join("")}${!posts.length ? recommendations : ""}${!posts.length && !state.loading && !state.error ? emptyState("A little quiet here", hasLanguages ? "No posts in the selected languages match the loaded results. Load older posts or change your languages in Settings." : state.filter !== "all" ? "No matching writing in the loaded posts. Try another filter or load older posts." : "Follow a writer, explore another timeline, or start a conversation.", hasLanguages ? '<a href="#settings" class="button subtle">Change language settings</a>' : action("discover", "Explore the fediverse", "", "button subtle")) : ""}</div>
-      ${state.loading ? '<div class="loading" role="status">Gathering your reading…</div>' : state.next ? `<div class="load-more">${action("load-more", "Load older posts", "", "button subtle")}</div>` : posts.length ? '<div class="end-note">You’re all caught up. Go make a little something.</div>' : ""}`;
+      ${state.loading ? `<div class="loading" role="status">${posts.length ? "Updating your reading…" : "Gathering your reading…"}</div>` : state.next ? `<div class="load-more">${action("load-more", "Load older posts", "", "button subtle")}</div>` : posts.length ? '<div class="end-note">You’re all caught up. Go make a little something.</div>' : ""}`;
   }
 
-  export async function loadFeed(
+  export function loadFeed(
     append = false,
     target = feedTarget,
+    force = true,
+  ): Promise<void> {
+    const api = state.api;
+    const key = JSON.stringify([state.view, state.timeline, state.query, state.filter,
+      state.followingOnly, state.discoveryLanguages, append, target]);
+    if (state.loading && feedInFlight?.api === api && feedInFlight.key === key)
+      return feedInFlight.promise;
+    const promise = runLoadFeed(append, target, force);
+    const request = { api, key, promise };
+    feedInFlight = request;
+    const done = () => { if (feedInFlight === request) feedInFlight = undefined; };
+    void promise.then(done, done);
+    return promise;
+  }
+
+  async function runLoadFeed(
+    append: boolean,
+    target: number,
+    force: boolean,
   ): Promise<void> {
     if (append && !state.next) return;
     const version = ++loadVersion,
@@ -297,15 +318,41 @@ namespace Fedi {
     const existing = new Set(append ? state.posts.map((p) => p.id) : []);
     const visited = new Set<string>();
     const timeline = state.view === "bookmarks" ? "bookmarks" : state.timeline;
+    const key = !state.query ? feedCacheKey(timeline) : undefined;
+    const generation = feedCacheGeneration();
+    const current = () => version === loadVersion && state.api === api;
+    const save = () => {
+      if (key && current() && generation === feedCacheGeneration()) {
+        const authors = new Set(state.posts.map((post) => post.author.id));
+        writeFeedCache({ key, posts: state.posts, next: state.next, updated: Date.now(),
+          relationships: [...state.relationships.values()].filter((r) => authors.has(r.id)) });
+      }
+    };
+    let cursor = append ? state.next : undefined;
+    const requestedRelationships = new Set<string>();
+    let reuseCache = false;
     state.loading = true;
     state.error = "";
     if (!append) {
-      state.posts = [];
+      const cached = key ? readFeedCache(key) : undefined;
+      if (cached) {
+        state.posts = cached.posts;
+        state.next = cached.next;
+        cached.relationships.forEach((r) => state.relationships.set(r.id, r));
+      } else if (!key || key !== feedSource) {
+        state.posts = [];
+        state.next = undefined;
+      }
       state.accounts = [];
-      state.next = undefined;
+      feedSource = key;
+      if (cached && !force && Date.now() - cached.updated < 60000) {
+        state.loading = false;
+        reuseCache = true;
+      }
     }
     render();
     if (!append) void loadSuggestions();
+    if (reuseCache) return;
     try {
       let posts: Post[];
       if (!api) {
@@ -340,38 +387,45 @@ namespace Fedi {
         );
       } else if (state.query) {
         const result = await api.search(state.query);
-        if (version !== loadVersion) return;
+        if (!current()) return;
         posts = result.posts;
         state.accounts = result.accounts;
       } else posts = [];
       const paginated = !!api && !state.query;
       for (let page = 0; page < feedPageLimit; page++) {
         if (api && paginated) {
-          const cursor = state.next;
           if (cursor) visited.add(cursor);
           const result = await api.timeline(timeline, cursor);
-          if (version !== loadVersion) return;
+          if (!current()) return;
           posts = result.posts;
           state.next =
             result.next && !visited.has(result.next) ? result.next : undefined;
+          cursor = state.next;
         }
-        if (version !== loadVersion) return;
+        if (!current()) return;
         state.posts = [
-          ...new Map([...state.posts, ...posts].map((p) => [p.id, p])).values(),
+          ...new Map([...(page === 0 && !append ? [] : state.posts), ...posts].map((p) => [p.id, p])).values(),
         ];
+        if (!paginated) state.next = undefined;
+        save();
+        render();
         if (api) {
-          try {
-            const relations = await api.relationships([
+          const ids = [...new Set([
               ...posts.map((p) => p.author.id),
               ...state.accounts.map((a) => a.id),
-            ]);
-            if (version !== loadVersion) return;
-            relations.forEach((r) => state.relationships.set(r.id, r));
-          } catch {
-            /* Reading does not depend on the relationships endpoint. */
+            ])].filter((id) => !requestedRelationships.has(id));
+          ids.forEach((id) => requestedRelationships.add(id));
+          if (ids.length) {
+            const relationships = api.relationships(ids).then((relations) => {
+              if (!current()) return;
+              relations.forEach((r) => state.relationships.set(r.id, r));
+              save();
+              render();
+            }).catch(() => { /* Relationship metadata is optional for reading. */ });
+            if (state.followingOnly) await relationships;
           }
         }
-        if (version !== loadVersion) return;
+        if (!current()) return;
         if (
           !paginated ||
           !state.next ||
@@ -381,9 +435,16 @@ namespace Fedi {
         render();
       }
     } catch (error) {
-      if (version === loadVersion) state.error = (error as Error).message;
+      if (current()) {
+        state.error = (error as Error).message;
+        if (error instanceof APIError && (error.status === 401 || error.status === 403)) {
+          clearFeedCache();
+          state.posts = [];
+          state.next = undefined;
+        }
+      }
     } finally {
-      if (version === loadVersion) {
+      if (current()) {
         state.loading = false;
         render();
       }
@@ -546,7 +607,7 @@ namespace Fedi {
       state.filter = "all";
     }
     if (state.view !== "discover") state.query = "";
-    await loadFeed();
+    await loadFeed(false, feedTarget, false);
   }
 
   function readerView(): string {

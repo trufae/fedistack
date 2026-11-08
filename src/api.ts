@@ -164,6 +164,8 @@ namespace Fedi {
             response.status,
           );
         }
+        if (method !== "GET" && /^\/api\/v[12]\/(?:statuses(?:\/|$)|bookmarks(?:\/|$)|filters(?:\/|$)|lists(?:\/|$)|accounts\/[^/]+\/(?:follow|unfollow|block|unblock|mute|unmute)$)/.test(url.pathname))
+          clearFeedCache();
         const data =
           response.status === 204
             ? (undefined as T)
@@ -232,9 +234,9 @@ namespace Fedi {
         : timeline.startsWith("tag:")
           ? `/api/v1/timelines/tag/${encodeURIComponent(timeline.slice(4))}`
           : paths[timeline];
-      const result = await this.request<MastodonStatus[]>(
-        next || `${path}${path.includes("?") ? "&" : "?"}limit=20`,
-      );
+      const url = new URL(next || path, this.server);
+      url.searchParams.set("limit", "40");
+      const result = await this.request<MastodonStatus[]>(url.href);
       return {
         posts: result.data
           .filter(

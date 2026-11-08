@@ -2478,7 +2478,7 @@ test("interest APIs encode identifiers, preserve list options, and use server pa
   assert.equal(calls[11].url.searchParams.get("following"), "true");
   assert.equal(calls[11].url.searchParams.get("q"), "name & surname");
   assert.equal(calls[12].url.pathname, "/api/v1/timelines/tag/caf%C3%A9%2Ftest");
-  assert.equal(calls[12].url.searchParams.get("limit"), "20");
+  assert.equal(calls[12].url.searchParams.get("limit"), "40");
   await assert.rejects(api.followedTags("https://untrusted.example/older"), /unsafe API URL/);
   assert.equal(calls.length, 13);
 });
@@ -2824,20 +2824,20 @@ test("automatic scanning is bounded and the next load resumes after the scanned 
   app.state.api.timeline = async (timeline, next) => {
     requests.push({ timeline, next });
     return {
-      posts: requests.length <= 10 ? [] : [post("found")],
-      next: requests.length <= 10 ? `page-${requests.length}` : undefined,
+      posts: requests.length <= 3 ? [] : [post("found")],
+      next: requests.length <= 3 ? `page-${requests.length}` : undefined,
     };
   };
   await app.loadFeed();
-  assert.equal(requests.length, 10);
-  assert.equal(app.state.next, "page-10");
+  assert.equal(requests.length, 3);
+  assert.equal(app.state.next, "page-3");
   await app.loadFeed(true);
-  assert.equal(requests.length, 11);
-  assert.equal(requests[10].next, "page-10");
+  assert.equal(requests.length, 4);
+  assert.equal(requests[3].next, "page-3");
   assert.equal(app.state.posts[0].id, "found");
   assert.equal(app.state.next, undefined);
   await app.loadFeed(true);
-  assert.equal(requests.length, 11);
+  assert.equal(requests.length, 4);
 });
 
 test("scanning counts articles in any selected language that match the following filter", async () => {
@@ -3677,4 +3677,163 @@ test("demo profiles show local activity and following; profile fields are escape
   app.render();
   assert.doesNotMatch(get("app").innerHTML, /<script>|<iframe|<img src=x/);
   assert.match(get("app").innerHTML, /&lt;script&gt;/);
+});
+
+function cachedFeedFixture() {
+  const fixture = feedFixture();
+  const { app } = fixture;
+  app.state.session = { server: "https://good.example", token: "access",
+    account: { ...app.demoMe, id: "reader" }, ...longServer };
+  app.state.api.server = app.state.session.server;
+  app.writeStore("session", app.state.session, true);
+  return fixture;
+}
+
+test("timeline requests use forty posts for initial and older pages", async () => {
+  const calls = [];
+  const { app } = setup(async (url) => {
+    calls.push(new URL(url));
+    return new Response("[]", { headers: { "Content-Type": "application/json" } });
+  });
+  const api = new app.API("https://good.example", "access");
+  await api.timeline("home");
+  await api.timeline("home", "https://good.example/api/v1/timelines/home?limit=20&max_id=old");
+  assert.deepEqual(calls.map((url) => url.searchParams.get("limit")), ["40", "40"]);
+  assert.equal(calls[1].searchParams.get("max_id"), "old");
+});
+
+test("posts render immediately without waiting for optional relationships", async () => {
+  const { app, get, post } = feedFixture();
+  let finish;
+  app.state.api.timeline = async () => ({ posts: [post("ready", { title: "Already readable" })] });
+  app.state.api.relationships = () => new Promise((resolve) => { finish = resolve; });
+  await app.loadFeed();
+  assert.match(get("app").innerHTML, /Already readable/);
+  assert.equal(app.state.loading, false);
+  finish([]);
+  await new Promise(setImmediate);
+});
+
+test("identical in-flight loads share a request and repeated authors share relationship lookups", async () => {
+  const { app, post } = feedFixture();
+  let finish, calls = 0, relationships = 0;
+  app.state.api.timeline = () => {
+    calls++;
+    return new Promise((resolve) => { finish = resolve; });
+  };
+  app.state.api.relationships = async () => { relationships++; return []; };
+  const first = app.loadFeed();
+  const second = app.loadFeed();
+  assert.equal(first, second);
+  assert.equal(calls, 1);
+  finish({ posts: [post("ready")] });
+  await first;
+  calls = 0;
+  relationships = 0;
+  app.state.api.timeline = async () => ({ posts: [post(`post-${++calls}`)], next: `page-${calls}` });
+  await app.loadFeed();
+  assert.equal(calls, 3);
+  assert.equal(relationships, 1);
+});
+
+test("fresh cached feeds return without requests and survive a tab reload", async () => {
+  const { app, context, post } = cachedFeedFixture();
+  let calls = 0;
+  app.state.api.timeline = async () => { calls++; return { posts: [post("saved", { title: "Cached reading" })] }; };
+  await app.loadFeed();
+  await app.loadFeed(false, 10, false);
+  assert.equal(calls, 1);
+  const restored = setup(undefined, { sessionStorage: context.sessionStorage });
+  const { get } = elements(restored.context);
+  restored.app.state.api = new restored.app.API("https://good.example", "access");
+  await restored.app.route();
+  assert.match(get("app").innerHTML, /Cached reading/);
+  assert.equal(restored.app.state.error, "");
+  assert.equal(context.localStorage.getItem("fedistack:feed-cache"), null);
+});
+
+test("stale feeds remain visible during refresh and failed refreshes keep offline reading", async () => {
+  const { app, context, get, post } = cachedFeedFixture();
+  app.state.api.timeline = async () => ({ posts: [post("old", { title: "Previous reading" })], next: "older" });
+  await app.loadFeed(false, 1);
+  const saved = app.readStore("feed-cache", [], true);
+  saved[0].updated -= 61000;
+  app.writeStore("feed-cache", saved, true);
+  let finish;
+  app.state.api.timeline = () => new Promise((resolve) => { finish = resolve; });
+  const loading = app.loadFeed(false, 1, false);
+  assert.match(get("app").innerHTML, /Previous reading/);
+  assert.match(get("app").innerHTML, /Updating your reading/);
+  finish({ posts: [post("new", { title: "Current reading" })], next: "new-older" });
+  await loading;
+  assert.deepEqual(Array.from(app.state.posts, (p) => p.id), ["new"]);
+  assert.equal(app.state.next, "new-older");
+  app.state.api.timeline = async () => { throw new Error("Offline"); };
+  await app.loadFeed();
+  assert.match(get("app").innerHTML, /Current reading/);
+  assert.equal(app.state.error, "Offline");
+  assert.equal(app.state.next, "new-older");
+  context.sessionStorage.setItem = () => { throw new Error("Quota exceeded"); };
+  app.state.api.timeline = async () => ({ posts: [post("readable")] });
+  await app.loadFeed();
+  assert.equal(app.state.error, "");
+  assert.equal(app.state.posts[0].id, "readable");
+});
+
+test("feed caches are isolated by account and timeline and are removed on logout", async () => {
+  const { app, context, get, post } = cachedFeedFixture();
+  app.state.api.timeline = async () => ({ posts: [post("private", { title: "Reader private feed", visibility: "private" })] });
+  await app.loadFeed();
+  let finish;
+  app.state.api.timeline = () => new Promise((resolve) => { finish = resolve; });
+  app.state.timeline = "local";
+  const local = app.loadFeed();
+  assert.doesNotMatch(get("app").innerHTML, /Reader private feed/);
+  finish({ posts: [] });
+  await local;
+  app.state.timeline = "home";
+  app.state.session = { ...app.state.session, account: { ...app.state.session.account, id: "someone-else" } };
+  const other = app.loadFeed();
+  assert.doesNotMatch(get("app").innerHTML, /Reader private feed/);
+  finish({ posts: [] });
+  await other;
+  app.clearSession();
+  assert.equal(context.sessionStorage.getItem("fedistack:feed-cache"), null);
+});
+
+test("feed mutations invalidate cached posts and late metadata cannot restore the old snapshot", async () => {
+  const { app, context, post } = cachedFeedFixture();
+  let finish;
+  app.state.api.timeline = async () => ({ posts: [post("deleted")] });
+  app.state.api.relationships = () => new Promise((resolve) => { finish = resolve; });
+  await app.loadFeed();
+  assert.ok(app.readFeedCache(app.feedCacheKey("home")));
+  context.fetch = async () => new Response(null, { status: 204 });
+  await new app.API("https://good.example", "access").deleteStatus("deleted");
+  assert.equal(context.sessionStorage.getItem("fedistack:feed-cache"), null);
+  finish([]);
+  await new Promise(setImmediate);
+  assert.equal(context.sessionStorage.getItem("fedistack:feed-cache"), null);
+});
+
+test("authorization failures clear cached private reading instead of redisplaying it", async () => {
+  const { app, context, get, post } = cachedFeedFixture();
+  app.state.api.timeline = async () => ({ posts: [post("private", { title: "Private cached reading", visibility: "private" })] });
+  await app.loadFeed();
+  app.state.api.timeline = async () => { throw new app.APIError("Sign in again", 401); };
+  await app.loadFeed();
+  assert.doesNotMatch(get("app").innerHTML, /Private cached reading/);
+  assert.equal(app.state.posts.length, 0);
+  assert.equal(context.sessionStorage.getItem("fedistack:feed-cache"), null);
+});
+
+test("malformed feed caches are ignored without preventing fresh loading", async () => {
+  for (const bad of ["{broken", "{}", JSON.stringify([{ key: "bad", posts: [null], relationships: [], updated: Date.now() }])]) {
+    const { app, context, post } = cachedFeedFixture();
+    context.sessionStorage.setItem("fedistack:feed-cache", bad);
+    app.state.api.timeline = async () => ({ posts: [post("fresh")] });
+    await app.loadFeed();
+    assert.equal(app.state.error, "");
+    assert.equal(app.state.posts[0].id, "fresh");
+  }
 });

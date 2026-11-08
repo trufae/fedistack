@@ -44,3 +44,7 @@ The script renders each PNG directly from the SVG, preserving transparent corner
 | `favicon.ico` | 16, 32, and 48 pixel images in one file |
 
 Commit the regenerated files with SVG changes. `make` copies them into `dist/assets/`; it does not need the image tools. The page declares the SVG, ICO fallback, 32-pixel PNG, and Apple touch icon. The web app manifest declares the 192- and 512-pixel PNGs and standalone launch mode. CI also runs the generator before building and testing.
+
+The build also creates content-hashed filenames for every declared icon and the manifest, then writes those relative URLs into `dist/index.html` and the built manifest. Changing an icon changes its URL automatically, so browsers can fetch it even when an older favicon is cached. The manifest keeps its relative ID, scope, and start URL, so hosting under a subdirectory still works. `dist/favicon.ico` provides the conventional fallback when hosted at a domain root.
+
+Deploy the complete contents of `dist/`, including `.htaccess` on Apache. The Apache configuration makes the HTML, stable manifest URL, and fallback ICO revalidate instead of remaining stale. Other hosts should also serve `index.html` with `Cache-Control: no-cache`. Reload the site after deployment to load the new icon URLs; existing Home Screen shortcuts may need to be added again. Old ZIP or tar archives must be rebuilt before uploading.

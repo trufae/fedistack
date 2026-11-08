@@ -30,6 +30,7 @@ test("the local server serves the complete static distribution and blocks traver
     ["/", "text/html"],
     ["/app.js", "text/javascript"],
     ["/styles.css", "text/css"],
+    ["/favicon.ico", "image/x-icon"],
     ["/manifest.webmanifest", "application/manifest+json"],
     ["/assets/slow-web.svg", "image/svg+xml"],
     ["/assets/favicon.svg", "image/svg+xml"],
@@ -44,6 +45,28 @@ test("the local server serves the complete static distribution and blocks traver
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("content-type"), type);
     assert.ok((await response.arrayBuffer()).byteLength > 0);
+  }
+  const html = await (await fetch(origin + "/")).text();
+  const links = Array.from(html.matchAll(/<link rel="(?:icon|apple-touch-icon|manifest)" href="([^"]+)"/g),
+    (match) => match[1]);
+  assert.equal(links.length, 5);
+  const iconTypes = { svg: "image/svg+xml", png: "image/png", ico: "image/x-icon", webmanifest: "application/manifest+json" };
+  for (const path of links) {
+    assert.match(path, /\.[a-f0-9]{16}\./);
+    const response = await fetch(new URL(path, origin));
+    assert.equal(response.status, 200, path);
+    assert.equal(response.headers.get("content-type"), iconTypes[path.split(".").at(-1)]);
+    if (path.endsWith(".webmanifest")) {
+      const manifest = await response.json();
+      for (const icon of manifest.icons) {
+        const iconResponse = await fetch(new URL(icon.src, response.url));
+        assert.equal(iconResponse.status, 200, icon.src);
+        assert.equal(iconResponse.headers.get("content-type"), icon.type);
+        assert.ok((await iconResponse.arrayBuffer()).byteLength > 0);
+      }
+    } else {
+      assert.ok((await response.arrayBuffer()).byteLength > 0);
+    }
   }
   assert.equal((await fetch(origin + "/..%2fpackage.json")).status, 404);
   assert.equal((await fetch(origin + "/missing")).status, 404);

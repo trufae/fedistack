@@ -12,6 +12,7 @@ dist: version
 	$(TSC) --project tsconfig.json
 	cp public/index.html public/styles.css public/manifest.webmanifest public/.htaccess dist/
 	cp public/assets/*.svg public/assets/*.png public/assets/*.ico dist/assets/
+	node scripts/build-icons.mjs
 
 icons:
 	./scripts/generate-icons.sh

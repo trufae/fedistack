@@ -493,6 +493,16 @@ namespace Fedi {
       state.api = new API(state.session.server, state.session.token);
     else state.session = null;
     document.addEventListener("click", (event) => {
+      const tab = (event.target as Element).closest<HTMLAnchorElement>(
+        '.mobile-nav a[aria-current="page"]',
+      );
+      if (tab && !event.defaultPrevented && event.button === 0 &&
+          !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey &&
+          (tab.hash === location.hash || (!location.hash && tab.hash === "#home"))) {
+        event.preventDefault();
+        window.scrollTo(0, 0);
+        return;
+      }
       const button = (event.target as Element).closest<HTMLButtonElement>(
         "button[data-action]",
       );

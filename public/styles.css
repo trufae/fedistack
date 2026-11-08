@@ -179,11 +179,14 @@ input[type="checkbox"] {
 .layout {
   display: grid;
   grid-template-columns: 232px minmax(0, 690px) 308px;
+  grid-template-rows: auto minmax(0, 1fr);
   max-width: 1280px;
   margin: auto;
   min-height: 100vh;
 }
 .sidebar {
+  grid-column: 1;
+  grid-row: 1 / 3;
   position: sticky;
   top: 0;
   height: 100dvh;
@@ -306,6 +309,17 @@ input[type="checkbox"] {
   min-height: 44px;
   flex-shrink: 0;
 }
+.mobile-account-action {
+  display: none;
+}
+.desktop-sign-in {
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: end;
+  align-self: start;
+  margin: 20px 23px 0;
+  min-height: 44px;
+}
 .write-button {
   margin-top: 32px;
   font-size: 13px;
@@ -425,6 +439,8 @@ input[type="checkbox"] {
   color: #9d654a;
 }
 main {
+  grid-column: 2;
+  grid-row: 1 / 3;
   min-width: 0;
   border-right: 1px solid var(--line);
   outline: none;
@@ -807,6 +823,8 @@ main {
   font-size: 13px;
 }
 .right-rail {
+  grid-column: 3;
+  grid-row: 2;
   padding: 25px 23px 30px 27px;
 }
 .search-box {
@@ -1372,6 +1390,7 @@ footer p {
 }
 .focus-mode .sidebar,
 .focus-mode .right-rail,
+.focus-mode .desktop-sign-in,
 .focus-mode .mobile-nav {
   display: none;
 }
@@ -1513,6 +1532,12 @@ footer p {
 }
 .messages-view .right-rail {
   display: none;
+}
+.messages-view .desktop-sign-in {
+  grid-column: 2;
+}
+.messages-view main {
+  grid-row: 2;
 }
 /* An open chat owns the viewport; its messages are the scrolling surface. */
 body.conversation-open {
@@ -2310,6 +2335,12 @@ summary {
   .right-rail {
     display: none;
   }
+  .desktop-sign-in {
+    grid-column: 2;
+  }
+  main {
+    grid-row: 2;
+  }
   .page-intro h1 {
     font-size: 38px;
   }
@@ -2363,6 +2394,12 @@ summary {
   }
   .account-action {
     margin-top: 0;
+  }
+  .mobile-account-action {
+    display: inline-flex;
+  }
+  .desktop-sign-in {
+    display: none;
   }
   .brand-caption,
   .sidebar nav,

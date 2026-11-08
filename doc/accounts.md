@@ -2,7 +2,7 @@
 
 [Documentation](README.md) · [Fedistack](../README.md)
 
-Click **Sign in** below the Fedistack logo on desktop or beside it on mobile. You can also sign in from the welcome panel or mobile navigation. Enter your instance domain and optionally check compatibility. OAuth registers Fedistack with the instance and redirects to the instance's sign-in page. Your password never enters Fedistack. OAuth uses a state parameter and an S256 PKCE challenge; registration and token exchange use form encoding.
+Click **Sign in** at the top-right of the site on desktop or beside the Fedistack logo on mobile. You can also sign in from the welcome panel or mobile navigation. Enter your instance domain and optionally check compatibility. OAuth registers Fedistack with the instance and redirects to the instance's sign-in page. Your password never enters Fedistack. OAuth uses a state parameter and an S256 PKCE challenge; registration and token exchange use form encoding.
 
 The additional sign-in options support a manual authorization code or an existing application access token with `read` and `write` permissions. For a token, enter the instance domain first, then choose **Other sign-in options → Sign in with token** to open a separate token entry dialog.
 

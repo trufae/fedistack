@@ -156,7 +156,7 @@ namespace Fedi {
       ["settings", "settings", "Settings"],
     ];
     return `<aside class="sidebar"><a class="brand" href="#home"><img src="assets/favicon.svg" alt="">fedistack<span>•</span></a><div class="brand-caption">Independent voices, connected.</div>
-      ${state.session ? action("disconnect", "Sign out", "", "button subtle account-action") : action("connect", "Sign in", "", "button primary account-action")}
+      ${state.session ? action("disconnect", "Sign out", "", "button subtle account-action") : action("connect", "Sign in", "", "button primary account-action mobile-account-action")}
       <nav aria-label="Main navigation">${items.map(([view, symbol, name]) => `<a href="#${view}" class="nav-item ${state.view === view || (view === "drafts" && state.view === "editor") ? "active" : ""}" ${state.view === view ? 'aria-current="page"' : ""}>${icon(symbol)}<span>${name}</span>${view === "drafts" && getDrafts().length ? `<span class="nav-count">${getDrafts().length}</span>` : ""}${view === "messages" && state.conversations.some((c) => c.unread) ? '<span class="unread-dot"></span>' : ""}</a>`).join("")}</nav>
       <a href="#write" class="button primary write-button">${icon("edit")}<span>Write an article</span></a><a href="#note" class="button subtle note-button">${icon("comment")}<span>Note</span></a>
       <div class="sidebar-bottom"><div class="sidebar-tools"><button class="icon-button" data-action="theme" aria-label="Toggle light and dark theme">${icon(document.documentElement.dataset.theme === "dark" ? "sun" : "moon")}</button><span>${state.session ? "Signed in" : "Not signed in"}</span></div>
@@ -215,7 +215,7 @@ namespace Fedi {
                   : feedView();
     renderHTML(
       document.getElementById("app")!,
-      `<div class="layout">${sidebar()}<main id="main" tabindex="-1">${content}</main>${rightRail()}</div>${mobileNav()}`,
+      `<div class="layout">${sidebar()}${!state.session ? action("connect", "Sign in", "", "button primary desktop-sign-in") : ""}<main id="main" tabindex="-1">${content}</main>${rightRail()}</div>${mobileNav()}`,
     );
     if (languageFocus) {
       const target = document.getElementById(languageFocus) ||

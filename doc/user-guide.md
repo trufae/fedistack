@@ -3,6 +3,7 @@
 [Documentation](README.md) · [Fedistack](../README.md)
 
 - Following, local, federated, bookmarks, hashtag, and server-list timelines, with pagination.
+- **Settings → Fedistack** shows the application version, starting at **0.1.0**.
 - Tap your bottom-right avatar (or your account in the desktop sidebar) to open **Your profile**. It shows your configured header image, bio, profile fields, post count, followers, and following. **Settings** is at the top of your profile and also in the desktop sidebar.
 - Profile tabs separate **Posts**, **Replies**, **Boosts**, **Followers**, and **Following**. Your own profile also has a private **Likes** tab and engagement totals for the posts currently loaded. Lists and activity have **Load more** controls; sparse boosts/replies scan up to four pages at a time and retain a cursor to continue. Direct messages stay in Conversations.
 - Tap an author's name or avatar in a post, comment, search result, recommendation, or follower list to view their profile inside Fedistack. Follow, unfollow, and message them there. An optional **Original profile** link opens their server. Remote follower lists may be incomplete or private.

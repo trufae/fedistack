@@ -10,6 +10,7 @@
     "outFile": "dist/app.js"
   },
   "files": [
+    "dist/version.ts",
     "src/types.ts",
     "src/markdown.ts",
     "src/storage.ts",

@@ -1,10 +1,13 @@
 TSC ?= $(shell if test -x node_modules/.bin/tsc; then echo node_modules/.bin/tsc; else echo tsc; fi)
 PORT ?= 8080
 
-.PHONY: all dist icons check test serve clean
+.PHONY: all dist version icons check test serve clean
 all: dist
 
-dist:
+version:
+	node scripts/version.mjs
+
+dist: version
 	mkdir -p dist/assets
 	$(TSC) --project tsconfig.json
 	cp public/index.html public/styles.css public/manifest.webmanifest public/.htaccess dist/
@@ -13,7 +16,7 @@ dist:
 icons:
 	./scripts/generate-icons.sh
 
-check:
+check: version
 	$(TSC) --project tsconfig.json --noEmit
 
 test: dist

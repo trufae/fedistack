@@ -2014,6 +2014,7 @@ summary {
 .feed-suggestions .recommended:last-child {
   margin-bottom: 0;
 }
+.version-badge,
 .profile-badge {
   display: inline-block;
   background: var(--wash);

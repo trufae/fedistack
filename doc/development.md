@@ -14,6 +14,10 @@ make test
 
 `make test` builds the distribution before running Node’s built-in test runner. See [getting started](getting-started.md) for the local server and static hosting.
 
+## Versioning
+
+Fedistack starts at **0.1.0**. `package.json` is the source of truth for the application version. Change its `version` for a release, then run `make test`. Both `make` and `make check` run `scripts/version.mjs` to generate `dist/version.ts`; TypeScript embeds that value in the static bundle and Settings displays it. The generated file is not committed and does not require a runtime fetch, so the version also works offline.
+
 ## Code layout
 
 | File              | Responsibility                                                |

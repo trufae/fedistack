@@ -170,7 +170,7 @@ namespace Fedi {
     return `<button type="button" class="${classes}" data-action="${name}" data-id="${escapeHTML(id)}"${accessible}>${label}</button>`;
   }
   export function followButton(account: Account, compact = true): string {
-    if (account.id === (state.session?.account.id || "you")) return "";
+    if (state.readerServer || account.id === (state.session?.account.id || "you")) return "";
     const r = state.relationships.get(account.id);
     const label = r?.following
       ? compact
@@ -205,7 +205,7 @@ namespace Fedi {
       post.visibility !== "direct";
     return `<div class="post-actions"><div>
       <button class="icon-button ${post.liked ? "liked" : ""}" data-action="like" data-id="${escapeHTML(post.id)}" aria-label="${post.liked ? "Unlike" : "Like"}" aria-pressed="${post.liked}">${icon("heart")}<span>${post.likes || ""}</span></button>
-      <a class="icon-button" href="#read/${encodeURIComponent(post.id)}" aria-label="Read ${post.replies} comments">${icon("comment")}<span>${post.replies || ""}</span></a>
+      <a class="icon-button" href="${escapeHTML(postReadLink(post.id))}" aria-label="Read ${post.replies} comments">${icon("comment")}<span>${post.replies || ""}</span></a>
       <button class="icon-button ${post.reposted ? "reposted" : ""}" data-action="repost" data-id="${escapeHTML(post.id)}" aria-label="${post.reposted ? "Undo repost" : "Repost"}" aria-pressed="${!!post.reposted}" title="${!canRepost(post) ? "Only public and unlisted posts can be reposted" : post.reposted ? "Undo repost" : "Repost"}"${canRepost(post) ? "" : " disabled"}>${icon("repost")}<span>${post.reposts || ""}</span></button>
       ${share}
       </div><div class="post-owner-actions">${owned ? `${action("edit-publication", `${icon("edit")} Edit`, post.id, "text-button")}${action("unpublish-publication", "Unpublish", post.id, "text-button")}${action("delete-publication", post.replyTo ? "Delete comment" : "Delete", post.id, "text-button delete-link")}` : ""}${original}<button class="icon-button ${post.saved ? "saved" : ""}" data-action="save" data-id="${escapeHTML(post.id)}" aria-label="${post.saved ? "Remove bookmark" : "Save for later"}" aria-pressed="${post.saved}">${icon("bookmark")}</button></div></div>`;
@@ -213,11 +213,11 @@ namespace Fedi {
 
   export function postCard(post: Post, featured = false): string {
     const hidden = post.warning && !state.revealed.has(post.id);
-    const href = `#read/${encodeURIComponent(post.id)}`;
+    const href = escapeHTML(postReadLink(post.id));
     return `<article class="post-card ${featured ? "featured" : ""} ${post.kind}">
       ${post.boostedBy ? `<p class="boost-label">${icon("refresh")} Shared by ${escapeHTML(post.boostedBy)}</p>` : ""}
-      ${post.replyTo ? `<p class="reply-context"><a href="#read/${encodeURIComponent(post.replyTo)}">${icon("comment")} View conversation ${icon("arrow")}</a></p>` : ""}
-      <div class="post-byline">${avatar(post.author, false, `post:${post.id}`)}<div><button class="author-link" data-action="profile" data-id="${escapeHTML(post.author.id)}">${escapeHTML(post.author.name)}</button><div class="byline-sub">${escapeHTML(post.author.publication || post.author.acct)} <span>· ${relativeDate(post.created)}</span></div></div>${followButton(post.author)}</div>
+      ${post.replyTo ? `<p class="reply-context"><a href="${escapeHTML(postReadLink(post.replyTo))}">${icon("comment")} View conversation ${icon("arrow")}</a></p>` : ""}
+      <div class="post-byline">${profileAvatar(post.author, false, `post:${post.id}`)}<div><a class="author-link" href="#${escapeHTML(profilePath(post.author.id))}">${escapeHTML(post.author.name)}</a><div class="byline-sub">${escapeHTML(post.author.publication || post.author.acct)} <span>· ${relativeDate(post.created)}</span></div></div>${followButton(post.author)}</div>
       ${
         hidden
           ? `<div class="content-warning">${icon("eye")}<strong>${escapeHTML(post.warning)}</strong>${action("reveal", "Show content", post.id, "button subtle")}</div>`
@@ -235,7 +235,7 @@ namespace Fedi {
       !state.readerServer &&
       post.author.id === (state.session?.account.id || "you") &&
       post.visibility !== "direct";
-    return `<div class="comment">${avatar(post.author, true, `post:${post.id}`)}<div><div class="comment-header"><div><strong>${escapeHTML(post.author.name)}</strong><span class="byline-sub"> · ${relativeDate(post.created)}</span></div>${owned ? action("delete-publication", "Delete comment", post.id, "text-button delete-link") : ""}</div>${post.warning ? `<details><summary>${escapeHTML(post.warning)}</summary><div class="prose">${markdown(post.markdown)}</div></details>` : `<div class="prose">${markdown(post.markdown)}</div>`}</div></div>`;
+    return `<div class="comment">${profileAvatar(post.author, true, `post:${post.id}`)}<div><div class="comment-header"><div><a class="author-link" href="#${escapeHTML(profilePath(post.author.id))}">${escapeHTML(post.author.name)}</a><span class="byline-sub"> · ${relativeDate(post.created)}</span></div>${owned ? action("delete-publication", "Delete comment", post.id, "text-button delete-link") : ""}</div>${post.warning ? `<details><summary>${escapeHTML(post.warning)}</summary><div class="prose">${markdown(post.markdown)}</div></details>` : `<div class="prose">${markdown(post.markdown)}</div>`}</div></div>`;
   }
 
   export function emptyState(

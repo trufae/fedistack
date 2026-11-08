@@ -535,6 +535,7 @@ namespace Fedi {
       const cachedPosts = new Set([
         ...state.posts,
         ...state.ownPosts,
+        ...(state.profile && !state.profile.server ? state.profile.posts : []),
         ...(state.readerServer ? [] : state.comments),
         ...(state.reading && !state.readerServer ? [state.reading] : []),
         ...(!state.api
@@ -558,6 +559,8 @@ namespace Fedi {
     }
     state.posts = state.posts.filter((p) => p.id !== id);
     state.ownPosts = state.ownPosts.filter((p) => p.id !== id);
+    if (state.profile && !state.profile.server)
+      state.profile.posts = state.profile.posts.filter((p) => p.id !== id);
     if (!state.readerServer)
       state.comments = state.comments.filter((p) => p.id !== id);
     if (state.session?.account.statuses !== undefined)

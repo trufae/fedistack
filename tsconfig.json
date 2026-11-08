@@ -17,6 +17,7 @@
     "src/demo.ts",
     "src/ui.ts",
     "src/app.ts",
+    "src/profile.ts",
     "src/editor.ts",
     "src/server-drafts.ts",
     "src/messages.ts",

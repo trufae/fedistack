@@ -388,6 +388,41 @@ namespace Fedi {
         `/api/v1/accounts/relationships?${query}`,
       );
     }
+    async account(id: string): Promise<Account> {
+      return mapAccount(await this.get<MastodonAccount>(`/api/v1/accounts/${encodeURIComponent(id)}`));
+    }
+    async accountPosts(
+      id: string, tab: "posts" | "replies" | "boosts" | "writing", next?: string,
+    ): Promise<{ posts: Post[]; next?: string }> {
+      // Mastodon has no portable boosts-only endpoint. Filter each page of
+      // account activity and keep its cursor, including pages with no matches.
+      const result = await this.request<MastodonStatus[]>(next ||
+        `/api/v1/accounts/${encodeURIComponent(id)}/statuses?exclude_replies=${tab === "posts"}&exclude_reblogs=${tab !== "boosts"}&limit=40`);
+      return {
+        posts: result.data.filter((s) => visibleStatus(s) &&
+          (tab === "boosts" ? !!s.reblog : !s.reblog) &&
+          (tab !== "replies" || !!s.in_reply_to_id) &&
+          (tab !== "posts" || !s.in_reply_to_id)).map(mapStatus),
+        next: result.next,
+      };
+    }
+    async favourites(next?: string): Promise<{ posts: Post[]; next?: string }> {
+      const result = await this.request<MastodonStatus[]>(next || "/api/v1/favourites?limit=40");
+      return { posts: result.data.filter(visibleStatus).map((s) => ({ ...mapStatus(s), liked: true })), next: result.next };
+    }
+    async accountConnections(id: string, kind: "followers" | "following", next?: string): Promise<{ accounts: Account[]; next?: string }> {
+      const result = await this.request<MastodonAccount[]>(next || `/api/v1/accounts/${encodeURIComponent(id)}/${kind}?limit=40`);
+      return { accounts: result.data.map(mapAccount), next: result.next };
+    }
+    async suggestions(): Promise<Account[]> {
+      try {
+        const result = await this.get<{ account: MastodonAccount }[]>("/api/v2/suggestions?limit=12");
+        return result.map((s) => mapAccount(s.account));
+      } catch (error) {
+        if (!(error instanceof APIError) || ![404, 405, 501].includes(error.status)) throw error;
+        return (await this.get<MastodonAccount[]>("/api/v1/suggestions?limit=12")).map(mapAccount);
+      }
+    }
     async follow(id: string, unfollow: boolean): Promise<Relationship> {
       return this.post<Relationship>(
         `/api/v1/accounts/${encodeURIComponent(id)}/${unfollow ? "unfollow" : "follow"}`,
@@ -518,7 +553,18 @@ namespace Fedi {
       followers: account.followers_count,
       following: account.following_count,
       statuses: account.statuses_count,
+      header: safeURL(account.header || "", true),
+      joined: account.created_at,
+      locked: account.locked,
+      hideCollections: account.hide_collections,
+      fields: account.fields?.map((f) => ({ name: f.name, value: plainText(htmlToMarkdown(f.value)) })),
     };
+  }
+
+  function visibleStatus(status: MastodonStatus): boolean {
+    const original = status.reblog || status;
+    return status.visibility !== "direct" && original.visibility !== "direct" &&
+      ![status, original].some((s) => s.filtered?.some((f) => f.filter.filter_action === "hide"));
   }
 
   export function mapStatus(input: MastodonStatus): Post {

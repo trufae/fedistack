@@ -6,6 +6,7 @@ namespace Fedi {
     avatar: "",
     bio: "A reader, a writer, a person on the open web.",
     color: "terracotta",
+    header: "assets/garden.svg",
   };
   export const demoAuthors: Account[] = [
     {

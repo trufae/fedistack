@@ -15,6 +15,7 @@ namespace Fedi {
     | "editor"
     | "messages"
     | "settings"
+    | "profile"
     | "reader";
   export interface Account {
     id: string;
@@ -28,6 +29,11 @@ namespace Fedi {
     followers?: number;
     following?: number;
     statuses?: number;
+    header?: string;
+    joined?: string;
+    locked?: boolean;
+    hideCollections?: boolean;
+    fields?: { name: string; value: string }[];
   }
   export interface Post {
     id: string;
@@ -112,6 +118,10 @@ namespace Fedi {
     id: string;
     following: boolean;
     requested: boolean;
+    followed_by?: boolean;
+    blocking?: boolean;
+    blocked_by?: boolean;
+    muting?: boolean;
   }
   export interface UserList {
     id: string;
@@ -134,6 +144,11 @@ namespace Fedi {
     followers_count?: number;
     following_count?: number;
     statuses_count?: number;
+    header?: string;
+    created_at?: string;
+    locked?: boolean;
+    hide_collections?: boolean;
+    fields?: { name: string; value: string }[];
   }
   export interface MastodonStatus {
     object_type?: string;

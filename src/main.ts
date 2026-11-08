@@ -12,6 +12,7 @@ namespace Fedi {
       [
         ...state.posts,
         ...state.ownPosts,
+        ...(state.profile && !state.profile.server ? state.profile.posts : []),
         ...(state.readerServer ? [] : state.comments),
         ...(state.reading && !state.readerServer ? [state.reading] : []),
       ]
@@ -27,9 +28,13 @@ namespace Fedi {
       } else post.saved = !post.saved;
       saveDemo();
     }
+    const profile = state.profile;
+    if (profile?.owner && ((profile.tab === "likes" && kind === "like") || (profile.tab === "boosts" && kind === "repost")))
+      profile.posts = profile.posts.filter((p) => kind === "like" ? p.liked : p.reposted);
     render();
   }
   async function toggleFollow(id: string): Promise<void> {
+    if (state.readerServer) return;
     const current = state.relationships.get(id),
       api = state.api;
     const unfollow = !!(current?.following || current?.requested);
@@ -38,6 +43,19 @@ namespace Fedi {
       : { id, following: !unfollow, requested: false };
     if (state.api !== api) return;
     state.relationships.set(id, relationship);
+    const delta = Number(relationship.following) - Number(!!current?.following);
+    const me = state.session?.account || demoMe;
+    if (!api) me.following = demoState.follows.length;
+    if (me.following !== undefined) me.following = Math.max(0, me.following + delta);
+    const profile = state.profile;
+    if (profile && !profile.server && profile.account) {
+      if (profile.owner) {
+        profile.account.following = me.following;
+        if (profile.tab === "following" && !relationship.following)
+          profile.people = profile.people.filter((a) => a.id !== id);
+      } else if (profile.id === id && profile.account.followers !== undefined)
+        profile.account.followers = Math.max(0, profile.account.followers + delta);
+    }
     if (!api) {
       demoState.follows = relationship.following
         ? [...new Set([...demoState.follows, id])]
@@ -72,14 +90,6 @@ namespace Fedi {
     showModal(
       "Share this publication",
       `<p>${post.url ? "Share this Fedistack link so readers see the formatted publication here." : "This is a local demo link. Connect an account and publish to get a public, shareable link."}</p><label>Fedistack reading link<input id="share-link" readonly value="${escapeHTML(link)}"></label>${action("copy-link", "Copy link", "", "button primary")}${post.url ? `<a class="button subtle" href="${escapeHTML(post.url)}" target="_blank" rel="noopener noreferrer">Open original ${icon("external")}</a>` : ""}`,
-    );
-  }
-  function profile(id: string): void {
-    const a = allAccounts().find((a) => a.id === id);
-    if (!a) return;
-    showModal(
-      a.name,
-      `<div class="profile-card">${avatar(a)}<p class="muted">@${escapeHTML(a.acct)}</p><p>${escapeHTML(a.bio)}</p>${followButton(a, false)} ${action("message-account", `${icon("mail")} Message`, a.id, "button subtle")}${a.url ? `<a href="${escapeHTML(a.url)}" class="button subtle" target="_blank" rel="noopener noreferrer">View profile ${icon("external")}</a>` : ""}</div>`,
     );
   }
   async function checkServer(button: HTMLButtonElement): Promise<void> {
@@ -117,7 +127,7 @@ namespace Fedi {
         connectTokenDialog();
         break;
       case "account":
-        navigate("settings");
+        navigate("profile");
         break;
       case "manage-hashtags":
         await showInterests("tags");
@@ -159,6 +169,9 @@ namespace Fedi {
         state.comments = [];
         state.reading = null;
         state.accounts = [];
+        state.profile = null;
+        state.suggestions = [];
+        state.suggestionsLoaded = false;
         state.lists = [];
         state.conversations = [];
         state.conversation = "";
@@ -229,7 +242,13 @@ namespace Fedi {
         await toggleFollow(id);
         break;
       case "profile":
-        profile(id);
+        navigate(profilePath(id));
+        break;
+      case "profile-refresh":
+        await route();
+        break;
+      case "profile-more":
+        await loadProfilePage(true);
         break;
       case "like":
         await togglePost(id, "like");

@@ -2125,7 +2125,7 @@ test("Your writing loads and paginates replies while keeping publications, boost
   });
   const next = "https://example.org/api/v1/accounts/me/statuses?max_id=40&exclude_replies=false";
   const requests = [];
-  app.state.api = { request: async (path) => {
+  app.state.api = Object.assign(new app.API("example.org"), { request: async (path) => {
     requests.push(path);
     return requests.length === 1
       ? { data: [status("article", null)], next }
@@ -2134,7 +2134,7 @@ test("Your writing loads and paginates replies while keeping publications, boost
           status("private-message", "dm", "direct"),
           { ...status("boost", null), reblog: status("boosted", "parent") },
         ] };
-  } };
+  } });
   await app.loadOwnPosts();
   assert.match(requests[0], /exclude_replies=false/);
   assert.match(requests[0], /exclude_reblogs=true/);
@@ -3448,4 +3448,233 @@ test("continued typing shares the pending 30-second upload and sends the latest 
   await app.syncServerDraft(article.id);
   assert.equal(server.requests.filter((r) => r.method === "POST").length, 1);
   assert.match([...server.statuses.values()][0].params.text, /Latest text after continued typing/);
+});
+
+const profileAccount = (id = "me", extra = {}) => ({
+  id, username: id, display_name: `Writer ${id}`, acct: `${id}@example.org`,
+  avatar: "https://example.org/avatar.png", header: "https://example.org/header.png",
+  note: "A writer on the open web", url: `https://example.org/@${id}`,
+  followers_count: 123, following_count: 42, statuses_count: 77,
+  created_at: "2020-01-02T00:00:00Z", ...extra,
+});
+async function profileFixture(fetch) {
+  const fixture = await postActionFixture(fetch);
+  const { app } = fixture;
+  app.state.session = { ...longServer, server: "https://example.org", token: "profile-token", account: app.mapAccount(profileAccount()) };
+  app.state.api = new app.API("example.org", "profile-token");
+  return fixture;
+}
+
+test("own profile refreshes header and counts, shows loaded engagement and settings, and pages posts", async () => {
+  const calls = [];
+  const { app, context, get } = await profileFixture(async (url) => {
+    const u = new URL(url); calls.push(u);
+    if (u.pathname.endsWith("/relationships")) return Response.json([]);
+    if (u.pathname.endsWith("/statuses")) return Response.json([
+      sharedStatus({ id: u.searchParams.has("max_id") ? "older" : "newer", account: profileAccount(), favourites_count: 6, reblogs_count: 3 }),
+      sharedStatus({ id: "dm", visibility: "direct", account: profileAccount() }),
+      sharedStatus({ id: "reply", in_reply_to_id: "parent", account: profileAccount() }),
+    ], { headers: u.searchParams.has("max_id") ? {} : { Link: '<https://example.org/api/v1/accounts/me/statuses?max_id=40>; rel="next"' } });
+    return Response.json(profileAccount("me", { header: "https://example.org/fresh-header.png", followers_count: 124 }));
+  });
+  context.location.hash = "#profile";
+  await app.route();
+  assert.equal(app.state.profile.owner, true);
+  assert.equal(app.state.session.account.followers, 124);
+  assert.equal(app.state.profile.posts.length, 1);
+  assert.match(get("app").innerHTML, /fresh-header.png/);
+  assert.match(get("app").innerHTML, /On these 1 loaded posts/);
+  assert.match(get("app").innerHTML, /Likes received/);
+  assert.match(get("app").innerHTML, /href="#settings" class="button subtle small-button"/);
+  assert.match(get("app").innerHTML, /aria-label="Your profile" aria-current="page"/);
+  await app.loadProfilePage(true);
+  assert.deepEqual(Array.from(app.state.profile.posts, (p) => p.id), ["newer", "older"]);
+  assert.equal(app.state.profile.next, undefined);
+  assert.equal(calls.filter((u) => u.pathname.endsWith("/statuses")).length, 2);
+});
+
+test("another account uses the same profile without requesting private likes or showing owner controls", async () => {
+  const paths = [];
+  const { app, context, get } = await profileFixture(async (url) => {
+    const path = new URL(url).pathname; paths.push(path);
+    if (path.endsWith("/relationships")) return Response.json([{ id: "other", following: false, requested: false, followed_by: true }]);
+    if (path.endsWith("/statuses")) return Response.json([]);
+    return Response.json(profileAccount("other"));
+  });
+  context.location.hash = "#profile/other?tab=likes";
+  await app.route();
+  assert.equal(app.state.profile.owner, false);
+  assert.equal(app.state.profile.tab, "posts");
+  assert.equal(paths.includes("/api/v1/favourites"), false);
+  assert.match(get("app").innerHTML, /Follows you/);
+  assert.match(get("app").innerHTML, /data-action="message-account" data-id="other"/);
+  assert.doesNotMatch(get("app").innerHTML, /tab=likes|Likes received|On these/);
+  assert.equal(app.state.session.account.id, "me");
+});
+
+test("boosts scan sparse pages, retain the cursor, and stop repeated pagination links", async () => {
+  let pages = 0;
+  const cursor = "https://example.org/api/v1/accounts/me/statuses?max_id=";
+  const { app, context } = await profileFixture(async (url) => {
+    const u = new URL(url);
+    if (u.pathname.endsWith("/relationships")) return Response.json([]);
+    if (!u.pathname.endsWith("/statuses")) return Response.json(profileAccount());
+    pages++;
+    if (pages === 1) assert.equal(u.searchParams.get("exclude_reblogs"), "false");
+    return Response.json(pages <= 4 ? [sharedStatus({ id: `own-${pages}` })] : [
+      sharedStatus({ id: "wrapper", reblog: sharedStatus({ id: "boosted", account: profileAccount("friend") }) }),
+      sharedStatus({ id: "private-wrapper", reblog: sharedStatus({ visibility: "direct" }) }),
+      sharedStatus({ id: "filtered-wrapper", reblog: sharedStatus({ id: "filtered", filtered: [{ filter: { filter_action: "hide" } }] }) }),
+    ], { headers: { Link: `<${cursor}${Math.min(pages, 4)}>; rel="next"` } });
+  });
+  context.location.hash = "#profile?tab=boosts";
+  await app.route();
+  assert.equal(pages, 4);
+  assert.equal(app.state.profile.posts.length, 0);
+  assert.ok(app.state.profile.next);
+  await app.loadProfilePage(true);
+  assert.equal(pages, 5);
+  assert.deepEqual(Array.from(app.state.profile.posts, (p) => p.id), ["boosted"]);
+  assert.equal(app.state.profile.posts[0].reposted, true);
+  assert.equal(app.state.profile.next, undefined);
+  assert.equal(app.findPost("boosted").id, "boosted");
+});
+
+test("following lists paginate, deduplicate accounts, and reflect unfollows without leaving the profile", async () => {
+  const { app, context, click } = await profileFixture(async (url) => {
+    const u = new URL(url);
+    if (u.pathname.endsWith("/unfollow")) return Response.json({ id: "friend", following: false, requested: false });
+    if (u.pathname.endsWith("/relationships")) return Response.json([{ id: "friend", following: true, requested: false }]);
+    if (u.pathname.endsWith("/following")) return Response.json(
+      u.searchParams.has("max_id") ? [profileAccount("friend"), profileAccount("older-friend")] : [profileAccount("friend")],
+      { headers: u.searchParams.has("max_id") ? {} : { Link: '<https://example.org/api/v1/accounts/me/following?max_id=40>; rel="next"' } });
+    return Response.json(profileAccount());
+  });
+  context.location.hash = "#profile?tab=following";
+  await app.route();
+  await app.loadProfilePage(true);
+  assert.deepEqual(Array.from(app.state.profile.people, (a) => a.id), ["friend", "older-friend"]);
+  click("friend", "follow");
+  await new Promise(setImmediate);
+  assert.equal(app.state.profile.account.following, 41);
+  assert.deepEqual(Array.from(app.state.profile.people, (a) => a.id), ["older-friend"]);
+  assert.equal(app.state.view, "profile");
+});
+
+test("private likes come from favourites and unlike updates every cached copy after success only", async () => {
+  let fail = true;
+  const { app, context, click, get } = await profileFixture(async (url) => {
+    const path = new URL(url).pathname;
+    if (path.endsWith("/relationships")) return Response.json([]);
+    if (path.endsWith("/unfavourite")) return fail ? Response.json({ error: "Try later" }, { status: 503 }) : Response.json(sharedStatus({ favourited: false, favourites_count: 1 }));
+    if (path === "/api/v1/favourites") return Response.json([sharedStatus({ account: profileAccount("other") })]);
+    return Response.json(profileAccount());
+  });
+  context.location.hash = "#profile?tab=likes";
+  await app.route();
+  assert.equal(app.state.profile.posts[0].liked, true);
+  assert.match(get("app").innerHTML, /Your likes · Only visible to you/);
+  // A cached timeline copy can predate the like made in another client.
+  app.state.posts = [{ ...app.state.profile.posts[0], liked: false }];
+  click("slow-web", "like");
+  await new Promise(setImmediate);
+  assert.equal(app.state.profile.posts.length, 1);
+  assert.equal(app.state.profile.posts[0].liked, true);
+  fail = false;
+  click("slow-web", "like");
+  await new Promise(setImmediate);
+  assert.equal(app.state.profile.posts.length, 0);
+  assert.equal(app.state.posts[0].liked, false);
+});
+
+test("profile responses cannot overwrite a newer route or a different account session", async () => {
+  let finish;
+  const { app, context } = await profileFixture(async () => new Promise((resolve) => { finish = resolve; }));
+  context.location.hash = "#profile";
+  const loading = app.route();
+  context.location.hash = "#settings";
+  await app.route();
+  finish(Response.json(profileAccount("me", { followers_count: 999 })));
+  await loading;
+  assert.equal(app.state.view, "settings");
+  assert.equal(app.state.profile, null);
+  assert.equal(app.state.session.account.followers, 123);
+  context.location.hash = "#profile";
+  const second = app.route();
+  app.state.api = new app.API("different.example");
+  finish(Response.json(profileAccount("me", { followers_count: 999 })));
+  await second;
+  assert.equal(app.state.session.account.followers, 123);
+});
+
+test("public profiles preserve source-server IDs without exposing account tokens or owner actions", async () => {
+  const calls = [];
+  const { app, context, get } = await profileFixture(async (url, options) => {
+    calls.push({ url, options });
+    return Response.json(new URL(url).pathname.endsWith("/statuses") ? [
+      sharedStatus({ account: profileAccount(), id: "public-post" }),
+      sharedStatus({ id: "private-post", visibility: "private" }),
+    ] : profileAccount());
+  });
+  context.location.hash = "#profile/me?server=https%3A%2F%2Fremote.example&tab=likes";
+  await app.route();
+  assert.equal(app.state.profile.owner, false);
+  assert.equal(app.state.profile.tab, "posts");
+  assert.equal(app.state.readerServer, "https://remote.example");
+  assert.equal(app.state.profile.posts.length, 1);
+  assert.ok(calls.every(({ url, options }) => url.startsWith("https://remote.example/") && !options.headers.Authorization));
+  assert.match(get("app").innerHTML, /href="#profile\/me\?server=https%3A%2F%2Fremote.example"/);
+  assert.doesNotMatch(get("app").innerHTML, /data-action="(?:follow|like|save|repost|delete-publication)"|tab=likes/);
+  assert.match(app.postReadLink("public-post"), /server=https%3A%2F%2Fremote.example/);
+});
+
+test("recommendations filter followed, requested, muted, blocked and own accounts, and stay out of Saved", async () => {
+  const { app, context, get } = await profileFixture(async (url) => {
+    if (url.includes("/suggestions")) return Response.json(["me", "following", "requested", "blocked", "muted", "new"].map((id) => ({ account: profileAccount(id) })));
+    return Response.json(["me", "following", "requested", "blocked", "muted", "new"].map((id) => ({
+      id, following: id === "following", requested: id === "requested", blocking: id === "blocked", muting: id === "muted",
+    })));
+  });
+  app.state.posts = app.demoPosts;
+  app.state.filter = "all";
+  await app.loadSuggestions();
+  assert.deepEqual(Array.from(app.suggestedAccounts(), (a) => a.id), ["new"]);
+  assert.match(get("app").innerHTML, /class="feed-suggestions"/);
+  app.state.view = "bookmarks";
+  app.render();
+  assert.doesNotMatch(get("app").innerHTML, /class="feed-suggestions"/);
+  app.state.relationships.set("new", { id: "new", following: true, requested: false });
+  assert.equal(app.suggestedAccounts().length, 0);
+  context.location.hash = "#settings";
+});
+
+test("unavailable suggestions fall back to v1 only for unsupported endpoints and never block reading", async () => {
+  const calls = [];
+  const { app } = setup(async (url) => {
+    calls.push(url);
+    if (url.includes("v2")) return Response.json({}, { status: 404 });
+    return Response.json([profileAccount("new")]);
+  });
+  app.htmlToMarkdown = (text) => text;
+  const api = new app.API("example.org");
+  assert.equal((await api.suggestions())[0].id, "new");
+  assert.equal(calls.length, 2);
+  const { app: denied } = setup(async () => Response.json({}, { status: 403 }));
+  await assert.rejects(new denied.API("example.org").suggestions(), /403/);
+});
+
+test("demo profiles show local activity and following; profile fields are escaped", async () => {
+  const { app, context, get } = await postActionFixture();
+  const liked = app.demoState.posts[0]; liked.liked = true;
+  context.location.hash = "#profile?tab=likes";
+  await app.route();
+  assert.equal(app.state.profile.posts[0].id, liked.id);
+  context.location.hash = "#profile?tab=following";
+  await app.route();
+  assert.equal(app.state.profile.people.length, app.demoState.follows.length);
+  app.state.profile.account.name = '<img src=x onerror=alert(1)>';
+  app.state.profile.account.fields = [{ name: "<script>", value: '<iframe src="bad">' }];
+  app.render();
+  assert.doesNotMatch(get("app").innerHTML, /<script>|<iframe|<img src=x/);
+  assert.match(get("app").innerHTML, /&lt;script&gt;/);
 });

@@ -9,6 +9,9 @@ namespace Fedi {
     query: "",
     posts: [] as Post[],
     accounts: [] as Account[],
+    profile: null as ProfileState | null,
+    suggestions: [] as Account[],
+    suggestionsLoaded: false,
     next: undefined as string | undefined,
     loading: false,
     error: "",
@@ -55,6 +58,11 @@ namespace Fedi {
   }
   export function allAccounts(): Account[] {
     return [
+      state.session?.account || demoMe,
+      ...(state.profile?.account && !state.profile.server ? [state.profile.account] : []),
+      ...(state.profile && !state.profile.server ? state.profile.people : []),
+      ...(state.profile && !state.profile.server ? state.profile.posts.map((p) => p.author) : []),
+      ...state.suggestions,
       ...state.accounts,
       ...state.posts.map((p) => p.author),
       ...state.comments.map((p) => p.author),
@@ -64,13 +72,18 @@ namespace Fedi {
     ];
   }
   export function findPost(id: string): Post | undefined {
+    if (state.view === "profile") {
+      const post = state.profile?.posts.find((p) => p.id === id);
+      if (post) return post;
+    }
     if (state.readerServer) {
-      const post = [state.reading, ...state.comments].find((p) => p?.id === id);
+      const post = [state.reading, ...(state.profile?.server ? state.profile.posts : []), ...state.comments].find((p) => p?.id === id);
       if (post) return post;
     }
     return [
       ...state.posts,
       ...state.ownPosts,
+      ...(state.profile && !state.profile.server ? state.profile.posts : []),
       ...state.comments,
       ...(state.reading ? [state.reading] : []),
       ...(!state.session
@@ -104,9 +117,7 @@ namespace Fedi {
   }
   export function publicationLink(post: Post): string {
     const url = new URL(location.href);
-    const server = state.readerServer && post === state.reading
-      ? state.readerServer
-      : state.api?.server || state.session?.server;
+    const server = state.readerServer || state.api?.server || state.session?.server;
     const username = post.author.acct.split("@")[0];
     url.search = "";
     url.hash = server
@@ -135,26 +146,18 @@ namespace Fedi {
       ["bookmarks", "bookmark", "Saved"],
       ["drafts", "edit", "Your writing"],
       ["messages", "mail", "Messages"],
+      ["settings", "settings", "Settings"],
     ];
     return `<aside class="sidebar"><a class="brand" href="#home"><img src="assets/favicon.svg" alt="">fedistack<span>•</span></a><div class="brand-caption">Independent voices, connected.</div>
       <nav aria-label="Main navigation">${items.map(([view, symbol, name]) => `<a href="#${view}" class="nav-item ${state.view === view || (view === "drafts" && state.view === "editor") ? "active" : ""}" ${state.view === view ? 'aria-current="page"' : ""}>${icon(symbol)}<span>${name}</span>${view === "drafts" && getDrafts().length ? `<span class="nav-count">${getDrafts().length}</span>` : ""}${view === "messages" && state.conversations.some((c) => c.unread) ? '<span class="unread-dot"></span>' : ""}</a>`).join("")}</nav>
       <a href="#write" class="button primary write-button">${icon("edit")}<span>Write an article</span></a><a href="#note" class="button subtle note-button">${icon("comment")}<span>Note</span></a>
       <div class="sidebar-bottom"><div class="sidebar-tools"><button class="icon-button" data-action="theme" aria-label="Toggle light and dark theme">${icon(document.documentElement.dataset.theme === "dark" ? "sun" : "moon")}</button><span>${state.session ? "Open & connected" : state.readerServer ? "Public reading" : "Offline demo"}</span></div>
-      <button class="profile-switch" data-action="${state.session ? "account" : "connect"}">${avatar(me, false, "sidebar")}<span><strong>${escapeHTML(state.session ? me.name : "Make yourself at home")}</strong><small>${escapeHTML(state.session ? new URL(state.session.server).host : "Connect your account")}</small></span>${icon("chevron")}</button></div></aside>`;
+      <button class="profile-switch" data-action="account">${avatar(me, false, "sidebar")}<span><strong>${escapeHTML(me.name)}</strong><small>${escapeHTML(state.session ? new URL(state.session.server).host : "Your demo profile")}</small></span>${icon("chevron")}</button></div></aside>`;
   }
 
   function rightRail(): string {
-    const authors = state.session
-      ? [
-          ...new Map(
-            state.posts
-              .filter((p) => p.author.id !== state.session!.account.id)
-              .map((p) => [p.author.id, p.author]),
-          ).values(),
-        ].slice(0, 3)
-      : state.readerServer ? [] : demoAuthors.slice(0, 3);
     return `<aside class="right-rail"><form class="search-box" id="search-form">${icon("search")}<input name="query" aria-label="Search publications and people" placeholder="Search your corner of the world" value="${escapeHTML(state.query)}"><button type="submit" class="sr-only">Search</button></form>
-      ${authors.length ? `<section class="rail-section"><div class="section-heading"><h3>Voices to explore</h3>${icon("users")}</div>${authors.map((a) => `<div class="recommended">${avatar(a, false, `suggested:${a.id}`)}<div><button class="author-link" data-action="profile" data-id="${escapeHTML(a.id)}">${escapeHTML(a.name)}</button><p>${escapeHTML(a.publication || a.bio.slice(0, 55) || a.acct)}</p></div>${followButton(a)}</div>`).join("")}</section>` : ""}
+      ${suggestionsView()}
       <section class="rail-section"><h3>Follow your curiosity</h3><div class="topics">${["Technology", "Culture", "Design", "Nature", "Life", "Writing"].map((t) => action("topic", t, t, "topic")).join("")}</div></section>
       <section class="little-note">${icon("globe")}<p>Your words. Your community.<br><strong>Your corner of the fediverse.</strong></p></section>
       <footer>Fedistack <span>·</span> Made for the open web<br><a href="#settings">About & settings</a>${!state.session && !state.readerServer ? "<p>Demo stories and people are fictional.</p>" : ""}</footer></aside>`;
@@ -169,7 +172,7 @@ namespace Fedi {
       ["drafts", "edit", "Your writing"],
       ["messages", "mail", "Messages"],
     ];
-    return `<nav class="mobile-nav" aria-label="Mobile navigation">${items.map(([view, symbol, name]) => `<a href="#${view}"${view === "drafts" ? ' class="mobile-write"' : ""} aria-label="${name}"${current === view ? ' aria-current="page"' : ""}>${icon(symbol)}</a>`).join("")}<a href="#settings" aria-label="Account and settings"${current === "settings" ? ' aria-current="page"' : ""}>${avatar(me, false, "mobile-account")}</a></nav>`;
+    return `<nav class="mobile-nav" aria-label="Mobile navigation">${items.map(([view, symbol, name]) => `<a href="#${view}"${view === "drafts" ? ' class="mobile-write"' : ""} aria-label="${name}"${current === view ? ' aria-current="page"' : ""}>${icon(symbol)}</a>`).join("")}<a href="#profile" aria-label="Your profile"${current === "profile" && state.profile?.owner ? ' aria-current="page"' : ""}>${avatar(me, false, "mobile-account")}</a></nav>`;
   }
 
   export function render(): void {
@@ -199,7 +202,9 @@ namespace Fedi {
               ? libraryView()
               : state.view === "settings"
                 ? settingsView()
-                : feedView();
+                : state.view === "profile"
+                  ? profileView()
+                  : feedView();
     renderHTML(
       document.getElementById("app")!,
       `<div class="layout">${sidebar()}<main id="main" tabindex="-1">${content}</main>${rightRail()}</div>${mobileNav()}`,
@@ -212,7 +217,7 @@ namespace Fedi {
       else target?.focus({ preventScroll: true });
     }
     if (state.view === "editor") updateEditorMeta();
-    document.title = `${state.view === "reader" && state.reading ? state.reading.title || "Note" : state.view === "editor" ? (state.draft?.kind === "post" ? "New note" : state.draft?.title) || "New draft" : "Your reading room"} — Fedistack`;
+    document.title = `${state.view === "reader" && state.reading ? state.reading.title || "Note" : state.view === "editor" ? (state.draft?.kind === "post" ? "New note" : state.draft?.title) || "New draft" : state.view === "profile" ? state.profile?.account?.name || "Profile" : "Your reading room"} — Fedistack`;
   }
 
   function normalizeDiscoveryLanguages(value: unknown): string[] {
@@ -268,6 +273,7 @@ namespace Fedi {
           : "Your reading room";
     const posts = visibleFeedPosts();
     const hasLanguages = state.view === "discover" && state.discoveryLanguages.length > 0;
+    const recommendations = !state.query && ["home", "discover"].includes(state.view) ? suggestionsView(true) : "";
     return `<header class="page-top"><span>${state.view === "bookmarks" ? "SAVED FOR A QUIET MOMENT" : new Date().toLocaleDateString("en", { weekday: "long", month: "long", day: "numeric" }).toUpperCase()}</span><div>${!state.session ? '<span class="demo-badge">DEMO</span>' : '<span class="connected-dot">Connected</span>'}${action("refresh", icon("refresh"), "", "icon-button refresh-button")}</div></header>
       <div class="page-intro"><h1>${title}<span class="accent">.</span></h1><p>${state.view === "bookmarks" ? "Good things are worth coming back to." : "Independent voices. A little more perspective."}</p></div>
       <div class="timeline-tabs" aria-label="Timelines">${(["home", "local", "federated"] as Timeline[]).map((t, i) => `<button data-action="timeline" data-id="${t}" class="${state.timeline === t ? "active" : ""}" aria-pressed="${state.timeline === t}">${["Following", "Local", "Federated"][i]}</button>`).join("")}${state.session ? `<select id="list-select" aria-label="Your lists"><option value="">Your lists</option>${state.lists.map((l) => `<option value="list:${escapeHTML(l.id)}" ${state.timeline === `list:${l.id}` ? "selected" : ""}>${escapeHTML(l.title)}</option>`).join("")}<option value="manage">Manage lists…</option></select>` : ""}</div>
@@ -275,9 +281,9 @@ namespace Fedi {
       ${state.view === "discover" ? `<form id="discover-search" class="search-box discover-search">${icon("search")}<input name="query" aria-label="Search people and writing" placeholder="Search people, writing, or #topics" value="${escapeHTML(state.query)}"><button class="button subtle">Search</button></form>` : ""}
       ${state.query ? `<div class="search-summary">Results for “${escapeHTML(state.query)}” ${action("clear-search", "Clear", "", "text-button")}</div>` : ""}
       ${state.timeline.startsWith("tag:") && !state.query && state.view !== "bookmarks" ? `<div class="search-summary">Posts tagged #${escapeHTML(state.timeline.slice(4))}</div>` : ""}
-      ${state.accounts.length ? `<div class="account-results">${state.accounts.map((a) => `<div class="recommended">${avatar(a)}<div><button class="author-link" data-action="profile" data-id="${escapeHTML(a.id)}">${escapeHTML(a.name)}</button><p>${escapeHTML(a.acct)}</p></div>${followButton(a)}</div>`).join("")}</div>` : ""}
+      ${state.accounts.length ? `<div class="account-results">${state.accounts.map((a) => accountRow(a, "search")).join("")}</div>` : ""}
       ${state.error ? `<div class="error-panel" role="alert">${escapeHTML(state.error)}${action("refresh", "Try again", "", "button subtle")}</div>` : ""}
-      <div class="feed">${posts.map((p, i) => postCard(p, i === 0 && p.kind === "article")).join("")}${!posts.length && !state.loading && !state.error ? emptyState("A little quiet here", hasLanguages ? "No posts in the selected languages match the loaded results. Load older posts or change your languages in Settings." : state.filter !== "all" ? "No matching writing in the loaded posts. Try another filter or load older posts." : "Follow a writer, explore another timeline, or start a conversation.", hasLanguages ? '<a href="#settings" class="button subtle">Change language settings</a>' : action("discover", "Explore the fediverse", "", "button subtle")) : ""}</div>
+      <div class="feed">${posts.map((p, i) => postCard(p, i === 0 && p.kind === "article") + (i === Math.min(2, posts.length - 1) ? recommendations : "")).join("")}${!posts.length ? recommendations : ""}${!posts.length && !state.loading && !state.error ? emptyState("A little quiet here", hasLanguages ? "No posts in the selected languages match the loaded results. Load older posts or change your languages in Settings." : state.filter !== "all" ? "No matching writing in the loaded posts. Try another filter or load older posts." : "Follow a writer, explore another timeline, or start a conversation.", hasLanguages ? '<a href="#settings" class="button subtle">Change language settings</a>' : action("discover", "Explore the fediverse", "", "button subtle")) : ""}</div>
       ${state.loading ? '<div class="loading" role="status">Gathering your reading…</div>' : state.next ? `<div class="load-more">${action("load-more", "Load older posts", "", "button subtle")}</div>` : posts.length ? '<div class="end-note">You’re all caught up. Go make a little something.</div>' : ""}`;
   }
 
@@ -299,6 +305,7 @@ namespace Fedi {
       state.next = undefined;
     }
     render();
+    if (!append) void loadSuggestions();
     try {
       let posts: Post[];
       if (!api) {
@@ -417,6 +424,11 @@ namespace Fedi {
       state.comments = [];
     }
     state.readerServer = "";
+    state.profile = null;
+    if (page === "profile") {
+      await openProfile(id || state.session?.account.id || demoMe.id, query);
+      return;
+    }
     if (page === "write" || page === "note") {
       if (id && state.api && !getDrafts().some((d) => d.id === id)) {
         const version = loadVersion;
@@ -543,15 +555,13 @@ namespace Fedi {
       return `<div class="page-intro">${emptyState(state.loading ? "Opening your next read…" : "Publication unavailable", state.error, '<a class="button subtle" href="#home">Back home</a>')}</div>`;
     const hidden = p.warning && !state.revealed.has(p.id);
     const publicReading = !!state.readerServer;
-    const author = publicReading
-      ? `<strong>${escapeHTML(p.author.name)}</strong>`
-      : `<button class="author-link" data-action="profile" data-id="${escapeHTML(p.author.id)}">${escapeHTML(p.author.name)}</button>`;
+    const author = `<a class="author-link" href="#${escapeHTML(profilePath(p.author.id))}">${escapeHTML(p.author.name)}</a>`;
     const replyForm = publicReading
       ? `<p class="muted">${state.session ? "Open the original post to join the conversation." : `Connect your account to join the conversation. ${action("connect", "Connect", "", "text-button")}`}</p>`
       : `<form id="reply-form"><label class="sr-only" for="reply-body">Write a comment</label><textarea id="reply-body" name="body" rows="3" required placeholder="Add a little perspective…">${escapeHTML(state.replyDrafts.get(p.id) || "")}</textarea><div class="reply-footer"><span>${p.visibility === "private" ? "Followers only" : p.visibility === "unlisted" ? "Unlisted reply" : "Public reply"}${!state.session || state.session.format !== "text/plain" ? " · Markdown supported" : ""}</span><button class="button primary" type="submit">Reply ${icon("arrow")}</button></div></form>`;
     return `<header class="page-top"><a class="text-button" href="#home">${icon("back")} Back to reading</a><button class="icon-button" data-action="focus" aria-label="${state.focus ? "Leave" : "Enter"} focus mode" title="Focus mode">${icon("book")}</button></header><article class="reader">
       ${hidden ? `<div class="content-warning"><h2>${escapeHTML(p.warning)}</h2>${action("reveal", "Show publication", p.id, "button subtle")}</div>` : `<span class="eyebrow">${escapeHTML(p.author.publication || "INDEPENDENT WRITING")}</span>${!publicReading && p.author.id === (state.session?.account.id || "you") ? `<span class="published-badge">${state.session ? "Published" : "Published in demo"}</span>` : ""}<h1>${escapeHTML(p.title || "A note from " + p.author.name)}</h1>${p.subtitle ? `<p class="reader-subtitle">${escapeHTML(p.subtitle)}</p>` : ""}`}
-      <div class="post-byline">${avatar(p.author, false, `post:${p.id}`)}<div>${author}<div class="byline-sub">${new Date(p.created).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })} · ${readingTime(p.markdown)} min read</div></div>${publicReading ? "" : followButton(p.author)}</div>
+      <div class="post-byline">${profileAvatar(p.author, false, `post:${p.id}`)}<div>${author}<div class="byline-sub">${new Date(p.created).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })} · ${readingTime(p.markdown)} min read</div></div>${publicReading ? "" : followButton(p.author)}</div>
       ${postActions(p)}${hidden ? "" : `${p.image ? `<img class="reader-cover" data-image-key="cover:${escapeHTML(p.id)}" src="${escapeHTML(p.image)}" alt="${escapeHTML(p.imageAlt || "")}">` : ""}<div class="prose reading-prose">${markdown(p.markdown.replace(/^#\s+[^\n]+\n+/, ""))}</div>${p.source ? `<a class="button subtle" href="${escapeHTML(p.source)}" target="_blank" rel="noopener noreferrer">Read the linked article ${icon("external")}</a>` : ""}<div class="reader-end">${icon("leaf")}<span>Thanks for reading. Keep the conversation going.</span></div>`}</article>
       <section class="comments"><div class="section-heading"><h2>Conversation <span>${p.replies}</span></h2>${action("share", "Share publication", p.id, "text-button")}</div>${replyForm}
       ${state.error ? `<p class="form-error" role="alert">${escapeHTML(state.error)}</p>` : ""}${state.loading ? '<p class="loading">Loading the conversation…</p>' : state.comments.map(commentCard).join("") || '<p class="muted">Be the first to start the conversation.</p>'}</section>`;
@@ -587,21 +597,10 @@ namespace Fedi {
     state.error = "";
     render();
     try {
-      const result = await api.request<MastodonStatus[]>(
-        append && state.ownNext
-          ? state.ownNext
-          : `/api/v1/accounts/${encodeURIComponent(state.session.account.id)}/statuses?exclude_replies=false&exclude_reblogs=true&limit=40`,
-      );
+      const result = await api.accountPosts(state.session.account.id, "writing", append ? state.ownNext : undefined);
       if (version !== loadVersion) return;
       state.ownPosts = [
-        ...new Map(
-          [
-            ...(append ? state.ownPosts : []),
-            ...result.data
-              .filter((p) => p.visibility !== "direct" && !p.reblog)
-              .map(mapStatus),
-          ].map((p) => [p.id, p]),
-        ).values(),
+        ...new Map([...(append ? state.ownPosts : []), ...result.posts].map((p) => [p.id, p])).values(),
       ];
       state.ownNext = result.next;
     } catch (error) {
@@ -616,7 +615,7 @@ namespace Fedi {
 
   function settingsView(): string {
     const session = state.session;
-    return `<header class="page-top"><span>MAKE YOURSELF AT HOME</span></header><div class="page-intro"><h1>The little details<span class="accent">.</span></h1><p>Your reading room, your way.</p></div><div class="settings-content"><section><h2>Appearance</h2><div class="theme-options">${["light", "dark", "system"].map((t) => `<button class="button ${state.theme === t ? "primary" : "subtle"}" data-action="set-theme" data-id="${t}" aria-pressed="${state.theme === t}">${icon(t === "dark" ? "moon" : t === "light" ? "sun" : "settings")} ${t[0].toUpperCase() + t.slice(1)}</button>`).join("")}</div></section>
+    return `<header class="page-top"><span>MAKE YOURSELF AT HOME</span><a href="#profile" class="text-button">Your profile ${icon("arrow")}</a></header><div class="page-intro"><h1>The little details<span class="accent">.</span></h1><p>Your reading room, your way.</p></div><div class="settings-content"><section><h2>Appearance</h2><div class="theme-options">${["light", "dark", "system"].map((t) => `<button class="button ${state.theme === t ? "primary" : "subtle"}" data-action="set-theme" data-id="${t}" aria-pressed="${state.theme === t}">${icon(t === "dark" ? "moon" : t === "light" ? "sun" : "settings")} ${t[0].toUpperCase() + t.slice(1)}</button>`).join("")}</div></section>
       <section><h2>Discovery languages</h2><p>Show publications in any of your chosen languages when exploring Discover. Add languages below and tap a language to remove it. Home and Saved keep all languages.</p>${languageSelector("settings-language")}<p class="muted">This uses language labels supplied by your server. Posts without a label are excluded while language filters are selected. An empty list shows all languages. Your preferences are saved on this device.</p></section>
       ${interestsSettings()}
       <section><h2>Your connection</h2>${session ? `<p>Connected as <strong>${escapeHTML(session.account.acct)}</strong></p><div class="capability-card"><strong>${session.maxChars.toLocaleString()} characters per publication</strong><p>${session.format === "text/markdown" ? "Native Markdown publishing" : session.format === "text/html" ? "Rich HTML publishing from Markdown" : "Plain-text publishing only"}</p><span>${supportsArticles(session) ? "Ready for long-form writing" : escapeHTML(articleSupportProblem(session))}</span></div>${action("disconnect", "Log out", "", "button subtle")}` : `<p>Choose an Akkoma, Pleroma, or compatible instance with long posts and rich text. Fedistack checks the server’s capabilities before you write.</p>${action("connect", "Connect your account", "", "button primary")}`}</section>
@@ -674,6 +673,9 @@ namespace Fedi {
       );
     state.posts = [];
     state.accounts = [];
+    state.profile = null;
+    state.suggestions = [];
+    state.suggestionsLoaded = false;
     state.ownPosts = [];
     state.ownNext = undefined;
     state.scheduledPosts = [];

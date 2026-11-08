@@ -316,6 +316,21 @@ namespace Fedi {
       case "format":
         formatSelection(id);
         break;
+      case "markdown-help":
+        markdownHelp();
+        break;
+      case "upload-media":
+        chooseDraftImages();
+        break;
+      case "insert-media":
+        insertDraftMedia(id);
+        break;
+      case "remove-media":
+        removeDraftMedia(id);
+        break;
+      case "retry-media":
+        await retryDraftMedia(id);
+        break;
       case "publish":
         await reviewPublication();
         break;
@@ -390,6 +405,10 @@ namespace Fedi {
   async function submit(form: HTMLFormElement): Promise<void> {
     const data = new FormData(form),
       value = (key: string) => String(data.get(key) || "").trim();
+    if (form.id === "editor-link-form") {
+      insertEditorLink(value("url"), value("label"));
+      return;
+    }
     if (form.id === "schedule-form") {
       await submitSchedule(value("time"), form.dataset.id || "");
       return;
@@ -539,6 +558,7 @@ namespace Fedi {
     document.addEventListener("input", (event) => {
       const el = event.target as HTMLInputElement;
       if (el.id.startsWith("draft-")) captureDraft();
+      if (el.dataset.mediaAlt) updateMediaDescription(el.dataset.mediaAlt, el.value);
       if (el.id === "message-body") rememberMessage();
       if (el.id === "reply-body" && state.reading)
         state.replyDrafts.set(state.reading.id, el.value);
@@ -566,6 +586,15 @@ namespace Fedi {
     });
     document.addEventListener("error", imageLoadError, true);
     document.addEventListener("keydown", editorKeydown);
+    document.addEventListener("paste", editorFileEvent);
+    document.addEventListener("drop", editorFileEvent);
+    document.addEventListener("dragover", (event) => {
+      if (state.view === "editor" && event.dataTransfer?.types.includes("Files") &&
+          (event.target as Element).closest("#draft-body, #draft-media, .editor-paper, .note-composer")) {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+      }
+    });
     document.getElementById("modal")!.addEventListener("click", (event) => {
       if (event.target === event.currentTarget) closeModal();
     });

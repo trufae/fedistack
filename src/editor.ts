@@ -1,6 +1,7 @@
 namespace Fedi {
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
   let publishing = false;
+  export function editorPublishing(): boolean { return publishing; }
   export function newDraft(kind: Draft["kind"] = "article"): Draft {
     return {
       id: uid(),
@@ -35,7 +36,13 @@ namespace Fedi {
     draft: Draft,
     capabilities: Capabilities,
   ): string {
-    if (!draft.body.trim())
+    if (mediaBusy(draft)) return "Wait for your images to finish uploading before publishing.";
+    if (draft.media?.some((m) => !m.url)) return "An image is still processing. Use Check image or remove it before publishing.";
+    if ((draft.media?.length || 0) > (capabilities.maxMedia ?? 4))
+      return `Your server allows ${capabilities.maxMedia ?? 4} attachments per publication.`;
+    if (draft.media?.some((m) => Array.from(m.description).length > (capabilities.mediaDescriptionLimit || 1500)))
+      return "An image description exceeds your server’s alt text limit.";
+    if (!draft.body.trim() && !(draft.kind === "post" && draft.media?.length))
       return "Give your publication a little substance before publishing.";
     if (draft.kind === "article" && !draft.title.trim())
       return "Your article needs a title.";
@@ -55,7 +62,7 @@ namespace Fedi {
     const saved = stored && JSON.stringify(stored) === JSON.stringify(d);
     const status = saved
       ? "saved"
-      : d.title || d.body || d.subtitle
+      : d.title || d.body || d.subtitle || d.media?.length
         ? "pending"
         : "empty";
     return `<div class="draft-save-state"><span class="draft-badge">${d.editingId ? "Editing published writing · unsent changes" : "Draft · unpublished"}</span><span id="save-status" role="status" aria-live="polite" data-state="${status}">${saved ? savedLabel(d.updated) : status === "empty" ? "Not saved yet · start writing" : "Unsaved changes"}</span>${state.session ? `<span id="server-save-status" role="status" aria-live="polite">${escapeHTML(serverDraftLabel(d))}</span>` : ""}</div>`;
@@ -71,9 +78,10 @@ namespace Fedi {
     return `<section class="note-composer" aria-label="${d.editingId ? "Edit note" : "New note"}">
       <header class="note-header">${avatar(me)}<div><strong>${escapeHTML(me.name)}</strong><span>${d.editingId ? "Editing your note" : state.session ? "A quick note" : "Note · offline demo"}</span></div><a href="#drafts" class="text-button">Drafts</a></header>
       <label class="sr-only" for="draft-body">Note text</label><textarea id="draft-body" class="note-input" placeholder="What's on your mind?" spellcheck="true">${escapeHTML(d.body)}</textarea>
+      ${draftMediaView(d)}
       ${publicationSettings(d)}
       <div class="note-save-row">${draftStatus(d)}<span id="character-count"></span></div>
-      <footer class="note-footer"><a class="text-button" href="#drafts">Save & close</a>${scheduleButton(d)}<button id="note-publish" class="button primary" data-action="publish-note" ${!d.body.trim() ? "disabled" : ""}>${d.editingId ? "Update note" : "Note"}</button></footer>
+      <footer class="note-footer"><a class="text-button" href="#drafts">Save & close</a>${scheduleButton(d)}<button id="note-publish" class="button primary" data-action="publish-note" ${(!d.body.trim() && !d.media?.length) || mediaBusy(d) ? "disabled" : ""}>${d.editingId ? "Update note" : "Note"}</button></footer>
     </section>`;
   }
   export function editorView(): string {
@@ -82,22 +90,28 @@ namespace Fedi {
     const tools = [
       ["bold", "<b>B</b>", "Bold (⌘/Ctrl+B)"],
       ["italic", "<i>I</i>", "Italic (⌘/Ctrl+I)"],
-      ["heading", "H₂", "Heading"],
+      ["strike", "<s>S</s>", "Strikethrough"],
+      ["heading", "H₂", "Section heading"],
+      ["subheading", "H₃", "Subheading"],
       ["quote", "“", "Blockquote"],
       ["list", "☷", "Bulleted list"],
+      ["ordered", "1.", "Numbered list"],
+      ["task", "☑", "Checklist"],
       ["link", icon("link"), "Link (⌘/Ctrl+K)"],
       ["image", icon("image"), "Image URL"],
       ["code", "&lt;/&gt;", "Code block"],
+      ["inline-code", "`", "Inline code"],
       ["divider", "―", "Divider"],
     ];
-    const toolbar = `<div class="editor-toolbar" role="toolbar" aria-label="Markdown formatting">${tools.map(([name, label, title]) => `<button type="button" data-action="format" data-id="${name}" title="${title}" aria-label="${title}">${label}</button>`).join("")}<span>MARKDOWN</span></div>`;
+    const toolbar = `<div class="editor-toolbar" role="toolbar" aria-label="Markdown formatting">${tools.map(([name, label, title]) => `<button type="button" data-action="format" data-id="${name}" title="${title}" aria-label="${title}">${label}</button>`).join("")}<button type="button" data-action="upload-media" title="Upload images" aria-label="Upload images">${icon("image")}+</button><button type="button" data-action="markdown-help" title="Markdown help" aria-label="Markdown help">?</button></div>`;
     return `<header class="page-top editor-top"><a class="text-button" href="#drafts">${icon("back")} Your writing</a><div>${draftStatus(d)}${state.preview ? '<button class="zen-preview-edit text-button" data-action="preview">Edit</button>' : ""}<button class="button subtle small-button zen-toggle" data-action="focus" aria-label="${state.focus ? "Exit" : "Enter"} Zen mode" aria-pressed="${state.focus}" title="Zen mode (⌘/Ctrl+Shift+F)">${icon("expand")}<span data-zen-label>${state.focus ? "Exit Zen" : "Zen mode"}</span></button></div></header>
       <div class="editor-controls"><span class="editor-kind">Article</span><div><button class="button subtle" data-action="preview">${icon(state.preview ? "edit" : "eye")} ${state.preview ? "Edit" : "Preview"}</button>${scheduleButton(d)}<button class="button primary" data-action="publish">${d.editingId ? "Update article" : state.session ? "Publish" : "Publish in demo"} ${icon("arrow")}</button></div></div>
       <div class="editor-paper">${
         state.preview
           ? `<div class="article-preview-heading"><span class="eyebrow">READING PREVIEW</span><h1>${escapeHTML(d.title || "Untitled article")}</h1>${d.subtitle ? `<p class="reader-subtitle">${escapeHTML(d.subtitle)}</p>` : ""}<div class="post-byline">${avatar(state.session?.account || demoMe)}<div><strong>${escapeHTML(state.session?.account.name || "You")}</strong><div class="byline-sub">${readingTime(d.body)} min read</div></div></div></div><div class="prose reading-prose">${markdown(d.body) || '<p class="muted">Your story will take shape here.</p>'}</div>`
           : `<div class="article-heading"><label class="sr-only" for="draft-title">Article title</label><input id="draft-title" class="title-input" placeholder="Give your story a title…" value="${escapeHTML(d.title)}" maxlength="250"><label class="sr-only" for="draft-subtitle">Subtitle</label><input id="draft-subtitle" class="subtitle-input" placeholder="Add a subtitle, if you like." value="${escapeHTML(d.subtitle)}" maxlength="500"></div>${toolbar}<label class="sr-only" for="draft-body">Article body in Markdown</label><textarea id="draft-body" class="writing-area" placeholder="It starts with a thought.\n\nTell your story…" spellcheck="true">${escapeHTML(d.body)}</textarea>`
-      }</div>
+      }${state.preview ? attachmentGallery(d.media, d.body) : ""}</div>
+      ${draftMediaView(d)}
       <div class="editor-bottom"><span id="word-count"></span><span id="character-count"></span>${action("export-current", `${icon("download")} Export .md`, "", "text-button")}</div>
       ${publicationSettings(d)}
       <p class="editor-note">${state.session ? `${state.session.maxChars.toLocaleString()} characters per publication · ${state.session.format === "text/markdown" ? "Native Markdown" : state.session.format === "text/html" ? "Rich text" : "Plain text only"}` : "Not signed in · drafts save on this device · sign in to publish to the fediverse."}</p>`;
@@ -143,7 +157,7 @@ namespace Fedi {
     ) as HTMLButtonElement | null;
     if (noteButton)
       noteButton.disabled =
-        !d.body.trim() || (!!state.session && count > state.session.maxChars);
+        (!d.body.trim() && !d.media?.length) || mediaBusy(d) || !!d.media?.some((m) => !m.url) || (!!state.session && count > state.session.maxChars);
   }
   export function captureDraft(): void {
     const d = state.draft;
@@ -163,7 +177,6 @@ namespace Fedi {
     d.warning = value("draft-warning") ?? d.warning;
     d.visibility =
       (value("draft-visibility") as Draft["visibility"]) || d.visibility;
-    d.updated = new Date().toISOString();
     if (
       before !==
       JSON.stringify([d.title, d.subtitle, d.body, d.warning, d.visibility])
@@ -172,6 +185,13 @@ namespace Fedi {
       d.scheduleKey = undefined;
       d.scheduleTime = undefined;
     }
+    draftChanged(false);
+  }
+  export function draftChanged(resetKeys = true): void {
+    const d = state.draft;
+    if (!d || publishing) return;
+    d.updated = new Date().toISOString();
+    if (resetKeys) d.publishKey = d.scheduleKey = d.scheduleTime = undefined;
     saveIndicator("Unsaved changes · saving…", "pending");
     clearTimeout(saveTimer);
     saveTimer = setTimeout(flushDraft, 300);
@@ -182,7 +202,7 @@ namespace Fedi {
     if (publishing) return true;
     const d = state.draft;
     if (!d) return true;
-    const empty = !d.title.trim() && !d.body.trim() && !d.subtitle.trim();
+    const empty = !d.title.trim() && !d.body.trim() && !d.subtitle.trim() && !d.media?.length && !mediaBusy(d);
     const success = empty && !d.serverId && !d.serverSaveKey ? removeDraft(d.id) : saveDraft(d);
     saveIndicator(
       success
@@ -196,8 +216,36 @@ namespace Fedi {
     if (serverStatus) serverStatus.textContent = serverDraftLabel(d);
     return success;
   }
+  export function insertEditorText(text: string, start?: number, end?: number): void {
+    if (publishing) return;
+    const textarea = document.getElementById("draft-body") as HTMLTextAreaElement | null;
+    if (!textarea) return;
+    start ??= textarea.selectionStart;
+    end ??= textarea.selectionEnd;
+    textarea.focus();
+    textarea.setSelectionRange(start, end);
+    // Use the browser's editing operation to retain native Undo/Redo history.
+    if (!document.execCommand?.("insertText", false, text))
+      textarea.setRangeText(text, start, end, "end");
+    captureDraft();
+  }
+  let linkSelection: { draft: Draft; start: number; end: number; image: boolean } | undefined;
+  export function insertEditorLink(url: string, label: string): void {
+    const selection = linkSelection;
+    if (!selection || state.draft !== selection.draft) return;
+    const safe = safeURL(url, selection.image);
+    if (!safe || (selection.image && !safe.startsWith("https://")))
+      throw new Error(selection.image ? "Enter an HTTPS image URL." : "Enter an HTTP or HTTPS link.");
+    closeModal();
+    insertEditorText(`${selection.image ? "!" : ""}[${markdownLabel(label || (selection.image ? "" : safe))}](${markdownURL(safe)})`, selection.start, selection.end);
+    linkSelection = undefined;
+  }
+  export function markdownHelp(): void {
+    showModal("Writing with Markdown", `<p>Select text, then use the toolbar or keyboard shortcuts. Paste or drop images to upload them.</p><div class="markdown-help"><code>## Section heading<br>### Subheading<br>**Bold** · *Italic* · ~~Strikethrough~~<br>- Bullet item<br>1. Numbered item<br>- [ ] Task · - [x] Completed task<br>&gt; A quotation<br>&#96;inline code&#96;<br>--- (divider)</code></div><p>Enter continues lists and quotes; Enter on an empty item ends the list. Tab indents selected lines; Shift+Tab removes indentation. Cmd/Ctrl+Z undoes toolbar edits. Use Preview to check the result.</p>${action("close-modal", "Back to writing", "", "button primary")}`);
+  }
   export function formatSelection(kind: string): void {
-    if (state.draft?.kind !== "article") return;
+    if (state.draft?.kind !== "article" || publishing) return;
+    if (state.preview && kind === "image") { state.preview = false; render(); }
     const textarea = document.getElementById(
       "draft-body",
     ) as HTMLTextAreaElement | null;
@@ -205,26 +253,49 @@ namespace Fedi {
     const start = textarea.selectionStart,
       end = textarea.selectionEnd,
       selected = textarea.value.slice(start, end);
+    if (kind === "link" || kind === "image") {
+      linkSelection = { draft: state.draft, start, end, image: kind === "image" };
+      showModal(kind === "image" ? "Insert an image from a URL" : "Insert a link", `<form id="editor-link-form"><label>${kind === "image" ? "Image URL (HTTPS)" : "URL"}<input type="url" name="url" required placeholder="https://" autofocus></label><label>${kind === "image" ? "Image description (alt text)" : "Link text"}<input name="label" value="${escapeHTML(selected)}"></label><button type="submit" class="button primary">Insert ${kind === "image" ? "image" : "link"}</button></form>`);
+      return;
+    }
+    const linePrefixes: Record<string, string> = { heading: "## ", subheading: "### ", quote: "> ", list: "- ", ordered: "1. ", task: "- [ ] " };
+    if (linePrefixes[kind]) {
+      const from = textarea.value.slice(0, start).lastIndexOf("\n") + 1;
+      const last = end > start && textarea.value[end - 1] === "\n" ? end - 1 : end;
+      const to = textarea.value.indexOf("\n", last);
+      const stop = to < 0 ? textarea.value.length : to;
+      const lines = textarea.value.slice(from, stop).split("\n");
+      const prefix = linePrefixes[kind];
+      const remove = lines.every((line) => kind === "ordered" ? /^\d+\. /.test(line) : line.startsWith(prefix));
+      const result = lines.map((line, i) => remove ? kind === "ordered" ? line.replace(/^\d+\. /, "") : line.slice(prefix.length) :
+        (kind === "ordered" ? `${i + 1}. ` : prefix) + line.replace(/^(?:#{1,6}\s+|>\s?|[-*+]\s+(?:\[[ xX]\]\s+)?|\d+\.\s+)/, "")).join("\n");
+      insertEditorText(result, from, stop);
+      textarea.setSelectionRange(from, from + result.length);
+      return;
+    }
     const formats: Record<string, [string, string, string]> = {
       bold: ["**", "**", "bold text"],
       italic: ["*", "*", "italic text"],
-      heading: ["\n## ", "\n", "Heading"],
-      quote: ["\n> ", "\n", "A thought worth keeping"],
-      list: ["\n- ", "\n", "List item"],
-      link: ["[", "](https://example.com)", "link text"],
-      image: ["![", "](https://example.com/image.jpg)", "Describe the image"],
+      strike: ["~~", "~~", "text"],
+      "inline-code": ["`", "`", "code"],
       code: ["\n```\n", "\n```\n", "code"],
       divider: ["\n\n---\n\n", "", ""],
     };
     const [prefix, suffix, placeholder] = formats[kind] || formats.bold;
     const content = selected || placeholder;
-    textarea.setRangeText(prefix + content + suffix, start, end, "end");
-    textarea.focus();
+    if (selected && prefix && suffix && selected.startsWith(prefix) && selected.endsWith(suffix)) {
+      insertEditorText(selected.slice(prefix.length, -suffix.length), start, end);
+      return;
+    }
+    if (selected && textarea.value.slice(start - prefix.length, start) === prefix && textarea.value.slice(end, end + suffix.length) === suffix) {
+      insertEditorText(selected, start - prefix.length, end + suffix.length);
+      return;
+    }
+    insertEditorText(prefix + content + suffix, start, end);
     textarea.setSelectionRange(
       start + prefix.length,
       start + prefix.length + content.length,
     );
-    captureDraft();
   }
   export function toggleFocus(): void {
     if (state.view === "editor" && state.draft?.kind !== "article") return;
@@ -277,6 +348,17 @@ namespace Fedi {
       `<div class="publish-preview"><span class="eyebrow">${d.kind} · ${d.visibility === "private" ? "FOLLOWERS ONLY" : d.visibility.toUpperCase()}</span><h3>${escapeHTML(d.title || "A new post")}</h3><p>${escapeHTML(plainText(d.body).slice(0, 240))}…</p><p class="muted">${readingTime(d.body)} min read · ${Array.from(publicationPayload(d, capabilities.format) + d.warning).length.toLocaleString()} characters</p></div><p>${d.editingId ? "Your changes will update the existing publication. Its link, likes, replies, and audience stay the same." : state.session ? `This is one publication on <strong>${escapeHTML(new URL(state.session.server).host)}</strong>. ${d.visibility === "public" ? "Anyone can read and share it." : d.visibility === "private" ? "Only approved followers can read it." : "It stays out of public timelines, but anyone with its link can read it."}` : "This stays in your browser. Sign in to share real publications with the fediverse."}</p>${action("confirm-publish", d.editingId ? "Update publication" : state.session ? "Publish now" : "Publish in demo", "", "button primary full-width")}`,
     );
   }
+  async function prepareDraftMedia(d: Draft, api: API): Promise<void> {
+    if (!d.media?.length) return;
+    const content = JSON.stringify(d.media.map((m) => [m.id, m.description]));
+    if (d.mediaPrepared === content) return;
+    for (const media of d.media) await api.describeMedia(media);
+    if (state.api !== api || state.draft !== d) return;
+    // A successful publication with a lost response can only be recovered by
+    // replaying its idempotency key, not by updating its now-attached media.
+    d.mediaPrepared = content;
+    if (!saveDraft(d, false)) throw new Error("Could not save image descriptions before publishing. Free up browser storage and try again.");
+  }
   export async function publishDraft(): Promise<void> {
     if (publishing || !state.draft) return;
     const d = state.draft,
@@ -303,6 +385,10 @@ namespace Fedi {
       if (problem) throw new Error(problem);
       await deleteSyncedDraft(d.id, true);
       if (state.api !== api) return;
+      if (api && !d.editingId) {
+        await prepareDraftMedia(d, api);
+        if (state.api !== api || state.session !== session) return;
+      }
       let post: Post;
       if (api && session)
         post = d.editingId
@@ -311,6 +397,7 @@ namespace Fedi {
               publicationPayload(d, session.format),
               d.warning,
               session.format,
+              d.media,
             )
           : await api.createStatus(
               publicationPayload(d, session.format),
@@ -319,6 +406,7 @@ namespace Fedi {
               d.warning,
               d.publishKey,
               session.format,
+              d.media,
             );
       else
         post = {
@@ -330,6 +418,9 @@ namespace Fedi {
           title: d.kind === "article" ? d.title : "",
           subtitle: d.kind === "article" ? d.subtitle : "",
           markdown: d.body,
+          media: d.media,
+          image: d.media?.[0]?.previewUrl,
+          imageAlt: d.media?.[0]?.description,
           kind: d.kind,
           created: d.editingId
             ? findPost(d.editingId)?.created || new Date().toISOString()
@@ -399,8 +490,10 @@ namespace Fedi {
       if (problem) throw new Error(problem);
       await deleteSyncedDraft(d.id, true);
       if (state.api !== api) return;
+      await prepareDraftMedia(d, api);
+      if (state.api !== api || state.session !== session) return;
       await api.createScheduledStatus(publicationPayload(d, session.format), d.visibility,
-        d.warning, session.format, scheduledAt, d.scheduleKey);
+        d.warning, session.format, scheduledAt, d.scheduleKey, d.media);
       if (!writeStore(key, readStore<Draft[]>(key, []).filter((x) => x.id !== d.id)))
         throw new Error("Publication is scheduled, but the local draft could not be removed. Check Scheduled before retrying.");
       if (state.api !== api) return;
@@ -439,6 +532,7 @@ namespace Fedi {
       body: heading ? text.slice(heading[0].length) : text,
       kind: heading ? "article" : "post",
       warning: source.spoiler_text || "",
+      media: post.media?.map((m) => ({ ...m })),
       visibility: post.visibility === "direct" ? "private" : post.visibility,
     };
   }
@@ -467,6 +561,7 @@ namespace Fedi {
           title: post.title,
           subtitle: post.subtitle,
           body: post.markdown,
+          media: post.media?.map((m) => ({ ...m })),
           kind: post.kind,
           warning: post.warning,
           visibility: post.visibility as Draft["visibility"],
@@ -588,11 +683,42 @@ namespace Fedi {
           .replace(/\s+/g, "-")
           .slice(0, 80) || "draft"
       }.md`,
-      draftMarkdown(draft),
+      [draftMarkdown(draft), ...(draft.media || []).filter((m) => m.type === "image" && m.url && !inlineMedia(draft.body, m)).map(mediaMarkdown)].filter(Boolean).join("\n\n"),
     );
   }
   export function editorKeydown(event: KeyboardEvent): void {
     if ((document.getElementById("modal") as HTMLDialogElement).open) return;
+    const textarea = document.activeElement as HTMLTextAreaElement | null;
+    if (!publishing && !event.isComposing && state.view === "editor" && state.draft?.kind === "article" && textarea?.id === "draft-body" &&
+        !event.metaKey && !event.ctrlKey && !event.altKey) {
+      const start = textarea.selectionStart, end = textarea.selectionEnd;
+      const lineStart = textarea.value.slice(0, start).lastIndexOf("\n") + 1;
+      if (event.key === "Tab") {
+        event.preventDefault();
+        if (start === end && !event.shiftKey) insertEditorText("  ");
+        else {
+          const last = end > start && textarea.value[end - 1] === "\n" ? end - 1 : end;
+          const next = textarea.value.indexOf("\n", last), stop = next < 0 ? textarea.value.length : next;
+          const lines = textarea.value.slice(lineStart, stop).split("\n");
+          const text = lines.map((line) => event.shiftKey ? line.replace(/^( {1,2}|\t)/, "") : "  " + line).join("\n");
+          insertEditorText(text, lineStart, stop);
+          textarea.setSelectionRange(lineStart, lineStart + text.length);
+        }
+        return;
+      }
+      if (event.key === "Enter" && !event.shiftKey && start === end) {
+        const before = textarea.value.slice(0, start);
+        if ((before.match(/^```/gm)?.length || 0) % 2 === 0) {
+          const item = /^(\s*)([-*+]|\d+\.|>) (\[[ xX]\] )?(.*)$/.exec(textarea.value.slice(lineStart, start));
+          if (item) {
+            event.preventDefault();
+            if (!item[4].trim()) insertEditorText("", lineStart, start);
+            else insertEditorText(`\n${item[1]}${/^\d/.test(item[2]) ? `${parseInt(item[2], 10) + 1}.` : item[2]} ${item[3] ? "[ ] " : ""}`);
+            return;
+          }
+        }
+      }
+    }
     if (event.key === "Escape" && state.focus) {
       toggleFocus();
       return;

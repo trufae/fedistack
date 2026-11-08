@@ -4409,3 +4409,292 @@ test("a late background profile response cannot replace the page after navigatio
   assert.equal(get("app").innerHTML, html);
   assert.notEqual(app.state.session.account.avatar, "https://example.org/stale.png");
 });
+
+const attachment = {
+  id: "image-one", type: "image", url: "https://files.example/original.png",
+  previewUrl: "https://files.example/preview.png", description: "A mountain at sunset",
+};
+const rawAttachment = {
+  id: attachment.id, type: attachment.type, url: attachment.url,
+  preview_url: attachment.previewUrl, description: attachment.description,
+};
+function editingClient(body = "First line\nSecond line") {
+  const client = setup(), { app, context } = client, { get } = elements(context);
+  app.state.draft = { ...article, body };
+  app.state.view = "editor";
+  const textarea = get("draft-body");
+  Object.assign(textarea, {
+    id: "draft-body", value: body, selectionStart: 0, selectionEnd: body.length,
+    setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; },
+    setRangeText(text, start, end) {
+      this.value = this.value.slice(0, start) + text + this.value.slice(end);
+      this.setSelectionRange(start + text.length, start + text.length);
+    },
+  });
+  context.document.activeElement = textarea;
+  get("modal").open = false;
+  get("modal").close = () => {};
+  return { ...client, get, textarea };
+}
+
+test("image uploads use multipart, fall back only for unsupported v2, and poll processing without re-uploading", async () => {
+  const requests = [];
+  let polls = 0;
+  const { app, context } = setup(async (url, options) => {
+    requests.push({ path: new URL(url).pathname, ...options });
+    if (url.endsWith("/api/v2/media")) return Response.json({}, { status: 404 });
+    if (url.endsWith("/api/v1/media")) return Response.json({ ...rawAttachment, url: null });
+    if (++polls === 1) return new Response(null, { status: 206 });
+    return Response.json(rawAttachment);
+  });
+  context.setTimeout = (callback) => { queueMicrotask(callback); return 0; };
+  const api = new app.API("https://example.org", "token");
+  const file = new File(["image"], "photo.png", { type: "image/png" });
+  const pending = await api.uploadMedia(file);
+  assert.equal(pending.url, "");
+  const ready = await api.readyMedia(pending);
+  assert.equal(ready.url, attachment.url);
+  assert.equal(polls, 2);
+  assert.equal(requests[0].body.get("file").name, "photo.png");
+  assert.equal(requests[0].headers["Content-Type"], undefined);
+  assert.equal(requests.filter((r) => r.method === "POST").length, 2);
+  assert.equal(requests[0].headers.Authorization, "Bearer token");
+});
+
+test("failed media uploads do not retry a rejected or uncertain upload", async () => {
+  for (const status of [401, 413, 422, 500]) {
+    let requests = 0;
+    const { app } = setup(async () => { requests++; return Response.json({ error: "Rejected" }, { status }); });
+    await assert.rejects(new app.API("https://example.org").uploadMedia(new File(["x"], "photo.png", { type: "image/png" })), /Rejected/);
+    assert.equal(requests, 1);
+  }
+});
+
+test("server image limits validate formats, file size, count and image-only notes", () => {
+  const { app } = setup();
+  const cap = app.detectCapabilities({ configuration: {
+    statuses: { max_characters: 500, max_media_attachments: 2 },
+    media_attachments: { image_size_limit: 1000, supported_mime_types: ["image/png", "video/mp4"], description_limit: 20 },
+  } });
+  assert.equal(cap.maxMedia, 2);
+  assert.equal(cap.imageSizeLimit, 1000);
+  assert.deepEqual(Array.from(cap.imageTypes), ["image/png"]);
+  assert.match(app.imageUploadProblem({ name: "x", type: "image/svg+xml", size: 100 }, cap, 0), /format/);
+  assert.match(app.imageUploadProblem({ name: "x", type: "image/png", size: 1001 }, cap, 0), /under/);
+  assert.match(app.imageUploadProblem({ name: "x", type: "image/png", size: 100 }, cap, 2), /2 attachments/);
+  assert.equal(app.imageUploadProblem({ name: "x", type: "image/png", size: 100 }, cap, 0), "");
+  const note = { ...app.newDraft("post"), media: [{ ...attachment, description: "Sunset" }] };
+  assert.equal(app.publishProblem(note, cap), "");
+  note.media[0].url = "";
+  assert.match(app.publishProblem(note, cap), /processing/);
+});
+
+test("creating, updating and scheduling publications sends attachment IDs and edit descriptions", async () => {
+  const requests = [];
+  const { app } = setup(async (url, options) => {
+    const body = JSON.parse(options.body);
+    requests.push({ url, body });
+    if (body.scheduled_at) return Response.json({ id: "scheduled", scheduled_at: body.scheduled_at, params: { text: body.status } });
+    return Response.json({ id: "post", content: "", account: { id: "me", username: "me", acct: "me", note: "" }, media_attachments: [rawAttachment] });
+  });
+  app.htmlToMarkdown = (html) => html;
+  const api = new app.API("https://example.org");
+  const created = await api.createStatus("", "public", undefined, "", "key", "text/plain", [attachment]);
+  assert.equal(created.media[0].url, attachment.url);
+  await api.editStatus("post", "Edited", "", "text/plain", [{ ...attachment, description: "New alt" }]);
+  await api.editStatus("post", "Removed", "", "text/plain", []);
+  await api.createScheduledStatus("Later", "public", "", "text/plain", new Date(Date.now() + 600000).toISOString(), "schedule-key", [attachment]);
+  assert.deepEqual(requests[0].body.media_ids, [attachment.id]);
+  assert.deepEqual(requests[1].body.media_attributes, [{ id: attachment.id, description: "New alt" }]);
+  assert.deepEqual(requests[2].body.media_ids, []);
+  assert.deepEqual(requests[3].body.media_ids, [attachment.id]);
+});
+
+test("image descriptions, inline placement, removal and galleries stay in sync", () => {
+  const { app, textarea } = editingClient("A paragraph.");
+  app.state.draft.media = [{ ...attachment }, { ...attachment, id: "second", url: "https://files.example/second.png" }];
+  textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+  app.insertDraftMedia(attachment.id);
+  assert.match(textarea.value, /!\[A mountain at sunset\]/);
+  app.updateMediaDescription(attachment.id, 'A [mountain] "sunset"');
+  assert.match(app.markdown(app.state.draft.body), /alt="A \[mountain\] &quot;sunset&quot;"/);
+  const gallery = app.attachmentGallery(app.state.draft.media, app.state.draft.body);
+  assert.doesNotMatch(gallery, /original.png/);
+  assert.match(gallery, /second.png/);
+  app.flushDraft();
+  assert.equal(app.getDrafts()[0].media[0].description, 'A [mountain] "sunset"');
+  app.removeDraftMedia(attachment.id);
+  assert.equal(app.state.draft.media.length, 1);
+  assert.doesNotMatch(app.state.draft.body, /original.png/);
+  assert.match(app.state.draft.body, /A paragraph/);
+});
+
+test("media survive edit drafts and server sync metadata, including alt-text conflicts", () => {
+  const { app } = setup();
+  const post = { ...app.demoPosts[0], media: [{ ...attachment }] };
+  const draft = app.draftFromSource(post, { text: "# Article\n\nBody", spoiler_text: "" });
+  assert.equal(draft.media[0].id, attachment.id);
+  draft.media[0].description = "Changed";
+  assert.equal(post.media[0].description, attachment.description);
+  const encoded = app.encodeServerDraft(draft);
+  const decoded = app.decodeServerDraft({ id: "s", scheduled_at: app.serverDraftTime(draft.id), params: { text: encoded }, media_attachments: [] });
+  assert.equal(decoded.media[0].description, "Changed");
+  assert.equal(app.draftContent(decoded), app.draftContent(draft));
+  assert.notEqual(app.draftContent(draft), app.draftContent({ ...draft, media: [attachment] }));
+  assert.equal(app.decodeServerDraft({ id: "s", scheduled_at: app.serverDraftTime(draft.id), params: { text: app.encodeServerDraft({ ...draft, media: [{ ...attachment, url: "javascript:alert(1)" }] }) }, media_attachments: [] }), null);
+});
+
+test("upload completion preserves typing and alt edits, and never restores deleted or foreign drafts", async () => {
+  for (const mode of ["typing", "deleted", "switched"]) {
+    const { app, textarea } = editingClient("Before upload");
+    let finish, entered;
+    const started = new Promise((resolve) => { entered = resolve; });
+    const ready = new Promise((resolve) => { finish = resolve; });
+    app.state.session = { ...longServer, server: "https://example.org", account: { id: "me" } };
+    app.state.api = {
+      capabilities: async () => longServer,
+      uploadMedia: async () => ({ ...attachment, url: "" }),
+      readyMedia: async () => { entered(); await ready; return { ...attachment }; },
+    };
+    const originalKey = app.draftKey(), originalId = app.state.draft.id;
+    const upload = app.uploadDraftImages([new File(["image"], "photo.png", { type: "image/png" })]);
+    await started;
+    assert.match(app.publishProblem(app.state.draft, longServer), /uploading/);
+    if (mode === "typing") {
+      textarea.value = "Written while uploading";
+      app.captureDraft();
+      app.updateMediaDescription(attachment.id, "Alt while processing");
+    } else if (mode === "deleted") {
+      app.removeDraft(originalId);
+      app.state.draft = null;
+    } else {
+      app.state.session = { ...longServer, server: "https://other.example", account: { id: "other" } };
+      app.state.api = null;
+      app.state.draft = { ...article, id: "other-draft", body: "Other account" };
+    }
+    finish();
+    await upload;
+    const originals = app.readStore(originalKey, []);
+    if (mode === "deleted") assert.equal(originals.length, 0);
+    else assert.equal(originals[0].media[0].url, attachment.url);
+    if (mode === "typing") {
+      assert.equal(app.state.draft.body, "Written while uploading");
+      assert.equal(app.state.draft.media[0].description, "Alt while processing");
+    }
+    if (mode === "switched") {
+      assert.equal(app.state.draft.body, "Other account");
+      assert.equal(app.state.draft.media, undefined);
+    }
+  }
+});
+
+test("formatting applies to each selected line and renders nested lists and checklists", () => {
+  const { app, textarea } = editingClient();
+  app.formatSelection("ordered");
+  assert.equal(textarea.value, "1. First line\n2. Second line");
+  app.formatSelection("task");
+  assert.equal(textarea.value, "- [ ] First line\n- [ ] Second line");
+  const rendered = app.markdown("- [x] Done\n  - Nested\n- [ ] Next\n\n3. Third");
+  assert.match(rendered, /disabled checked/);
+  assert.match(rendered, /<ul><li>Nested<\/li><\/ul>/);
+  assert.match(rendered, /<ol start="3">/);
+  assert.doesNotMatch(app.markdown("- [x] <script>alert(1)</script>"), /<script>/);
+});
+
+test("Enter continues ordered lists and tasks, ends empty items, and leaves code blocks alone", () => {
+  for (const [source, expected, handled] of [
+    ["2. Second", "2. Second\n3. ", true],
+    ["- [x] Done", "- [x] Done\n- [ ] ", true],
+    ["> Quote", "> Quote\n> ", true],
+    ["- ", "", true],
+    ["```\n- Code", "```\n- Code", false],
+  ]) {
+    const { app, textarea } = editingClient(source);
+    textarea.setSelectionRange(source.length, source.length);
+    let prevented = false;
+    app.editorKeydown({ key: "Enter", preventDefault() { prevented = true; } });
+    assert.equal(prevented, handled);
+    assert.equal(textarea.value, expected);
+  }
+});
+
+test("toolbar edits use native editing when available, preserving the browser undo history", () => {
+  const { app, context, textarea } = editingClient("hello");
+  const calls = [];
+  context.document.execCommand = (command, ui, text) => {
+    calls.push(command);
+    textarea.setRangeText(text, textarea.selectionStart, textarea.selectionEnd);
+    return true;
+  };
+  app.formatSelection("bold");
+  assert.deepEqual(calls, ["insertText"]);
+  assert.equal(textarea.value, "**hello**");
+  app.formatSelection("bold");
+  assert.equal(textarea.value, "hello");
+});
+
+test("publication retries retain media descriptions and replay the same idempotency key", async () => {
+  for (const scheduled of [false, true]) {
+    const { app, get } = editingClient();
+    get("modal").close = () => {};
+    app.state.draft.media = [{ ...attachment }];
+    app.state.session = { ...longServer, server: "https://example.org", account: { id: "me" } };
+    let descriptions = 0, attempts = 0;
+    const keys = [];
+    const publish = async (...args) => {
+      keys.push(args[scheduled ? 5 : 4]);
+      assert.equal(args[6][0].id, attachment.id);
+      if (++attempts === 1) throw new Error("Response lost");
+      return { ...app.demoPosts[0], id: "published", media: [{ ...attachment }] };
+    };
+    app.state.api = {
+      capabilities: async () => longServer,
+      describeMedia: async () => { descriptions++; if (descriptions > 1) throw new Error("Already attached"); },
+      createStatus: publish,
+      createScheduledStatus: publish,
+    };
+    const date = new Date(Date.now() + 600000).toISOString();
+    const attempt = () => scheduled ? app.scheduleDraft(date) : app.publishDraft();
+    await assert.rejects(attempt(), /Response lost/);
+    assert.equal(app.getDrafts()[0].media[0].id, attachment.id);
+    await attempt();
+    assert.equal(descriptions, 1);
+    assert.equal(keys[0], keys[1]);
+    assert.equal(app.state.draft, null);
+  }
+});
+
+test("a failed upload leaves the text and earlier images saved with an actionable error", async () => {
+  const { app } = editingClient("Keep this writing");
+  app.state.session = { ...longServer, server: "https://example.org", account: { id: "me" } };
+  let uploads = 0;
+  app.state.api = {
+    capabilities: async () => longServer,
+    uploadMedia: async () => {
+      if (++uploads === 2) throw new Error("Upload interrupted. Try again.");
+      return { ...attachment };
+    },
+  };
+  const file = new File(["image"], "photo.png", { type: "image/png" });
+  await app.uploadDraftImages([file, file]);
+  assert.equal(app.state.draft.body, "Keep this writing");
+  assert.equal(app.getDrafts()[0].media.length, 1);
+  assert.equal(app.mediaBusy(app.state.draft), false);
+  assert.match(app.draftMediaView(app.state.draft), /Upload interrupted\. Try again\./);
+});
+
+test("URL dialogs insert safe links and images at the remembered selection", () => {
+  const { app, get, textarea } = editingClient("Selected text");
+  get("modal").querySelector = () => null;
+  get("modal").showModal = () => {};
+  app.formatSelection("link");
+  assert.throws(() => app.insertEditorLink("javascript:alert(1)", "unsafe"), /HTTP/);
+  app.insertEditorLink("https://example.org/page(one)", "Read [this]");
+  assert.equal(textarea.value, "[Read \\[this\\]](https://example.org/page%28one%29)");
+  assert.match(app.markdown(textarea.value), />Read \[this\]<\/a>/);
+  textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+  app.formatSelection("image");
+  assert.throws(() => app.insertEditorLink("http://example.org/photo.png", "image"), /HTTPS/);
+  app.insertEditorLink("https://example.org/photo.png", 'Photo "caption"');
+  assert.match(app.markdown(textarea.value), /alt="Photo &quot;caption&quot;"/);
+});

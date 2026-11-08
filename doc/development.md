@@ -30,6 +30,7 @@ Fedistack starts at **0.1.0**. `package.json` is the source of truth for the app
 | `src/app.ts`      | Routes, state, feed, reader, library, settings                |
 | `src/profile.ts`  | Shared account profiles, paginated activity, people lists, recommendations |
 | `src/editor.ts`   | Draft lifecycle, formatting, preview, single-post publishing  |
+| `src/media.ts`    | Image uploads, attachment management, inline images, alt text and galleries |
 | `src/messages.ts` | Conversation loading, participants, private replies           |
 | `src/interests.ts` | Hashtag subscriptions, list management, and list membership   |
 | `src/ui.ts`       | Shared components, icons, dialogs, notifications              |

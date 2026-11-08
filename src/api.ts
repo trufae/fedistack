@@ -1,4 +1,12 @@
 namespace Fedi {
+  export function mapMedia(media: MastodonMedia): MediaAttachment {
+    return {
+      id: media.id, type: media.type,
+      url: safeURL(media.url || "", true),
+      previewUrl: safeURL(media.preview_url || media.url || "", true),
+      description: media.description || "",
+    };
+  }
   export class APIError extends Error {
     constructor(
       message: string,
@@ -183,7 +191,7 @@ namespace Fedi {
         if (method !== "GET" && /^\/api\/v[12]\/(?:statuses(?:\/|$)|bookmarks(?:\/|$)|filters(?:\/|$)|lists(?:\/|$)|accounts\/[^/]+\/(?:follow|unfollow|block|unblock|mute|unmute)$)/.test(url.pathname))
           clearFeedCache();
         const data =
-          response.status === 204
+          response.status === 204 || response.status === 206
             ? (undefined as T)
             : ((await response.json().catch((error) => {
               if (error?.name !== "SyntaxError") throw error;
@@ -248,6 +256,33 @@ namespace Fedi {
       if (typeof data[kind] !== "string" || !safeURL(data[kind]!, true).startsWith("https://"))
         throw new Error("The server accepted the upload but did not return a usable HTTPS image URL. Refresh your profile or check your server’s media configuration.");
       return mapAccount(data);
+    }
+    async uploadMedia(file: File): Promise<MediaAttachment> {
+      const body = new FormData();
+      body.append("file", file);
+      let uploaded: MastodonMedia;
+      try {
+        uploaded = await this.post<MastodonMedia>("/api/v2/media", body);
+      } catch (error) {
+        if (!(error instanceof APIError) || ![404, 405, 501].includes(error.status)) throw error;
+        uploaded = await this.post<MastodonMedia>("/api/v1/media", body);
+      }
+      if (!uploaded?.id || uploaded.type !== "image")
+        throw new Error("The server could not process this image. Try a different image format.");
+      return mapMedia(uploaded);
+    }
+    async readyMedia(media: MediaAttachment): Promise<MediaAttachment> {
+      for (let attempt = 0; attempt < 20; attempt++) {
+        if (media.url) return media;
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        const result = await this.get<MastodonMedia | undefined>(`/api/v1/media/${encodeURIComponent(media.id)}`);
+        if (result) media = mapMedia(result);
+      }
+      if (media.url) return media;
+      throw new Error("The server is still processing this image. Use Check image to try again.");
+    }
+    async describeMedia(media: MediaAttachment): Promise<void> {
+      await this.request(`/api/v1/media/${encodeURIComponent(media.id)}`, "PUT", { description: media.description });
     }
     async capabilities(): Promise<Capabilities> {
       // v1 carries rich-text formats on Akkoma/Pleroma, even when v2 is supported.
@@ -325,6 +360,7 @@ namespace Fedi {
       text: string,
       warning: string,
       format: PostFormat,
+      media?: MediaAttachment[],
     ): Promise<Post> {
       const result = await this.request<MastodonStatus>(
         `/api/v1/statuses/${encodeURIComponent(id)}`,
@@ -332,6 +368,8 @@ namespace Fedi {
         {
           status: text,
           spoiler_text: warning,
+          ...(media ? { media_ids: media.map((m) => m.id),
+            media_attributes: media.map((m) => ({ id: m.id, description: m.description })) } : {}),
           ...(format !== "text/plain" ? { content_type: format } : {}),
         },
       );
@@ -369,12 +407,14 @@ namespace Fedi {
     async createScheduledStatus(
       text: string, visibility: Visibility, warning: string,
       format: PostFormat, scheduledAt: string, key: string,
+      media: MediaAttachment[] = [],
     ): Promise<ScheduledStatus> {
       // Never allow a missing/invalid date to fall through to immediate publishing.
       validateScheduleTime(scheduledAt);
       const result = await this.post<ScheduledStatus>("/api/v1/statuses", {
         status: text, visibility, spoiler_text: warning,
         content_type: format, scheduled_at: scheduledAt,
+        ...(media.length ? { media_ids: media.map((m) => m.id) } : {}),
       }, key);
       if (!result.id || !result.params ||
           Date.parse(result.scheduled_at || "") !== Date.parse(scheduledAt))
@@ -395,6 +435,7 @@ namespace Fedi {
       warning = "",
       key = uid(),
       format: PostFormat = "text/plain",
+      media: MediaAttachment[] = [],
     ): Promise<Post> {
       return mapStatus(
         await this.post<MastodonStatus>(
@@ -404,6 +445,7 @@ namespace Fedi {
             visibility,
             ...(replyTo ? { in_reply_to_id: replyTo } : {}),
             spoiler_text: warning,
+            ...(media.length ? { media_ids: media.map((m) => m.id) } : {}),
             ...(format !== "text/plain" ? { content_type: format } : {}),
           },
           key,
@@ -568,7 +610,8 @@ namespace Fedi {
     version?: string;
     max_toot_chars?: number;
     configuration?: {
-      statuses?: { max_characters?: number; supported_mime_types?: string[] };
+      statuses?: { max_characters?: number; supported_mime_types?: string[]; max_media_attachments?: number };
+      media_attachments?: { image_size_limit?: number; supported_mime_types?: string[]; description_limit?: number };
     };
     pleroma?: { metadata?: { post_formats?: string[] } };
   }
@@ -587,8 +630,14 @@ namespace Fedi {
       ...(v2?.configuration?.statuses?.supported_mime_types || []),
       ...(v1?.configuration?.statuses?.supported_mime_types || []),
     ];
+    const media = v2?.configuration?.media_attachments || v1?.configuration?.media_attachments;
+    const maxMedia = v2?.configuration?.statuses?.max_media_attachments ?? v1?.configuration?.statuses?.max_media_attachments;
     return {
       maxChars,
+      ...(maxMedia !== undefined ? { maxMedia } : {}),
+      ...(media?.image_size_limit ? { imageSizeLimit: media.image_size_limit } : {}),
+      ...(media?.supported_mime_types ? { imageTypes: media.supported_mime_types.filter((t) => t.startsWith("image/")) } : {}),
+      ...(media?.description_limit ? { mediaDescriptionLimit: media.description_limit } : {}),
       format: formats.includes("text/markdown")
         ? "text/markdown"
         : formats.includes("text/html")
@@ -671,6 +720,7 @@ namespace Fedi {
       warning,
       image: safeURL(media?.preview_url || card?.image || "", true),
       imageAlt: media?.description || "",
+      media: s.media_attachments?.filter((m) => !!m.id).map((m) => mapMedia({ ...m, url: m.url || m.preview_url })),
       url: safeURL(s.url),
       source: card ? safeURL(card.url) : undefined,
       replyTo: s.in_reply_to_id,

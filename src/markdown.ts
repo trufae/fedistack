@@ -29,7 +29,7 @@ namespace Fedi {
     if (depth > 8) return escapeHTML(source);
     // Parse from source, then escape each text node. Generated HTML is never parsed again.
     const token =
-      /`([^`\n]+)`|(!?)\[([^\]\n]*)\]\(([^\s)]+)\)|\*\*([^*\n]+)\*\*|__([^_\n]+)__|~~([^~\n]+)~~|\*([^*\n]+)\*|_([^_\n]+)_|(https?:\/\/[^\s<>]+)/g;
+      /`([^`\n]+)`|(!?)\[((?:\\.|[^\]\\\n])*)\]\(([^\s)]+)\)|\*\*([^*\n]+)\*\*|__([^_\n]+)__|~~([^~\n]+)~~|\*([^*\n]+)\*|_([^_\n]+)_|(https?:\/\/[^\s<>]+)|\\([\\\[\]*_`~])/g;
     let result = "",
       cursor = 0;
     for (const match of source.matchAll(token)) {
@@ -40,13 +40,14 @@ namespace Fedi {
         result += !url
           ? escapeHTML(match[3])
           : match[2]
-            ? `<img src="${escapeHTML(url)}" alt="${escapeHTML(match[3])}" loading="lazy" referrerpolicy="no-referrer">`
+            ? `<img src="${escapeHTML(url)}" alt="${escapeHTML(match[3].replace(/\\([\\\[\]])/g, "$1"))}" loading="lazy" referrerpolicy="no-referrer">`
             : `<a href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer">${inline(match[3], depth + 1)}</a>`;
       } else if (match[5] || match[6])
         result += `<strong>${inline(match[5] || match[6], depth + 1)}</strong>`;
       else if (match[7]) result += `<del>${inline(match[7], depth + 1)}</del>`;
       else if (match[8] || match[9])
         result += `<em>${inline(match[8] || match[9], depth + 1)}</em>`;
+      else if (match[11]) result += escapeHTML(match[11]);
       else {
         const url = safeURL(match[10]);
         result += `<a href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer">${escapeHTML(match[10])}</a>`;
@@ -56,7 +57,8 @@ namespace Fedi {
     return result + escapeHTML(source.slice(cursor));
   }
 
-  export function markdown(source: string): string {
+  export function markdown(source: string, depth = 0): string {
+    if (depth > 32) return escapeHTML(source);
     const lines = source.replace(/\r\n?/g, "\n").split("\n");
     const output: string[] = [];
     let i = 0;
@@ -103,9 +105,16 @@ namespace Fedi {
           tag = ordered ? "ol" : "ul";
         const pattern = ordered ? /^\d+\.\s/ : /^[-*+]\s/;
         const items: string[] = [];
-        while (i < lines.length && pattern.test(lines[i]))
-          items.push(`<li>${inline(lines[i++].replace(pattern, ""))}</li>`);
-        output.push(`<${tag}>${items.join("")}</${tag}>`);
+        while (i < lines.length && pattern.test(lines[i])) {
+          const text = lines[i++].replace(pattern, "");
+          const task = !ordered && /^\[([ xX])\]\s+(.*)$/.exec(text);
+          const nested: string[] = [];
+          while (i < lines.length && /^( {2,}|\t)/.test(lines[i]))
+            nested.push(lines[i++].replace(/^( {2}|\t)/, ""));
+          items.push(`<li${task ? ' class="task-item"' : ""}>${task ? `<input type="checkbox" disabled${task[1] !== " " ? " checked" : ""} aria-label="${task[1] !== " " ? "Completed task" : "Incomplete task"}"> ${inline(task[2])}` : inline(text)}${nested.length ? markdown(nested.join("\n"), depth + 1) : ""}</li>`);
+        }
+        const first = ordered ? parseInt(line, 10) : 1;
+        output.push(`<${tag}${ordered && first !== 1 ? ` start="${first}"` : ""}>${items.join("")}</${tag}>`);
         continue;
       }
       const paragraph = [line];
@@ -158,7 +167,12 @@ namespace Fedi {
         return `\n\n> ${text.trim().replace(/\n/g, "\n> ")}\n\n`;
       if (tag === "pre") return `\n\n\`\`\`\n${node.textContent}\n\`\`\`\n\n`;
       if (tag === "code") return `\`${text}\``;
-      if (tag === "li") return `- ${text}\n`;
+      if (tag === "del" || tag === "s") return `~~${text}~~`;
+      if (tag === "li") {
+        const ordered = node.parentElement?.tagName.toLowerCase() === "ol";
+        const index = ordered ? Array.from(node.parentElement!.children).indexOf(node) + Number(node.parentElement!.getAttribute("start") || 1) : 0;
+        return `${ordered ? `${index}.` : "-"} ${text}\n`;
+      }
       if (tag === "br") return "\n";
       if (["p", "div", "ul", "ol"].includes(tag)) return `\n\n${text}\n\n`;
       return text;

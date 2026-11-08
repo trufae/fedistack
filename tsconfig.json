@@ -20,6 +20,7 @@
     "src/app.ts",
     "src/profile.ts",
     "src/editor.ts",
+    "src/media.ts",
     "src/server-drafts.ts",
     "src/messages.ts",
     "src/interests.ts",

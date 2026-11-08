@@ -46,6 +46,7 @@ namespace Fedi {
     created: string;
     image?: string;
     imageAlt?: string;
+    media?: MediaAttachment[];
     likes: number;
     replies: number;
     reposts: number;
@@ -79,7 +80,9 @@ namespace Fedi {
     visibility: Exclude<Visibility, "direct">;
     warning: string;
     updated: string;
+    media?: MediaAttachment[];
     publishKey?: string;
+    mediaPrepared?: string;
     editingId?: string;
     serverId?: string;
     serverDraftId?: string;
@@ -109,6 +112,24 @@ namespace Fedi {
     maxChars: number;
     format: PostFormat;
     software: string;
+    maxMedia?: number;
+    imageSizeLimit?: number;
+    imageTypes?: string[];
+    mediaDescriptionLimit?: number;
+  }
+  export interface MediaAttachment {
+    id: string;
+    type: string;
+    url: string;
+    previewUrl: string;
+    description: string;
+  }
+  export interface MastodonMedia {
+    id: string;
+    type: string;
+    url?: string | null;
+    preview_url?: string | null;
+    description?: string | null;
   }
   export interface Session extends Capabilities {
     server: string;
@@ -176,11 +197,7 @@ namespace Fedi {
     mentions?: { id: string; acct: string }[];
     tags?: { name: string }[];
     filtered?: { filter: { filter_action: string; title: string } }[];
-    media_attachments?: {
-      type: string;
-      preview_url: string;
-      description?: string;
-    }[];
+    media_attachments?: MastodonMedia[];
     card?: {
       type: string;
       title: string;

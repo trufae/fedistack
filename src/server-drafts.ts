@@ -20,12 +20,12 @@ namespace Fedi {
   }
 
   export function draftContent(d: Draft): string {
-    return JSON.stringify([d.kind, d.title, d.subtitle, d.body, d.warning, d.visibility, d.editingId || ""]);
+    return JSON.stringify([d.kind, d.title, d.subtitle, d.body, d.warning, d.visibility, d.editingId || "", d.media || []]);
   }
 
   export function encodeServerDraft(d: Draft): string {
     const metadata = { id: d.id, kind: d.kind, title: d.title, subtitle: d.subtitle,
-      updated: d.updated, editingId: d.editingId };
+      updated: d.updated, editingId: d.editingId, ...(d.media?.length ? { media: d.media } : {}) };
     return draftMarkdown(d) + draftMarker + encodeURIComponent(JSON.stringify(metadata)) + " -->";
   }
 
@@ -46,6 +46,11 @@ namespace Fedi {
           typeof meta.subtitle !== "string" || !Number.isFinite(Date.parse(meta.updated)) ||
           (meta.editingId !== undefined && typeof meta.editingId !== "string") ||
           !["public", "unlisted", "private"].includes(s.params.visibility || "public")) return null;
+      if (meta.media !== undefined && (!Array.isArray(meta.media) || meta.media.length > 100 ||
+          !meta.media.every((m: MediaAttachment) => m && typeof m.id === "string" && !!m.id &&
+            typeof m.type === "string" && typeof m.description === "string" &&
+            typeof m.url === "string" && (!m.url || safeURL(m.url, true).startsWith("https://")) &&
+            typeof m.previewUrl === "string" && (!m.previewUrl || safeURL(m.previewUrl, true).startsWith("https://"))))) return null;
       const prefix = meta.kind === "article"
         ? [meta.title ? `# ${meta.title}` : "", meta.subtitle].filter(Boolean).join("\n\n") : "";
       const source = text.slice(0, index);
@@ -61,6 +66,7 @@ namespace Fedi {
         updated: meta.updated, editingId: meta.editingId,
         visibility: (s.params.visibility || "public") as Draft["visibility"],
         warning: s.params.spoiler_text || "", serverId: s.id, serverDraftId: meta.id, serverContent: scheduledContent(s),
+        ...(meta.media?.length ? { media: meta.media } : {}),
       };
       d.serverDraftContent = draftContent(d);
       return d;
@@ -154,7 +160,8 @@ namespace Fedi {
     if (!d) return;
     for (const old of d.serverPreviousIds || []) await removeServerDraftCopy(api, old);
     if (d.serverPreviousIds?.length) updateReference(key, id, { serverPreviousIds: [] });
-    if (!d.title.trim() && !d.subtitle.trim() && !d.body.trim()) {
+    if (draftKey() === key && mediaBusy(d)) return;
+    if (!d.title.trim() && !d.subtitle.trim() && !d.body.trim() && !d.media?.length) {
       if (d.serverId) await removeServerDraftCopy(api, d.serverId);
       storeDrafts(key, accountDrafts(key).filter((x) => x.id !== id));
       if (draftKey() === key && state.draft?.id === id) clearReference(state.draft);

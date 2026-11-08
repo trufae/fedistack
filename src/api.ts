@@ -774,7 +774,7 @@ namespace Fedi {
     if (redirect === oob) {
       showModal(
         "Authorize Fedistack",
-        `<p>Open your server, authorize Fedistack, then paste the authorization code below.</p><a class="button primary" href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer">Open your server ${icon("external")}</a><form id="oauth-form"><label>Authorization code<input name="code" required autocomplete="off"></label><button class="button primary" type="submit">Finish connecting</button></form>`,
+        `<p>Open your server, authorize Fedistack, then paste the authorization code below.</p><a class="button primary" href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer">Open your server ${icon("external")}</a><form id="oauth-form"><label>Authorization code<input name="code" required autocomplete="off"></label><button class="button primary" type="submit">Finish signing in</button></form>`,
       );
     } else location.assign(url);
   }

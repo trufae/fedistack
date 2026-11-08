@@ -1,6 +1,6 @@
 namespace Fedi {
   export function interestsSettings(): string {
-    return `<section><h2>Hashtags & lists</h2><p>Follow hashtags for topics you care about. Create lists to group people you follow into their own timelines.</p>${state.session ? `<div class="interest-buttons">${action("manage-hashtags", "Manage hashtags", "", "button subtle")}${action("manage-lists", "Manage lists", "", "button subtle")}</div><p class="muted">Subscriptions and lists are saved on your server and shared with your other apps.</p>` : `<p class="muted">Connect your account to manage hashtag subscriptions and lists on your server.</p>${action("connect", "Connect your account", "", "button subtle")}`}</section>`;
+    return `<section><h2>Hashtags & lists</h2><p>Follow hashtags for topics you care about. Create lists to group people you follow into their own timelines.</p>${state.session ? `<div class="interest-buttons">${action("manage-hashtags", "Manage hashtags", "", "button subtle")}${action("manage-lists", "Manage lists", "", "button subtle")}</div><p class="muted">Subscriptions and lists are saved on your server and shared with your other apps.</p>` : `<p class="muted">Sign in to manage hashtag subscriptions and lists on your server.</p>${action("connect", "Sign in", "", "button subtle")}`}</section>`;
   }
 
   interface InterestManager {

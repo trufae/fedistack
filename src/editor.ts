@@ -100,7 +100,7 @@ namespace Fedi {
       }</div>
       <div class="editor-bottom"><span id="word-count"></span><span id="character-count"></span>${action("export-current", `${icon("download")} Export .md`, "", "text-button")}</div>
       ${publicationSettings(d)}
-      <p class="editor-note">${state.session ? `${state.session.maxChars.toLocaleString()} characters per publication · ${state.session.format === "text/markdown" ? "Native Markdown" : state.session.format === "text/html" ? "Rich text" : "Plain text only"}` : "Offline demo · drafts save on this device · connect a long-post instance to publish to the fediverse."}</p>`;
+      <p class="editor-note">${state.session ? `${state.session.maxChars.toLocaleString()} characters per publication · ${state.session.format === "text/markdown" ? "Native Markdown" : state.session.format === "text/html" ? "Rich text" : "Plain text only"}` : "Not signed in · drafts save on this device · sign in to publish to the fediverse."}</p>`;
   }
 
   function savedLabel(date: string): string {
@@ -274,7 +274,7 @@ namespace Fedi {
         : state.session
           ? "Ready to share your writing?"
           : "Publish to your offline demo?",
-      `<div class="publish-preview"><span class="eyebrow">${d.kind} · ${d.visibility === "private" ? "FOLLOWERS ONLY" : d.visibility.toUpperCase()}</span><h3>${escapeHTML(d.title || "A new post")}</h3><p>${escapeHTML(plainText(d.body).slice(0, 240))}…</p><p class="muted">${readingTime(d.body)} min read · ${Array.from(publicationPayload(d, capabilities.format) + d.warning).length.toLocaleString()} characters</p></div><p>${d.editingId ? "Your changes will update the existing publication. Its link, likes, replies, and audience stay the same." : state.session ? `This is one publication on <strong>${escapeHTML(new URL(state.session.server).host)}</strong>. ${d.visibility === "public" ? "Anyone can read and share it." : d.visibility === "private" ? "Only approved followers can read it." : "It stays out of public timelines, but anyone with its link can read it."}` : "This stays in your browser. Connect your account to share real publications with the fediverse."}</p>${action("confirm-publish", d.editingId ? "Update publication" : state.session ? "Publish now" : "Publish in demo", "", "button primary full-width")}`,
+      `<div class="publish-preview"><span class="eyebrow">${d.kind} · ${d.visibility === "private" ? "FOLLOWERS ONLY" : d.visibility.toUpperCase()}</span><h3>${escapeHTML(d.title || "A new post")}</h3><p>${escapeHTML(plainText(d.body).slice(0, 240))}…</p><p class="muted">${readingTime(d.body)} min read · ${Array.from(publicationPayload(d, capabilities.format) + d.warning).length.toLocaleString()} characters</p></div><p>${d.editingId ? "Your changes will update the existing publication. Its link, likes, replies, and audience stay the same." : state.session ? `This is one publication on <strong>${escapeHTML(new URL(state.session.server).host)}</strong>. ${d.visibility === "public" ? "Anyone can read and share it." : d.visibility === "private" ? "Only approved followers can read it." : "It stays out of public timelines, but anyone with its link can read it."}` : "This stays in your browser. Sign in to share real publications with the fediverse."}</p>${action("confirm-publish", d.editingId ? "Update publication" : state.session ? "Publish now" : "Publish in demo", "", "button primary full-width")}`,
     );
   }
   export async function publishDraft(): Promise<void> {

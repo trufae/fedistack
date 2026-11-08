@@ -217,7 +217,7 @@ input[type="checkbox"] {
   letter-spacing: 0.2px;
 }
 .sidebar nav {
-  margin-top: 49px;
+  margin-top: 24px;
   display: grid;
   gap: 9px;
 }
@@ -300,6 +300,11 @@ input[type="checkbox"] {
 .small-button {
   padding: 8px 12px;
   min-height: 34px;
+}
+.account-action {
+  margin-top: 24px;
+  min-height: 44px;
+  flex-shrink: 0;
 }
 .write-button {
   margin-top: 32px;
@@ -443,13 +448,6 @@ main {
   align-items: center;
   gap: 14px;
 }
-.demo-badge {
-  border: 1px solid var(--line);
-  padding: 3px 6px;
-  border-radius: 3px;
-  font-size: 8px;
-  letter-spacing: 1px;
-}
 .connected-dot {
   font-size: 10px;
 }
@@ -474,6 +472,31 @@ main {
   font-size: 12px;
   color: var(--muted);
   margin-top: 11px;
+}
+.signin-welcome {
+  margin: 0 34px 28px;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--sage);
+}
+.signin-welcome h2 {
+  font-size: 24px;
+  font-weight: 500;
+}
+.signin-welcome p {
+  margin: 12px 0 18px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.signin-welcome .button {
+  min-height: 44px;
+  min-width: 120px;
+}
+.signin-welcome .signin-preview {
+  margin: 16px 0 0;
+  color: var(--muted);
+  font-size: 12px;
 }
 .timeline-tabs {
   display: flex;
@@ -2234,6 +2257,10 @@ summary {
     padding-left: 25px;
     padding-right: 25px;
   }
+  .signin-welcome {
+    margin-left: 25px;
+    margin-right: 25px;
+  }
   .page-intro h1 {
     font-size: 33px;
   }
@@ -2327,11 +2354,15 @@ summary {
     flex-direction: row;
     align-items: center;
     justify-content: space-between;
+    gap: 16px;
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }
   .brand {
     font-size: 28px;
+  }
+  .account-action {
+    margin-top: 0;
   }
   .brand-caption,
   .sidebar nav,
@@ -2351,6 +2382,10 @@ summary {
   }
   .page-intro h1 {
     font-size: 36px;
+  }
+  .signin-welcome {
+    margin: 0 22px 25px;
+    padding: 20px;
   }
   .timeline-tabs {
     padding: 0 22px;
@@ -2406,13 +2441,19 @@ summary {
     background: var(--bg);
     border-top: 1px solid var(--line);
   }
-  .mobile-nav > a {
+  .mobile-nav > a,
+  .mobile-nav > button {
     min-width: 44px;
     height: 44px;
     display: flex;
     align-items: center;
     justify-content: center;
     color: var(--muted);
+  }
+  .mobile-nav > .mobile-sign-in {
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 650;
   }
   .mobile-nav > a[aria-current="page"] {
     color: var(--ink);

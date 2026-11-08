@@ -2660,7 +2660,7 @@ test("interest management remains reachable with no lists and escapes names retu
   assert.match(modal.innerHTML, /&lt;img/);
   app.state.session = null;
   app.state.api = null;
-  assert.match(app.interestsSettings(), /Connect your account to manage/);
+  assert.match(app.interestsSettings(), /Sign in to manage/);
   assert.doesNotMatch(app.interestsSettings(), /data-action="manage-/);
 });
 

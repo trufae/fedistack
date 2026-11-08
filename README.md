@@ -31,12 +31,12 @@ cd fedistack
 make && make serve
 ```
 
-Open **http://127.0.0.1:8080** to explore the built-in demo, or connect your account. Ready to host your own copy? Run `make` and upload the contents of `dist/` to a static host.
+Open **http://127.0.0.1:8080** and choose **Sign in** to use your existing Fediverse account. A clearly labeled preview with fictional stories is available before signing in. Ready to host your own copy? Run `make` and upload the contents of `dist/` to a static host.
 
 ## Explore further
 
 - [Getting started and hosting](doc/getting-started.md)
-- [Connecting your account](doc/accounts.md)
+- [Signing in](doc/accounts.md)
 - [Reading, writing, and conversations](doc/user-guide.md)
 - [Publishing and server compatibility](doc/publishing.md)
 - [Development and testing](doc/development.md)

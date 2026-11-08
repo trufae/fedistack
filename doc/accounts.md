@@ -1,14 +1,14 @@
-# Connecting an account
+# Signing in
 
 [Documentation](README.md) · [Fedistack](../README.md)
 
-Click **Connect your account**, enter your instance domain, and optionally check compatibility. OAuth registers Fedistack with the instance and redirects to the instance's sign-in page. Your password never enters Fedistack. OAuth uses a state parameter and an S256 PKCE challenge; registration and token exchange use form encoding.
+Click **Sign in** below the Fedistack logo on desktop or beside it on mobile. You can also sign in from the welcome panel or mobile navigation. Enter your instance domain and optionally check compatibility. OAuth registers Fedistack with the instance and redirects to the instance's sign-in page. Your password never enters Fedistack. OAuth uses a state parameter and an S256 PKCE challenge; registration and token exchange use form encoding.
 
-The additional sign-in options support a manual authorization code or an existing application access token with `read` and `write` permissions. For a token, enter the instance domain first, then choose **Other sign-in options → Connect with token** to open a separate token entry dialog.
+The additional sign-in options support a manual authorization code or an existing application access token with `read` and `write` permissions. For a token, enter the instance domain first, then choose **Other sign-in options → Sign in with token** to open a separate token entry dialog.
 
-Check **Keep me signed in on this device** before connecting to retain the access token in local storage across app launches. Leave it unchecked for temporary tab storage. The choice applies to OAuth and manual tokens; OAuth registration credentials and pending authorization data always remain in tab storage. After installing the Home Screen app, sign in and enable this option inside the app.
+Check **Keep me signed in on this device** before signing in to retain the access token in local storage across app launches. Leave it unchecked for temporary tab storage. The choice applies to OAuth and manual tokens; OAuth registration credentials and pending authorization data always remain in tab storage. After installing the Home Screen app, sign in and enable this option inside the app.
 
-Tap your avatar, then choose **Settings → Your connection → Log out** to remove the saved access token and pending authorization data. Your drafts remain on the device and any successfully synced copies remain on the server. Revoke the application in your server's settings to revoke server-side access as well.
+Click **Sign out** below the Fedistack logo on desktop or beside it on mobile, or choose **Settings → Your account → Sign out**, to remove the saved access token and pending authorization data. Your drafts remain on the device and any successfully synced copies remain on the server. Revoke the application in your server's settings to revoke server-side access as well.
 
 Fedistack stores an access token, never your account password. Browser storage is accessible to scripts on the same origin, including other applications hosted under that origin; it is not Apple Passwords or Keychain storage. Use persistent sign-in only on a trusted device and deployment. A dedicated HTTPS origin isolates Fedistack from other sites you host. See [OWASP's browser-storage guidance](https://cheatsheetseries.owasp.org/cheatsheets/HTML5_Security_Cheat_Sheet.html#local-storage). Clearing website data, private browsing, or browser storage eviction can require signing in again.
 

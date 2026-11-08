@@ -4,7 +4,7 @@
 
 <img src="../public/assets/favicon.svg" width="96" height="96" alt="Fedistack icon">
 
-The [SVG source](../public/assets/favicon.svg) is the Fedistack mark: three cream pancakes and a pat of butter on a warm orange tile. The orange matches the `--accent` color in `public/styles.css`; the pancake layers are broad, symmetric shapes with even negative-space gaps that stay legible at 16×16. It is used in the app and README and is the source for every raster export. Edit this file, then regenerate the assets. If the tile color changes, update the Apple touch icon background in `scripts/generate-icons.sh` and the theme color in `public/manifest.webmanifest` to match.
+The [SVG source](../public/assets/favicon.svg) is the Fedistack mark: three cream pancakes on a warm orange tile, with the gaps between the layers and the butter pat cut out as orange negative space. It uses only two colors, the `--accent` orange from `public/styles.css` and cream, and the broad, symmetric shapes stay legible at 16×16. It is used in the app and README and is the source for every raster export. Edit this file, then regenerate the assets. If the tile color changes, update the Apple touch icon background in `scripts/generate-icons.sh` and the theme color in `public/manifest.webmanifest` to match.
 
 ## Generate PNGs and ICO
 

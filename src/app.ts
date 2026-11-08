@@ -42,6 +42,11 @@ namespace Fedi {
   const feedTarget = 10;
   const feedPageLimit = 3;
   let feedSource: string | undefined;
+  let feedController: AbortController | undefined;
+  export function cancelReadingRequests(): void {
+    feedController?.abort();
+    state.profile?.controller?.abort();
+  }
   let feedInFlight: { key: string; api: API | null; promise: Promise<void> } | undefined;
   export const demoState = readStore<{
     posts: Post[];
@@ -315,6 +320,8 @@ namespace Fedi {
     if (append && !state.next) return;
     const version = ++loadVersion,
       api = state.api;
+    feedController?.abort();
+    const controller = feedController = new AbortController();
     const existing = new Set(append ? state.posts.map((p) => p.id) : []);
     const visited = new Set<string>();
     const timeline = state.view === "bookmarks" ? "bookmarks" : state.timeline;
@@ -323,7 +330,7 @@ namespace Fedi {
     const cached = key ? readFeedCache(key) : undefined;
     let updated = cached?.updated || 0;
     let loaded: Post[] = append ? state.posts : [];
-    const current = () => version === loadVersion && state.api === api;
+    const current = () => version === loadVersion && state.api === api && !controller.signal.aborted;
     const save = () => {
       if (key && current() && state.posts === loaded && generation === feedCacheGeneration()) {
         const authors = new Set(state.posts.map((post) => post.author.id));
@@ -388,7 +395,7 @@ namespace Fedi {
           ]),
         );
       } else if (state.query) {
-        const result = await api.search(state.query);
+        const result = await api.search(state.query, controller.signal);
         if (!current()) return;
         posts = result.posts;
         state.accounts = result.accounts;
@@ -397,7 +404,7 @@ namespace Fedi {
       for (let page = 0; page < feedPageLimit; page++) {
         if (api && paginated) {
           if (cursor) visited.add(cursor);
-          const result = await api.timeline(timeline, cursor);
+          const result = await api.timeline(timeline, cursor, controller.signal);
           if (!current()) return;
           posts = result.posts;
           if (page === 0 && !append) updated = Date.now();
@@ -443,6 +450,7 @@ namespace Fedi {
     } catch (error) {
       if (current()) {
         state.error = (error as Error).message;
+        if (cached && state.posts !== loaded) state.next = cached.next;
         if (error instanceof APIError && (error.status === 401 || error.status === 403)) {
           clearFeedCache();
           state.posts = [];
@@ -455,6 +463,33 @@ namespace Fedi {
         render();
       }
     }
+  }
+
+  let readingRefresh: { api: API; key: string; at: number; failures: number } | undefined;
+  let refreshingReading = false;
+  export async function refreshReading(now = Date.now()): Promise<void> {
+    const api = state.api, p = state.profile;
+    if (!api || refreshingReading || state.loading || p?.loading || state.query ||
+        !["home", "discover", "profile"].includes(state.view) ||
+        (typeof document !== "undefined" && document.hidden) ||
+        (typeof navigator !== "undefined" && navigator.onLine === false) ||
+        (typeof window !== "undefined" && window.scrollY > 200)) return;
+    const key = JSON.stringify([state.view, state.timeline, p?.id, p?.tab, p?.server]);
+    const empty = p ? !p.posts.length && !p.people.length : !state.posts.length;
+    const interval = empty ? 5000 : 30000;
+    if (readingRefresh?.api !== api || readingRefresh.key !== key)
+      readingRefresh = { api, key, at: 0, failures: 0 };
+    const refresh = readingRefresh;
+    const updated = p ? p.updated : readFeedCache(feedCacheKey(state.timeline) || "")?.updated || 0;
+    if (now < Math.max(refresh.at, updated + interval)) return;
+    refreshingReading = true;
+    try {
+      if (p) await loadProfilePage();
+      else await loadFeed(false);
+      const failed = p ? !!p.error : !!state.error;
+      refresh.failures = failed ? refresh.failures + 1 : 0;
+      refresh.at = now + (failed ? Math.min(120000, interval * 2 ** refresh.failures) : interval);
+    } finally { refreshingReading = false; }
   }
 
   export async function route(force = false): Promise<void> {
@@ -482,6 +517,7 @@ namespace Fedi {
       /* Ignore malformed hashes. */
     }
     loadVersion++;
+    cancelReadingRequests();
     state.error = "";
     state.loading = false;
     state.focus = false;

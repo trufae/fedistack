@@ -36,6 +36,7 @@ namespace Fedi {
   }
 
   export function clearSession(): void {
+    cancelReadingRequests();
     const feedCleared = clearFeedCache();
     const localCleared = writeStore("session", null);
     const tabCleared = writeStore("session", null, true);

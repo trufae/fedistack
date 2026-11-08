@@ -571,7 +571,14 @@ namespace Fedi {
     });
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) flushDraft();
+      else void refreshReading();
     });
+    window.addEventListener("online", () => { void refreshReading(); });
+    const pollReading = async () => {
+      try { await refreshReading(); }
+      finally { setTimeout(pollReading, 5000); }
+    };
+    setTimeout(pollReading, 5000);
     matchMedia("(prefers-color-scheme: dark)").addEventListener(
       "change",
       () => {

@@ -3519,6 +3519,7 @@ test("another account uses the same profile without requesting private likes or 
   assert.equal(app.state.profile.owner, false);
   assert.equal(app.state.profile.tab, "posts");
   assert.equal(paths.includes("/api/v1/favourites"), false);
+  await new Promise(setImmediate); // Optional metadata resolves after readable activity.
   assert.match(get("app").innerHTML, /Follows you/);
   assert.match(get("app").innerHTML, /data-action="message-account" data-id="other"/);
   assert.doesNotMatch(get("app").innerHTML, /tab=likes|Likes received|On these/);
@@ -3942,4 +3943,135 @@ test("cached articles stay visible while fresh note pages are scanned", async ()
   await loading;
   assert.match(get("app").innerHTML, /New readable article/);
   assert.doesNotMatch(get("app").innerHTML, /Readable cached article/);
+});
+
+test("relationship requests share in-flight IDs, cache results, and batch at eighty", async () => {
+  const calls = []; let finish;
+  const { app, context } = setup(async (url) => {
+    const ids = new URL(url).searchParams.getAll("id[]"); calls.push(ids);
+    if (ids.includes("pending")) return new Promise((resolve) => { finish = resolve; });
+    return Response.json(ids.map((id) => ({ id, following: false })));
+  });
+  const api = new app.API("example.org");
+  const first = api.relationships(["pending", "pending"]);
+  const second = api.relationships(["pending"]);
+  assert.equal(calls.length, 1);
+  finish(Response.json([{ id: "pending", following: false }]));
+  await Promise.all([first, second]);
+  await api.relationships(["pending"]);
+  assert.equal(calls.length, 1);
+  await api.relationships(Array.from({ length: 161 }, (_, i) => String(i)));
+  assert.deepEqual(calls.slice(1).map((ids) => ids.length), [80, 80, 1]);
+  const now = Date.now(); context.Date = class extends Date { static now() { return now + 61000; } };
+  const stale = api.relationships(["pending"]);
+  assert.equal(calls.length, 5);
+  finish(Response.json([])); await stale;
+  await api.relationships(["pending"]);
+  assert.equal(calls.length, 5, "missing IDs are cached too");
+});
+
+test("late relationship reads cannot undo a successful follow", async () => {
+  let finish;
+  const { app } = setup(async (url, options) => options.method === "POST"
+    ? Response.json({ id: "friend", following: true })
+    : new Promise((resolve) => { finish = resolve; }));
+  const api = new app.API("example.org", "token");
+  const pending = api.relationships(["friend"]);
+  await api.follow("friend", false);
+  finish(Response.json([{ id: "friend", following: false }]));
+  assert.equal((await pending)[0].following, true);
+  assert.equal((await api.relationships(["friend"]))[0].following, true);
+});
+
+test("superseded feed requests are cancelled and cannot replace the new timeline", async () => {
+  const { app, context, get } = cachedFeedFixture();
+  app.htmlToMarkdown = (text) => text;
+  let oldSignal;
+  context.fetch = async (url, options) => {
+    const path = new URL(url).pathname;
+    if (path.endsWith("/home")) return new Promise((_, reject) => {
+      oldSignal = options.signal;
+      options.signal.addEventListener("abort", () => reject(new Error("aborted")));
+    });
+    if (path.endsWith("/public")) return Response.json([sharedStatus({ id: "new", content: "Fresh local note" })]);
+    return Response.json([]);
+  };
+  app.state.api = new app.API("good.example", "token");
+  app.state.filter = "all";
+  const old = app.loadFeed();
+  app.state.timeline = "local";
+  await app.loadFeed(); await old;
+  assert.equal(oldSignal.aborted, true);
+  assert.equal(app.state.error, "");
+  assert.deepEqual(Array.from(app.state.posts, (p) => p.id), ["new"]);
+  assert.equal(app.state.error, "");
+  assert.match(get("app").innerHTML, /Fresh local note/);
+});
+
+test("leaving a loading profile aborts its network read", async () => {
+  let signal;
+  const { app, context } = await profileFixture(async (url, options) => {
+    if (new URL(url).pathname.endsWith("/statuses")) return new Promise((_, reject) => {
+      signal = options.signal;
+      signal.addEventListener("abort", () => reject(new Error("aborted")));
+    });
+    return Response.json(profileAccount());
+  });
+  context.location.hash = "#profile";
+  const profile = app.route();
+  await new Promise(setImmediate);
+  context.location.hash = "#settings";
+  await app.route(); await profile;
+  assert.equal(signal.aborted, true);
+  assert.equal(app.state.view, "settings");
+  assert.equal(app.state.error, "");
+});
+
+test("failed suggestions retry after backoff and concurrent callers share one attempt", async () => {
+  const { app, context } = cachedFeedFixture();
+  let calls = 0, finish;
+  app.state.api.suggestions = () => { calls++; return new Promise((resolve, reject) => { finish = { resolve, reject }; }); };
+  const one = app.loadSuggestions(), two = app.loadSuggestions();
+  assert.equal(one, two); assert.equal(calls, 1);
+  finish.reject(new Error("Timeout")); await one;
+  assert.equal(app.state.suggestionsLoaded, false);
+  await app.loadSuggestions(); assert.equal(calls, 1);
+  const now = Date.now(); context.Date = class extends Date { static now() { return now + 61000; } };
+  const retry = app.loadSuggestions(); assert.equal(calls, 2);
+  finish.resolve([app.demoAuthors[0]]); await retry;
+  assert.equal(app.state.suggestionsLoaded, true);
+  await app.loadSuggestions(); assert.equal(calls, 2);
+});
+
+test("automatic refresh checks visible reading, respects freshness and backs off errors", async () => {
+  const { app, context, post } = cachedFeedFixture();
+  let calls = 0, fail = false;
+  app.state.api.timeline = async () => { calls++; if (fail) throw new Error("Offline"); return { posts: [post("head")] }; };
+  const now = Date.now();
+  await app.loadFeed();
+  await app.refreshReading(now + 1000); assert.equal(calls, 1);
+  context.document.hidden = true;
+  await app.refreshReading(now + 31000); assert.equal(calls, 1);
+  context.document.hidden = false;
+  context.window = { scrollY: 300 };
+  await app.refreshReading(now + 31000); assert.equal(calls, 1);
+  context.window.scrollY = 0;
+  await app.refreshReading(now + 31000); assert.equal(calls, 2);
+  fail = true;
+  await app.refreshReading(now + 62000); assert.equal(calls, 3);
+  await app.refreshReading(now + 93000); assert.equal(calls, 3);
+  await app.refreshReading(now + 123000); assert.equal(calls, 4);
+});
+
+test("empty profiles refresh automatically so a background import becomes visible", async () => {
+  let pages = 0;
+  const { app, context } = await profileFixture(async (url) => {
+    if (new URL(url).pathname.endsWith("/statuses")) return Response.json(++pages === 1 ? [] : [sharedStatus({ id: "imported", account: profileAccount() })]);
+    return Response.json(profileAccount());
+  });
+  context.location.hash = "#profile";
+  await app.route();
+  assert.equal(app.state.profile.posts.length, 0);
+  await app.refreshReading(Date.now() + 5100);
+  assert.deepEqual(Array.from(app.state.profile.posts, (p) => p.id), ["imported"]);
 });

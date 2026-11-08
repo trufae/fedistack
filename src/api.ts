@@ -86,6 +86,15 @@ namespace Fedi {
 
   export class API {
     readonly server: string;
+    private relationshipCache = new Map<string, { value?: Relationship; updated: number }>();
+    private relationshipPending = new Map<string, Promise<Relationship | undefined>>();
+    private relationshipVersion = 0;
+    private rememberRelationship(id: string, value?: Relationship): void {
+      this.relationshipCache.delete(id);
+      this.relationshipCache.set(id, { value, updated: Date.now() });
+      while (this.relationshipCache.size > 500)
+        this.relationshipCache.delete(this.relationshipCache.keys().next().value!);
+    }
     constructor(
       server: string,
       private token = "",
@@ -98,6 +107,7 @@ namespace Fedi {
       method = "GET",
       body?: unknown,
       key?: string,
+      signal?: AbortSignal,
     ): Promise<{ data: T; next?: string }> {
       const url = new URL(path, this.server);
       // Never send an access token to a pagination URL on another origin.
@@ -108,7 +118,10 @@ namespace Fedi {
       if (cooldown > Date.now())
         throw new APIError(cooldownMessage(cooldown), 429, cooldown);
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 25000);
+      const cancel = () => controller.abort();
+      signal?.addEventListener("abort", cancel, { once: true });
+      if (signal?.aborted) cancel();
+      const timer = setTimeout(cancel, 25000);
       try {
         const headers: Record<string, string> = { Accept: "application/json" };
         if (this.token) headers.Authorization = `Bearer ${this.token}`;
@@ -170,11 +183,22 @@ namespace Fedi {
           response.status === 204
             ? (undefined as T)
             : ((await response.json()) as T);
+        if (method !== "GET" && /\/accounts\/[^/]+\/(follow|unfollow|block|unblock|mute|unmute)$/.test(url.pathname)) {
+          this.relationshipVersion++;
+          const id = decodeURIComponent(url.pathname.split("/").slice(-2)[0]);
+          const relation = data as unknown as Relationship;
+          this.rememberRelationship(id, relation?.id === id ? relation : undefined);
+        }
         const next = /<([^>]+)>;\s*rel="next"/.exec(
           response.headers.get("Link") || "",
         )?.[1];
         return { data, next };
       } catch (error) {
+        if (signal?.aborted) {
+          const cancelled = new Error("Request cancelled.");
+          cancelled.name = "AbortError";
+          throw cancelled;
+        }
         if (error instanceof APIError) throw error;
         throw new Error(
           controller.signal.aborted
@@ -183,11 +207,12 @@ namespace Fedi {
         );
       } finally {
         clearTimeout(timer);
+        signal?.removeEventListener("abort", cancel);
       }
     }
 
-    async get<T>(path: string): Promise<T> {
-      return (await this.request<T>(path)).data;
+    async get<T>(path: string, signal?: AbortSignal): Promise<T> {
+      return (await this.request<T>(path, "GET", undefined, undefined, signal)).data;
     }
     async post<T>(path: string, data: unknown = {}, key?: string): Promise<T> {
       return (await this.request<T>(path, "POST", data, key)).data;
@@ -222,6 +247,7 @@ namespace Fedi {
     async timeline(
       timeline: Timeline,
       next?: string,
+      signal?: AbortSignal,
     ): Promise<{ posts: Post[]; next?: string }> {
       const paths: Record<string, string> = {
         home: "/api/v1/timelines/home",
@@ -236,7 +262,7 @@ namespace Fedi {
           : paths[timeline];
       const url = new URL(next || path, this.server);
       url.searchParams.set("limit", "40");
-      const result = await this.request<MastodonStatus[]>(url.href);
+      const result = await this.request<MastodonStatus[]>(url.href, "GET", undefined, undefined, signal);
       return {
         posts: result.data
           .filter(
@@ -383,23 +409,40 @@ namespace Fedi {
       );
     }
     async relationships(ids: string[]): Promise<Relationship[]> {
-      if (!ids.length) return [];
-      const query = new URLSearchParams();
-      [...new Set(ids)].forEach((id) => query.append("id[]", id));
-      return this.get<Relationship[]>(
-        `/api/v1/accounts/relationships?${query}`,
-      );
+      const unique = [...new Set(ids)];
+      const missing = unique.filter((id) => !this.relationshipPending.has(id) &&
+        Date.now() - (this.relationshipCache.get(id)?.updated || 0) >= 60000);
+      for (let offset = 0; offset < missing.length; offset += 80) {
+        const batch = missing.slice(offset, offset + 80), version = this.relationshipVersion;
+        const query = new URLSearchParams();
+        batch.forEach((id) => query.append("id[]", id));
+        const request = this.get<Relationship[]>(`/api/v1/accounts/relationships?${query}`);
+        for (const id of batch) {
+          const pending = request.then((rows) => {
+            // A mutation response is authoritative over an older metadata read.
+            if (version === this.relationshipVersion)
+              this.rememberRelationship(id, rows.find((row) => row.id === id));
+            return this.relationshipCache.get(id)?.value;
+          }).finally(() => {
+            if (this.relationshipPending.get(id) === pending) this.relationshipPending.delete(id);
+          });
+          this.relationshipPending.set(id, pending);
+        }
+      }
+      const rows = await Promise.all(unique.map((id) =>
+        this.relationshipPending.get(id) || this.relationshipCache.get(id)?.value));
+      return rows.filter((row): row is Relationship => !!row);
     }
-    async account(id: string): Promise<Account> {
-      return mapAccount(await this.get<MastodonAccount>(`/api/v1/accounts/${encodeURIComponent(id)}`));
+    async account(id: string, signal?: AbortSignal): Promise<Account> {
+      return mapAccount(await this.get<MastodonAccount>(`/api/v1/accounts/${encodeURIComponent(id)}`, signal));
     }
     async accountPosts(
-      id: string, tab: "posts" | "replies" | "boosts" | "writing", next?: string,
+      id: string, tab: "posts" | "replies" | "boosts" | "writing", next?: string, signal?: AbortSignal,
     ): Promise<{ posts: Post[]; next?: string }> {
       // Mastodon has no portable boosts-only endpoint. Filter each page of
       // account activity and keep its cursor, including pages with no matches.
       const result = await this.request<MastodonStatus[]>(next ||
-        `/api/v1/accounts/${encodeURIComponent(id)}/statuses?exclude_replies=false&exclude_reblogs=${tab !== "boosts"}&limit=40`);
+        `/api/v1/accounts/${encodeURIComponent(id)}/statuses?exclude_replies=false&exclude_reblogs=${tab !== "boosts"}&limit=40`, "GET", undefined, undefined, signal);
       return {
         posts: result.data.filter((s) => visibleStatus(s) &&
           (tab === "boosts" ? !!s.reblog : !s.reblog) &&
@@ -407,12 +450,12 @@ namespace Fedi {
         next: result.next,
       };
     }
-    async favourites(next?: string): Promise<{ posts: Post[]; next?: string }> {
-      const result = await this.request<MastodonStatus[]>(next || "/api/v1/favourites?limit=40");
+    async favourites(next?: string, signal?: AbortSignal): Promise<{ posts: Post[]; next?: string }> {
+      const result = await this.request<MastodonStatus[]>(next || "/api/v1/favourites?limit=40", "GET", undefined, undefined, signal);
       return { posts: result.data.filter(visibleStatus).map((s) => ({ ...mapStatus(s), liked: true })), next: result.next };
     }
-    async accountConnections(id: string, kind: "followers" | "following", next?: string): Promise<{ accounts: Account[]; next?: string }> {
-      const result = await this.request<MastodonAccount[]>(next || `/api/v1/accounts/${encodeURIComponent(id)}/${kind}?limit=40`);
+    async accountConnections(id: string, kind: "followers" | "following", next?: string, signal?: AbortSignal): Promise<{ accounts: Account[]; next?: string }> {
+      const result = await this.request<MastodonAccount[]>(next || `/api/v1/accounts/${encodeURIComponent(id)}/${kind}?limit=40`, "GET", undefined, undefined, signal);
       return { accounts: result.data.map(mapAccount), next: result.next };
     }
     async suggestions(): Promise<Account[]> {
@@ -463,12 +506,13 @@ namespace Fedi {
     }
     async search(
       query: string,
+      signal?: AbortSignal,
     ): Promise<{ accounts: Account[]; posts: Post[] }> {
       const result = await this.get<{
         accounts: MastodonAccount[];
         statuses: MastodonStatus[];
       }>(
-        `/api/v2/search?${new URLSearchParams({ q: query, resolve: "true", limit: "20" })}`,
+        `/api/v2/search?${new URLSearchParams({ q: query, resolve: "true", limit: "20" })}`, signal,
       );
       return {
         accounts: result.accounts.map(mapAccount),

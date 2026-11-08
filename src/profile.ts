@@ -16,6 +16,7 @@ namespace Fedi {
     updated: number;
     generation: number;
     cacheKey: string;
+    controller?: AbortController;
   }
   const profileTabs: ProfileTab[] = ["posts", "replies", "likes", "boosts", "followers", "following"];
 
@@ -56,9 +57,10 @@ namespace Fedi {
     return `<div class="recommended">${profileAvatar(account, false, `${key}:${account.id}`)}<div><a class="author-link" href="#${escapeHTML(profilePath(account.id))}">${escapeHTML(account.name)}</a><p>@${escapeHTML(account.acct)}</p>${direction ? `<p class="muted">${direction}</p>` : ""}${account.bio ? `<p class="account-bio">${escapeHTML(account.bio)}</p>` : ""}</div>${followButton(account)}</div>`;
   }
   function currentProfile(profile: ProfileState, api: API | null): boolean {
-    return state.profile === profile && state.view === "profile" && state.api === api;
+    return state.profile === profile && state.view === "profile" && state.api === api && !profile.controller?.signal.aborted;
   }
   export async function openProfile(id: string, query: string, force = false): Promise<void> {
+    state.profile?.controller?.abort();
     const params = new URLSearchParams(query), api = state.api;
     const source = params.get("server");
     let server = "", sourceError = "";
@@ -77,7 +79,7 @@ namespace Fedi {
       tab: profileTabs.includes(tab) && (tab !== "likes" || owner) ? tab : "posts",
       api: server ? new API(server) : api, server,
       posts: [], people: [], visited: new Set(), loading: true, error: "",
-      updated: 0, generation: feedCacheGeneration(), cacheKey: "",
+      updated: 0, generation: feedCacheGeneration(), cacheKey: "", controller: new AbortController(),
     };
     p.cacheKey = JSON.stringify([state.session?.server, state.session?.account.id, p.api?.server, id, p.tab]);
     const saved = profileCache.get(p.cacheKey);
@@ -86,12 +88,12 @@ namespace Fedi {
     state.view = "profile";
     state.readerServer = server;
     render();
-    if (!force && saved?.generation === p.generation && Date.now() - p.updated < (p.posts.length || p.people.length ? 60000 : 5000)) {
+    if (!sourceError && !force && saved?.generation === p.generation && Date.now() - p.updated < (p.posts.length || p.people.length ? 60000 : 5000)) {
       p.loading = false; render(); return;
     }
     try {
       if (sourceError) throw new Error(sourceError);
-      p.account = p.api ? await p.api.account(id) : cached;
+      p.account = p.api ? await p.api.account(id, p.controller?.signal) : cached;
       if (!currentProfile(p, api)) return;
       if (!p.account) throw new Error("This account could not be found.");
       if (owner && state.session) {
@@ -120,6 +122,8 @@ namespace Fedi {
   export async function loadProfilePage(append = false): Promise<void> {
     const p = state.profile, api = state.api;
     if (!p || p.loading || !p.account || (append && !p.next)) return;
+    p.controller?.abort();
+    p.controller = new AbortController();
     p.loading = true;
     p.error = "";
     if (!append) {
@@ -148,10 +152,10 @@ namespace Fedi {
           const cursor = next;
           if (cursor) p.visited.add(cursor);
           const result = p.tab === "followers" || p.tab === "following"
-            ? await p.api.accountConnections(p.id, p.tab, cursor)
+            ? await p.api.accountConnections(p.id, p.tab, cursor, p.controller.signal)
             : p.tab === "likes"
-              ? await p.api.favourites(cursor)
-              : await p.api.accountPosts(p.id, p.tab, cursor);
+              ? await p.api.favourites(cursor, p.controller.signal)
+              : await p.api.accountPosts(p.id, p.tab, cursor, p.controller.signal);
           if (!currentProfile(p, api)) return;
           next = result.next && !p.visited.has(result.next) ? result.next : undefined;
           if (page === 0 && !append) p.updated = Date.now();
@@ -230,19 +234,33 @@ namespace Fedi {
     if (!accounts.length) return "";
     return `<section class="${inline ? "feed-suggestions" : "rail-section"}" aria-label="People to follow"><div class="section-heading"><h3>People to follow</h3>${icon("users")}</div>${inline ? '<p class="muted">A few more voices for your reading room.</p>' : ""}${accounts.map((a) => accountRow(a, inline ? "feed-suggested" : "rail-suggested")).join("")}</section>`;
   }
-  export async function loadSuggestions(): Promise<void> {
+  let suggestionRequest: { api: API; promise: Promise<void> } | undefined;
+  let suggestionRetry: { api: API; at: number } | undefined;
+  export function loadSuggestions(): Promise<void> {
     const api = state.api;
-    if (!api || state.suggestionsLoaded) return;
-    state.suggestionsLoaded = true;
-    try {
-      const accounts = await api.suggestions();
-      if (state.api !== api) return;
-      const relationships = await api.relationships(accounts.map((a) => a.id));
-      if (state.api !== api) return;
-      // A follow may have completed while suggestions were loading.
-      relationships.forEach((r) => { if (!state.relationships.has(r.id)) state.relationships.set(r.id, r); });
-      state.suggestions = accounts;
-      if (["home", "discover"].includes(state.view)) render();
-    } catch { /* Suggestions are optional; known timeline authors are the fallback. */ }
+    if (!api) return Promise.resolve();
+    if (suggestionRequest?.api === api) return suggestionRequest.promise;
+    if (suggestionRetry?.api === api && suggestionRetry.at > Date.now()) return Promise.resolve();
+    const promise = (async () => {
+      try {
+        const accounts = await api.suggestions();
+        if (state.api !== api) return;
+        const relationships = await api.relationships(accounts.map((a) => a.id));
+        if (state.api !== api) return;
+        relationships.forEach((r) => state.relationships.set(r.id, r));
+        state.suggestions = accounts;
+        state.suggestionsLoaded = true;
+        suggestionRetry = { api, at: Date.now() + 300000 };
+        if (["home", "discover"].includes(state.view)) render();
+      } catch (error) {
+        if (state.api === api) {
+          state.suggestionsLoaded = false;
+          suggestionRetry = { api, at: Math.max(Date.now() + 60000, error instanceof APIError ? error.retryAt || 0 : 0) };
+        }
+      }
+    })();
+    const request = suggestionRequest = { api, promise };
+    void promise.finally(() => { if (suggestionRequest === request) suggestionRequest = undefined; });
+    return promise;
   }
 }

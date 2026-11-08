@@ -1646,9 +1646,15 @@ body.conversation-open {
   align-items: flex-end;
   gap: 9px;
 }
+#message-form textarea,
+#message-form button {
+  height: 44px;
+}
 #message-form textarea {
   flex: 1;
   font-size: 12px;
+  line-height: 22px;
+  padding: 10px 13px;
   resize: none;
 }
 #message-form button {

@@ -1,5 +1,6 @@
 namespace Fedi {
   export type Visibility = "public" | "unlisted" | "private" | "direct";
+  export type ProfileImage = "avatar" | "header";
   export type Timeline =
     | "home"
     | "local"

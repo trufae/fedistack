@@ -23,6 +23,7 @@ function setup(
   const context = vm.createContext({
     URL,
     URLSearchParams,
+    FormData,
     Headers,
     Response,
     TextEncoder,
@@ -3478,6 +3479,134 @@ async function profileFixture(fetch) {
   return fixture;
 }
 
+for (const kind of ["avatar", "header"]) test(`the ${kind} picker uploads multipart images and refreshes the saved account`, async () => {
+  let finish, picker, opened = 0;
+  const writes = [];
+  let account = profileAccount();
+  const { app, context, get, click } = await profileFixture(async (url, options) => {
+    if (options.method === "PATCH") {
+      writes.push({ url, ...options });
+      await new Promise((resolve) => { finish = resolve; });
+      account = profileAccount("me", { [kind]: `https://example.org/new-${kind}.png` });
+      return Response.json(account);
+    }
+    if (url.includes("/statuses")) return Response.json([sharedStatus({ account })]);
+    if (url.includes("/relationships")) return Response.json([]);
+    return Response.json(account);
+  });
+  const remember = kind === "header";
+  app.state.session.remember = remember;
+  context.location.hash = "#profile";
+  await app.route();
+  app.state.posts = [{ ...app.state.profile.posts[0], author: { ...app.state.session.account } }];
+  app.writeFeedCache({ key: app.feedCacheKey("home"), posts: app.state.posts, relationships: [], updated: Date.now() });
+  context.document.createElement = (tag) => {
+    assert.equal(tag, "input");
+    picker = { files: [], addEventListener(name, callback) { this[name] = callback; }, click() { opened++; } };
+    return picker;
+  };
+  assert.match(get("app").innerHTML, /aria-label="Change profile picture"/);
+  assert.match(get("app").innerHTML, /aria-label="Change background image"/);
+  click(kind, "profile-image");
+  assert.equal(opened, 1, "open the picker during the tap gesture");
+  assert.equal(picker.type, "file");
+  assert.equal(picker.accept, "image/*");
+  picker.change();
+  assert.equal(writes.length, 0, "cancelling does not update the account");
+  await new Promise(setImmediate);
+  click(kind, "profile-image");
+  picker.files = [new File(["image bytes"], "replacement.png", { type: "image/png" })];
+  picker.change();
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].url, "https://example.org/api/v1/accounts/update_credentials");
+  assert.equal(writes[0].headers.Authorization, "Bearer profile-token");
+  assert.equal(writes[0].headers["Content-Type"], undefined, "the browser supplies the multipart boundary");
+  assert.ok(writes[0].body instanceof FormData);
+  assert.deepEqual([...writes[0].body.keys()], [kind]);
+  assert.equal(writes[0].body.get(kind).name, "replacement.png");
+  assert.equal(await writes[0].body.get(kind).text(), "image bytes");
+  assert.match(get("app").innerHTML, /role="status">Updating/);
+  assert.equal((get("app").innerHTML.match(/class="profile-image-button"[^>]* disabled/g) || []).length, 2);
+  await app.updateProfileImage(kind, picker.files[0]);
+  assert.equal(writes.length, 1, "do not submit concurrent image updates");
+  finish();
+  await new Promise(setImmediate);
+  const updated = `https://example.org/new-${kind}.png`;
+  assert.equal(app.state.profile.account[kind], updated);
+  assert.equal(app.state.profile.posts[0].author[kind], updated);
+  assert.equal(app.state.posts[0].author[kind], updated);
+  assert.equal(app.loadSession().account[kind], updated);
+  assert.equal((remember ? context.sessionStorage : context.localStorage).getItem("fedistack:session"), null);
+  assert.equal(app.readFeedCache(app.feedCacheKey("home")), undefined);
+  assert.match(get("toast").textContent, /updated/);
+  assert.doesNotMatch(get("app").innerHTML, /role="status">Updating/);
+  await app.route();
+  assert.equal(app.state.profile.account[kind], updated, "reopening cannot restore a stale cached profile");
+});
+
+test("invalid files and failed image uploads preserve the profile and allow retrying", async () => {
+  let reject = true, writes = 0;
+  const { app, context, get } = await profileFixture(async (url, options) => {
+    if (options.method === "PATCH") {
+      writes++;
+      return reject ? Response.json({ error: "Image is too large" }, { status: 422 })
+        : Response.json(profileAccount("me", { avatar: "https://example.org/retry.png" }));
+    }
+    return Response.json(url.includes("/statuses") ? [] : profileAccount());
+  });
+  context.location.hash = "#profile";
+  await app.route();
+  await assert.rejects(app.updateProfileImage("avatar", new File(["text"], "text.txt", { type: "text/plain" })), /Choose an image/);
+  await assert.rejects(app.updateProfileImage("avatar", new File([], "empty.png", { type: "image/png" })), /empty/);
+  assert.equal(writes, 0);
+  const file = new File(["image"], "image.png", { type: "image/png" });
+  await assert.rejects(app.updateProfileImage("avatar", file), /Image is too large/);
+  assert.equal(app.state.profile.account.avatar, "https://example.org/avatar.png");
+  assert.doesNotMatch(get("app").innerHTML, /class="profile-image-button"[^>]* disabled/);
+  reject = false;
+  await app.updateProfileImage("avatar", file);
+  assert.equal(app.state.profile.account.avatar, "https://example.org/retry.png");
+});
+
+test("an image response after switching accounts cannot update or persist the new session", async () => {
+  let finish;
+  const { app, context } = await profileFixture(async (url, options) => {
+    if (options.method === "PATCH") return new Promise((resolve) => { finish = resolve; });
+    return Response.json(url.includes("/statuses") ? [] : profileAccount());
+  });
+  context.location.hash = "#profile";
+  await app.route();
+  const updating = app.updateProfileImage("header", new File(["image"], "image.png", { type: "image/png" }));
+  app.clearSession();
+  app.state.api = new app.API("other.example", "other-token");
+  app.state.session = { ...app.state.session, server: "https://other.example", account: { ...app.state.session.account } };
+  finish(Response.json(profileAccount("me", { header: "https://example.org/old-session.png" })));
+  await updating;
+  assert.equal(app.state.session.account.header, "https://example.org/header.png");
+  assert.equal(app.loadSession(), null);
+});
+
+test("a profile read started before an upload completes cannot restore the previous image", async () => {
+  let finishUpload, finishRead, delayRead = false;
+  const { app, context } = await profileFixture(async (url, options) => {
+    if (options.method === "PATCH") return new Promise((resolve) => { finishUpload = resolve; });
+    if (url.includes("/statuses")) return Response.json([]);
+    if (delayRead) return new Promise((resolve) => { finishRead = resolve; });
+    return Response.json(profileAccount());
+  });
+  context.location.hash = "#profile";
+  await app.route();
+  const updating = app.updateProfileImage("avatar", new File(["image"], "image.png", { type: "image/png" }));
+  delayRead = true;
+  const reading = app.openProfile("me", "", true);
+  finishUpload(Response.json(profileAccount("me", { avatar: "https://example.org/new.png" })));
+  await updating;
+  finishRead(Response.json(profileAccount()));
+  await reading;
+  assert.equal(app.state.profile.account.avatar, "https://example.org/new.png");
+  assert.equal(app.loadSession().account.avatar, "https://example.org/new.png");
+});
+
 test("own profile refreshes header and counts, shows loaded engagement and settings, and pages posts", async () => {
   const calls = [];
   const { app, context, get } = await profileFixture(async (url) => {
@@ -3522,7 +3651,7 @@ test("another account uses the same profile without requesting private likes or 
   await new Promise(setImmediate); // Optional metadata resolves after readable activity.
   assert.match(get("app").innerHTML, /Follows you/);
   assert.match(get("app").innerHTML, /data-action="message-account" data-id="other"/);
-  assert.doesNotMatch(get("app").innerHTML, /tab=likes|Likes received|On these/);
+  assert.doesNotMatch(get("app").innerHTML, /tab=likes|Likes received|On these|data-action="profile-image"/);
   assert.equal(app.state.session.account.id, "me");
 });
 

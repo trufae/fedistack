@@ -126,7 +126,8 @@ namespace Fedi {
         const headers: Record<string, string> = { Accept: "application/json" };
         if (this.token) headers.Authorization = `Bearer ${this.token}`;
         const form = body instanceof URLSearchParams;
-        if (body !== undefined)
+        const multipart = body instanceof FormData;
+        if (body !== undefined && !multipart)
           headers["Content-Type"] = form
             ? "application/x-www-form-urlencoded;charset=UTF-8"
             : "application/json";
@@ -137,9 +138,11 @@ namespace Fedi {
           body:
             body === undefined
               ? undefined
-              : form
-                ? body.toString()
-                : JSON.stringify(body),
+              : multipart
+                ? body
+                : form
+                  ? body.toString()
+                  : JSON.stringify(body),
           signal: controller.signal,
           credentials: "omit",
           redirect: "error",
@@ -227,6 +230,14 @@ namespace Fedi {
         account: mapAccount(account),
         ...(await this.capabilities()),
       };
+    }
+    async updateProfileImage(kind: ProfileImage, file: File): Promise<Account> {
+      const body = new FormData();
+      body.append(kind, file);
+      const result = await this.request<MastodonAccount>(
+        "/api/v1/accounts/update_credentials", "PATCH", body,
+      );
+      return mapAccount(result.data);
     }
     async capabilities(): Promise<Capabilities> {
       // v1 carries rich-text formats on Akkoma/Pleroma, even when v2 is supported.

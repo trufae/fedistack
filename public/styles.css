@@ -1809,6 +1809,7 @@ summary {
   border-radius: 50%;
 }
 .profile-cover {
+  position: relative;
   height: clamp(140px, 22vw, 220px);
   overflow: hidden;
   background: linear-gradient(125deg, var(--sage), var(--accent-wash));
@@ -1829,12 +1830,56 @@ summary {
   margin: -36px 0 18px;
   position: relative;
 }
-.profile-identity > .avatar {
+.profile-avatar > .avatar {
   width: 92px;
   height: 92px;
   flex-shrink: 0;
   border: 5px solid var(--bg);
   font-size: 28px;
+}
+.profile-avatar {
+  position: relative;
+  flex-shrink: 0;
+}
+.profile-image-button {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  padding: 0;
+}
+.profile-avatar .profile-image-button {
+  border-radius: 50%;
+}
+.profile-image-button > span {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: 20px;
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 1px 5px #0003;
+  font-size: 12px;
+}
+.profile-avatar .profile-image-button > span {
+  top: auto;
+  bottom: 0;
+  right: 0;
+  padding: 6px;
+}
+.profile-image-button:hover > span,
+.profile-image-button:focus-visible > span {
+  background: var(--accent-wash);
+}
+.profile-cover .profile-image-button:focus-visible {
+  outline-offset: -4px;
+}
+.profile-image-status {
+  margin-bottom: 12px;
+  color: var(--muted);
 }
 .profile-buttons {
   display: flex;
@@ -2042,7 +2087,7 @@ summary {
   .profile-identity {
     gap: 10px;
   }
-  .profile-identity > .avatar {
+  .profile-avatar > .avatar {
     width: 80px;
     height: 80px;
   }

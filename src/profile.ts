@@ -22,6 +22,57 @@ namespace Fedi {
 
   type ProfileCache = Pick<ProfileState, "account" | "posts" | "people" | "next" | "updated" | "generation">;
   const profileCache = new Map<string, ProfileCache>();
+  let profileImageUpload: { api: API; kind: ProfileImage } | undefined;
+  let profileImageVersion = 0;
+
+  export function chooseProfileImage(kind: ProfileImage): void {
+    const api = state.api, session = state.session, p = state.profile;
+    if (!api || !session || !p?.owner || p.server || state.view !== "profile" || profileImageUpload?.api === api) return;
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.addEventListener("change", () => {
+      const file = input.files?.[0];
+      if (file && state.api === api && state.session === session)
+        void updateProfileImage(kind, file).catch(formError);
+    }, { once: true });
+    input.click();
+  }
+
+  export async function updateProfileImage(kind: ProfileImage, file: File): Promise<void> {
+    const api = state.api, session = state.session;
+    if (!api || !session || profileImageUpload?.api === api) return;
+    if (file.type && !file.type.startsWith("image/")) throw new Error("Choose an image file.");
+    if (!file.size) throw new Error("This image is empty. Choose a different image.");
+    const upload = profileImageUpload = { api, kind };
+    const current = () => state.api === api && state.session === session;
+    render();
+    try {
+      const account = await api.updateProfileImage(kind, file);
+      if (!current()) return;
+      if (account.id !== session.account.id) throw new Error("The server returned a different account. Refresh your profile and try again.");
+      const p = state.profile;
+      const posts = [...state.posts, ...state.ownPosts,
+        ...(p && !p.server ? p.posts : []),
+        ...(state.readerServer ? [] : [...state.comments, ...(state.reading ? [state.reading] : [])]),
+        ...state.conversations.flatMap((c) => c.messages)];
+      const accounts = [session.account, ...state.accounts, ...state.suggestions,
+        ...(p && !p.server ? [...p.people, ...(p.account ? [p.account] : [])] : []),
+        ...state.conversations.flatMap((c) => c.accounts), ...posts.map((post) => post.author)];
+      accounts.filter((a) => a.id === account.id).forEach((a) => Object.assign(a, account));
+      profileImageVersion++;
+      profileCache.clear();
+      clearFeedCache();
+      const saved = writeStore("session", session, session.remember !== true);
+      toast(`${kind === "avatar" ? "Profile picture" : "Background image"} updated.${saved ? "" : " Browser storage is unavailable; the change is saved on your server."}`);
+    } catch (error) {
+      if (current()) throw error;
+    } finally {
+      if (profileImageUpload === upload) profileImageUpload = undefined;
+      if (current()) render();
+    }
+  }
+
   function saveProfile(p: ProfileState): void {
     if (p.generation !== feedCacheGeneration() || p.posts.length > 200 || p.people.length > 200) return;
     profileCache.delete(p.cacheKey);
@@ -92,9 +143,11 @@ namespace Fedi {
       p.loading = false; render(); return;
     }
     try {
+      const imageVersion = profileImageVersion;
       if (sourceError) throw new Error(sourceError);
-      p.account = p.api ? await p.api.account(id, p.controller?.signal) : cached;
+      const account = p.api ? await p.api.account(id, p.controller?.signal) : cached;
       if (!currentProfile(p, api)) return;
+      p.account = owner && imageVersion !== profileImageVersion && state.session ? state.session.account : account;
       if (!p.account) throw new Error("This account could not be found.");
       if (owner && state.session) {
         state.session.account = p.account;
@@ -189,6 +242,12 @@ namespace Fedi {
     const p = state.profile, a = p?.account;
     if (!p || !a) return `<header class="page-top"><a href="#home" class="text-button">${icon("back")} Home</a></header>${emptyState(p?.loading ? "Opening profile…" : "Profile unavailable", p?.error || "", p && !p.loading ? action("profile-refresh", "Try again", "", "button subtle") : "")}`;
     const tabs = profileTabs.filter((tab) => tab !== "followers" && tab !== "following" && (tab !== "likes" || p.owner));
+    const editable = p.owner && !!state.api && !!state.session;
+    const uploading = editable && profileImageUpload?.api === state.api ? profileImageUpload.kind : undefined;
+    const imageButton = (kind: ProfileImage) => {
+      const label = kind === "avatar" ? "Change profile picture" : "Change background image";
+      return editable ? `<button type="button" class="profile-image-button" data-action="profile-image" data-id="${kind}" aria-label="${label}" title="${label}"${uploading ? " disabled" : ""}><span aria-hidden="true">${icon("image")}${kind === "header" ? "Change background" : ""}</span></button>` : "";
+    };
     const link = (tab: ProfileTab) => `#${escapeHTML(profilePath(p.id, tab, p.server))}`;
     const stats = ([['posts', a.statuses], ['followers', a.followers], ['following', a.following]] as const)
       .map(([tab, count]) => `<a href="${link(tab)}"${p.tab === tab ? ' aria-current="page"' : ""}><strong>${count === undefined ? "—" : count.toLocaleString()}</strong><span>${tab === "posts" ? "posts & replies" : tab}</span></a>`).join("");
@@ -202,8 +261,9 @@ namespace Fedi {
         : p.tab === "boosts" ? "Posts shared by this account will appear here."
           : "There are no posts to show here yet.";
     return `<header class="page-top"><a href="#home" class="text-button">${icon("back")} Home</a><div>${action("profile-refresh", icon("refresh"), "", "icon-button")}${p.owner ? '<a href="#settings" class="button subtle small-button">' + icon("settings") + ' Settings</a>' : ""}</div></header>
-      <section class="profile-header"><div class="profile-cover">${a.header ? `<img src="${escapeHTML(safeURL(a.header, true))}" data-image-key="header:${escapeHTML(a.id)}" alt="${escapeHTML(a.name)}’s profile header" referrerpolicy="no-referrer">` : ""}</div>
-      <div class="profile-details"><div class="profile-identity">${avatar(a, false, `profile:${a.id}`)}<div class="profile-buttons">${p.owner ? '<a href="#drafts" class="button subtle">' + icon("edit") + ' Your writing</a><a href="#bookmarks" class="button subtle">' + icon("bookmark") + ' Saved</a>' : p.server ? "" : `${followButton(a, false)}${action("message-account", `${icon("mail")} Message`, a.id, "button subtle")}`}</div></div>
+      <section class="profile-header"><div class="profile-cover">${a.header ? `<img src="${escapeHTML(safeURL(a.header, true))}" data-image-key="header:${escapeHTML(a.id)}" alt="${escapeHTML(a.name)}’s profile header" referrerpolicy="no-referrer">` : ""}${imageButton("header")}</div>
+      <div class="profile-details"><div class="profile-identity"><div class="profile-avatar">${avatar(a, false, `profile:${a.id}`)}${imageButton("avatar")}</div><div class="profile-buttons">${p.owner ? '<a href="#drafts" class="button subtle">' + icon("edit") + ' Your writing</a><a href="#bookmarks" class="button subtle">' + icon("bookmark") + ' Saved</a>' : p.server ? "" : `${followButton(a, false)}${action("message-account", `${icon("mail")} Message`, a.id, "button subtle")}`}</div></div>
+      ${uploading ? `<p class="profile-image-status" role="status">Updating ${uploading === "avatar" ? "profile picture" : "background image"}…</p>` : ""}
       <h1>${escapeHTML(a.name)}</h1><p class="profile-handle">@${escapeHTML(a.acct)} ${a.locked ? `<span title="Approves follow requests">${icon("lock")}</span>` : ""}</p>
       ${state.relationships.get(a.id)?.followed_by && !p.server && !p.owner ? '<span class="profile-badge">Follows you</span>' : ""}
       ${a.bio ? `<p class="profile-bio">${escapeHTML(a.bio)}</p>` : ""}

@@ -250,6 +250,9 @@ namespace Fedi {
       case "profile-more":
         await loadProfilePage(true);
         break;
+      case "profile-image":
+        if (id === "avatar" || id === "header") chooseProfileImage(id);
+        break;
       case "like":
         await togglePost(id, "like");
         break;

@@ -204,7 +204,7 @@ namespace Fedi {
   async function fetchProfilePage(p: ProfileState, append: boolean): Promise<void> {
     let posts = append ? p.posts : [], people = append ? p.people : [];
     let next = append ? p.next : undefined;
-    // Bound scanning for sparse boosts/replies, retaining a usable cursor.
+    // Bound scanning for sparse activity, retaining a usable cursor.
     for (let page = 0; page < 4; page++) {
       if (p.controller?.signal.aborted) return;
       const cursor = next;
@@ -278,7 +278,8 @@ namespace Fedi {
         const posts = demoProfilePosts();
         p.posts = posts.filter((post) => p.tab === "likes" ? post.liked :
           p.tab === "boosts" ? p.owner && post.reposted :
-          ["posts", "replies"].includes(p.tab) && post.author.id === p.id && (p.tab !== "replies" || !!post.replyTo || !!post.isReply));
+          (p.tab === "posts" || p.tab === "replies") && post.author.id === p.id &&
+          (p.tab === "replies") === !!(post.replyTo || post.isReply));
         p.people = p.tab === "following" && p.owner
           ? demoAuthors.filter((a) => demoState.follows.includes(a.id))
           : p.tab === "followers" && !p.owner && demoState.follows.includes(p.id) ? [demoMe] : [];
@@ -342,7 +343,7 @@ namespace Fedi {
       <div class="profile-meta">${joined ? `<span>${joined}</span>` : ""}${a.url ? `<a href="${escapeHTML(safeURL(a.url))}" target="_blank" rel="noopener noreferrer">Original profile ${icon("external")}</a>` : ""}${!state.session && !p.server ? '<span>Fictional offline demo</span>' : ""}</div>
       <div class="profile-counts">${stats}</div></div></section>
       ${p.owner && p.tab === "posts" && p.posts.length ? `<section class="profile-insights" aria-label="Your post activity"><p>On these ${p.posts.length} loaded posts</p><div>${[["heart", "Likes received", "likes"], ["repost", "Boosts received", "reposts"], ["comment", "Replies received", "replies"]].map(([symbol, label, key]) => `<span>${icon(symbol)}<strong>${p.posts.reduce((n, post) => n + (post[key as "likes" | "reposts" | "replies"] || 0), 0).toLocaleString()}</strong> ${label}</span>`).join("")}</div></section>` : ""}
-      <nav class="timeline-tabs profile-tabs" aria-label="Profile activity">${tabs.map((tab) => `<a href="${link(tab)}"${p.tab === tab ? ' class="active" aria-current="page"' : ""}>${tab === "posts" ? "Posts & replies" : tab[0].toUpperCase() + tab.slice(1)}${tab === "likes" ? ` ${icon("lock")}` : ""}</a>`).join("")}</nav>
+      <nav class="timeline-tabs profile-tabs" aria-label="Profile activity">${tabs.map((tab) => `<a href="${link(tab)}"${p.tab === tab ? ' class="active" aria-current="page"' : ""}>${tab[0].toUpperCase() + tab.slice(1)}${tab === "likes" ? ` ${icon("lock")}` : ""}</a>`).join("")}</nav>
       ${people ? `<p class="profile-notice">${p.tab === "followers" ? (p.owner ? "People who follow you" : "People who follow this account") : (p.owner ? "People you follow" : "People this account follows")}</p>` : ""}
       ${p.tab === "likes" ? '<p class="profile-notice">Your likes · Only visible to you</p>' : ""}
       <div class="${people ? "profile-people" : "feed"}">${people ? p.people.map((a) => accountRow(a, "profile-person")).join("") : p.posts.map((post) => postCard(post)).join("")}</div>

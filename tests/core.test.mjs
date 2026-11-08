@@ -3760,7 +3760,8 @@ test("own profile refreshes header and counts, shows loaded engagement and setti
     if (u.pathname.endsWith("/statuses")) return Response.json([
       sharedStatus({ id: u.searchParams.has("max_id") ? "older" : "newer", account: profileAccount(), favourites_count: 6, reblogs_count: 3 }),
       sharedStatus({ id: "dm", visibility: "direct", account: profileAccount() }),
-      sharedStatus({ id: "reply", in_reply_to_id: "parent", account: profileAccount() }),
+      sharedStatus({ id: "self-reply", in_reply_to_id: "parent", in_reply_to_account_id: "me", account: profileAccount() }),
+      sharedStatus({ id: "orphan-reply", is_reply: true, account: profileAccount() }),
     ], { headers: u.searchParams.has("max_id") ? {} : { Link: '<https://example.org/api/v1/accounts/me/statuses?max_id=40>; rel="next"' } });
     return Response.json(profileAccount("me", { header: "https://example.org/fresh-header.png", followers_count: 124 }));
   });
@@ -3768,16 +3769,20 @@ test("own profile refreshes header and counts, shows loaded engagement and setti
   await app.route();
   assert.equal(app.state.profile.owner, true);
   assert.equal(app.state.session.account.followers, 124);
-  assert.equal(app.state.profile.posts.length, 2);
+  assert.deepEqual(Array.from(app.state.profile.posts, (p) => p.id), ["newer"]);
   assert.match(get("app").innerHTML, /fresh-header.png/);
-  assert.match(get("app").innerHTML, /On these 2 loaded posts/);
+  assert.match(get("app").innerHTML, /On these 1 loaded posts/);
+  assert.match(get("app").innerHTML, /aria-current="page">Posts<\/a>/);
+  assert.match(get("app").innerHTML, /<strong>77<\/strong><span>posts & replies<\/span>/);
   assert.match(get("app").innerHTML, /Likes received/);
   assert.match(get("app").innerHTML, /href="#settings" class="button subtle small-button"/);
   assert.match(get("app").innerHTML, /aria-label="Your profile" aria-current="page"/);
   await app.loadProfilePage(true);
-  assert.deepEqual(Array.from(app.state.profile.posts, (p) => p.id), ["newer", "reply", "older"]);
+  assert.deepEqual(Array.from(app.state.profile.posts, (p) => p.id), ["newer", "older"]);
   assert.equal(app.state.profile.next, undefined);
-  assert.equal(calls.filter((u) => u.pathname.endsWith("/statuses")).length, 2);
+  const pages = calls.filter((u) => u.pathname.endsWith("/statuses"));
+  assert.equal(pages.length, 2);
+  assert.equal(pages[0].searchParams.get("exclude_replies"), "true");
 });
 
 test("another account uses the same profile without requesting private likes or showing owner controls", async () => {
@@ -3954,6 +3959,14 @@ test("unavailable suggestions fall back to v1 only for unsupported endpoints and
 test("demo profiles show local activity and following; profile fields are escaped", async () => {
   const { app, context, get } = await postActionFixture();
   const liked = app.demoState.posts[0]; liked.liked = true;
+  app.demoState.posts.push({ ...liked, id: "demo-post", author: app.demoMe, liked: false });
+  app.demoState.comments[liked.id] = [{ ...liked, id: "demo-reply", author: app.demoMe, replyTo: liked.id, liked: false }];
+  context.location.hash = "#profile";
+  await app.route();
+  assert.deepEqual(Array.from(app.state.profile.posts, (p) => p.id), ["demo-post"]);
+  context.location.hash = "#profile?tab=replies";
+  await app.route();
+  assert.deepEqual(Array.from(app.state.profile.posts, (p) => p.id), ["demo-reply"]);
   context.location.hash = "#profile?tab=likes";
   await app.route();
   assert.equal(app.state.profile.posts[0].id, liked.id);

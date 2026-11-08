@@ -4056,6 +4056,9 @@ test("automatic refresh checks visible reading, respects freshness and backs off
   context.window = { scrollY: 300 };
   await app.refreshReading(now + 31000); assert.equal(calls, 1);
   context.window.scrollY = 0;
+  context.document.activeElement = { matches: () => true };
+  await app.refreshReading(now + 31000); assert.equal(calls, 1);
+  context.document.activeElement = undefined;
   await app.refreshReading(now + 31000); assert.equal(calls, 2);
   fail = true;
   await app.refreshReading(now + 62000); assert.equal(calls, 3);
@@ -4064,14 +4067,15 @@ test("automatic refresh checks visible reading, respects freshness and backs off
 });
 
 test("empty profiles refresh automatically so a background import becomes visible", async () => {
-  let pages = 0;
+  let pages = 0, accounts = 0;
   const { app, context } = await profileFixture(async (url) => {
     if (new URL(url).pathname.endsWith("/statuses")) return Response.json(++pages === 1 ? [] : [sharedStatus({ id: "imported", account: profileAccount() })]);
-    return Response.json(profileAccount());
+    return Response.json(profileAccount("me", { followers_count: ++accounts }));
   });
   context.location.hash = "#profile";
   await app.route();
   assert.equal(app.state.profile.posts.length, 0);
   await app.refreshReading(Date.now() + 5100);
   assert.deepEqual(Array.from(app.state.profile.posts, (p) => p.id), ["imported"]);
+  assert.equal(app.state.profile.account.followers, 2);
 });

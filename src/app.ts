@@ -471,7 +471,7 @@ namespace Fedi {
     const api = state.api, p = state.profile;
     if (!api || refreshingReading || state.loading || p?.loading || state.query ||
         !["home", "discover", "profile"].includes(state.view) ||
-        (typeof document !== "undefined" && document.hidden) ||
+        (typeof document !== "undefined" && (document.hidden || document.activeElement?.matches("input,textarea,[contenteditable=true]"))) ||
         (typeof navigator !== "undefined" && navigator.onLine === false) ||
         (typeof window !== "undefined" && window.scrollY > 200)) return;
     const key = JSON.stringify([state.view, state.timeline, p?.id, p?.tab, p?.server]);
@@ -484,9 +484,13 @@ namespace Fedi {
     if (now < Math.max(refresh.at, updated + interval)) return;
     refreshingReading = true;
     try {
-      if (p) await loadProfilePage();
+      if (p) {
+        const query = new URLSearchParams({ tab: p.tab });
+        if (p.server) query.set("server", p.server);
+        await openProfile(p.id, query.toString(), true);
+      }
       else await loadFeed(false);
-      const failed = p ? !!p.error : !!state.error;
+      const failed = p ? !!state.profile?.error : !!state.error;
       refresh.failures = failed ? refresh.failures + 1 : 0;
       refresh.at = now + (failed ? Math.min(120000, interval * 2 ** refresh.failures) : interval);
     } finally { refreshingReading = false; }

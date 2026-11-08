@@ -554,6 +554,7 @@ namespace Fedi {
       if (el.id === "settings-language" && el.value)
         setDiscoveryLanguages([...state.discoveryLanguages, el.value]);
     });
+    document.addEventListener("error", imageLoadError, true);
     document.addEventListener("keydown", editorKeydown);
     document.getElementById("modal")!.addEventListener("click", (event) => {
       if (event.target === event.currentTarget) closeModal();

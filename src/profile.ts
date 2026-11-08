@@ -23,7 +23,29 @@ namespace Fedi {
   type ProfileCache = Pick<ProfileState, "account" | "posts" | "people" | "next" | "updated" | "generation">;
   const profileCache = new Map<string, ProfileCache>();
   let profileImageUpload: { api: API; kind: ProfileImage } | undefined;
+  let profileImageError: { api: API; message: string } | undefined;
   let profileImageVersion = 0;
+
+  export function profileImageUpdating(): boolean {
+    return !!state.api && profileImageUpload?.api === state.api;
+  }
+
+  function checkProfileImage(url: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      const finish = (loaded: boolean) => {
+        clearTimeout(timer);
+        image.onload = image.onerror = null;
+        if (loaded) resolve();
+        else reject(new Error("The server saved your profile, but the image could not be loaded. Try refreshing your profile; if it still fails, check your server’s media URL and file access."));
+      };
+      const timer = setTimeout(() => finish(false), 15000);
+      image.referrerPolicy = "no-referrer";
+      image.onload = () => finish(image.naturalWidth > 0);
+      image.onerror = () => finish(false);
+      image.src = url;
+    });
+  }
 
   export function chooseProfileImage(kind: ProfileImage): void {
     const api = state.api, session = state.session, p = state.profile;
@@ -42,12 +64,13 @@ namespace Fedi {
   export async function updateProfileImage(kind: ProfileImage, file: File): Promise<void> {
     const api = state.api, session = state.session;
     if (!api || !session || profileImageUpload?.api === api) return;
-    if (file.type && !file.type.startsWith("image/")) throw new Error("Choose an image file.");
-    if (!file.size) throw new Error("This image is empty. Choose a different image.");
     const upload = profileImageUpload = { api, kind };
     const current = () => state.api === api && state.session === session;
+    profileImageError = undefined;
     render();
     try {
+      if (file.type && !file.type.startsWith("image/")) throw new Error("Choose an image file.");
+      if (!file.size) throw new Error("This image is empty. Choose a different image.");
       const account = await api.updateProfileImage(kind, file);
       if (!current()) return;
       if (account.id !== session.account.id) throw new Error("The server returned a different account. Refresh your profile and try again.");
@@ -64,9 +87,14 @@ namespace Fedi {
       profileCache.clear();
       clearFeedCache();
       const saved = writeStore("session", session, session.remember !== true);
+      await checkProfileImage(account[kind]!);
+      if (!current()) return;
       toast(`${kind === "avatar" ? "Profile picture" : "Background image"} updated.${saved ? "" : " Browser storage is unavailable; the change is saved on your server."}`);
     } catch (error) {
-      if (current()) throw error;
+      if (current()) {
+        profileImageError = { api, message: (error as Error).message };
+        throw error;
+      }
     } finally {
       if (profileImageUpload === upload) profileImageUpload = undefined;
       if (current()) render();
@@ -85,8 +113,9 @@ namespace Fedi {
     if (!api || p.server) return;
     void api.relationships(ids.filter((id) => id !== state.session?.account.id)).then((relations) => {
       if (!currentProfile(p, api)) return;
+      const changed = relations.some((r) => JSON.stringify(state.relationships.get(r.id)) !== JSON.stringify(r));
       relations.forEach((r) => state.relationships.set(r.id, r));
-      render();
+      if (changed) render();
     }).catch(() => { /* Relationship metadata must not delay reading. */ });
   }
 
@@ -172,6 +201,67 @@ namespace Fedi {
       .filter((p) => p.visibility !== "direct").map((p) => [p.id, p])).values()]
       .sort((a, b) => b.created.localeCompare(a.created));
   }
+  async function fetchProfilePage(p: ProfileState, append: boolean): Promise<void> {
+    let posts = append ? p.posts : [], people = append ? p.people : [];
+    let next = append ? p.next : undefined;
+    // Bound scanning for sparse boosts/replies, retaining a usable cursor.
+    for (let page = 0; page < 4; page++) {
+      if (p.controller?.signal.aborted) return;
+      const cursor = next;
+      if (cursor) p.visited.add(cursor);
+      const result = p.tab === "followers" || p.tab === "following"
+        ? await p.api!.accountConnections(p.id, p.tab, cursor, p.controller?.signal)
+        : p.tab === "likes"
+          ? await p.api!.favourites(cursor, p.controller?.signal)
+          : await p.api!.accountPosts(p.id, p.tab, cursor, p.controller?.signal);
+      next = result.next && !p.visited.has(result.next) ? result.next : undefined;
+      if (page === 0 && !append) p.updated = Date.now();
+      if ("accounts" in result) {
+        people = [...new Map([...people, ...result.accounts].map((a) => [a.id, a])).values()];
+      } else {
+        const visible = p.server ? result.posts.filter((post) => canRepost(post)) : result.posts;
+        posts = [...new Map([...posts, ...visible].map((post) => [post.id, post])).values()];
+        if (p.owner && p.tab === "boosts") posts.forEach((post) => { post.reposted = true; });
+      }
+      const count = "accounts" in result ? result.accounts.length : result.posts.length;
+      if (count || !next) break;
+    }
+    p.posts = posts; p.people = people; p.next = next;
+  }
+
+  export async function refreshProfile(): Promise<void> {
+    const p = state.profile, api = state.api;
+    if (!p?.api || p.loading || profileImageUpdating()) return;
+    p.controller?.abort();
+    const controller = p.controller = new AbortController();
+    const imageVersion = profileImageVersion;
+    const current = () => currentProfile(p, api) && p.controller === controller && imageVersion === profileImageVersion;
+    const visible = () => JSON.stringify([p.account, p.posts, p.people, p.next, p.error]);
+    const before = visible();
+    // Keep the visible profile intact until both account and activity arrive.
+    const fresh = { ...p, visited: new Set<string>(), error: "" };
+    try {
+      fresh.account = await p.api.account(p.id, controller.signal);
+      if (!current()) return;
+      await fetchProfilePage(fresh, false);
+      if (!current()) return;
+      Object.assign(p, fresh);
+      if (p.owner && state.session && p.account) {
+        state.session.account = p.account;
+        if (before !== visible()) writeStore("session", state.session, state.session.remember !== true);
+      }
+      saveProfile(p);
+      profileRelationships(p, [...p.people.map((a) => a.id), ...p.posts.map((post) => post.author.id), ...(!p.owner ? [p.id] : [])]);
+    } catch (error) {
+      if (!current()) return;
+      p.error = (error as Error).message;
+      if (error instanceof APIError && [401, 403].includes(error.status)) {
+        clearFeedCache(); profileCache.clear(); p.posts = []; p.people = []; p.next = undefined;
+      }
+    }
+    if (current() && before !== visible()) render();
+  }
+
   export async function loadProfilePage(append = false): Promise<void> {
     const p = state.profile, api = state.api;
     if (!p || p.loading || !p.account || (append && !p.next)) return;
@@ -183,8 +273,6 @@ namespace Fedi {
       p.visited.clear();
     }
     render();
-    let postsLoaded = append ? p.posts : [], peopleLoaded = append ? p.people : [];
-    let next = append ? p.next : undefined;
     try {
       if (!p.api) {
         const posts = demoProfilePosts();
@@ -199,30 +287,11 @@ namespace Fedi {
         }));
         if (p.owner) p.account = { ...demoMe, statuses: posts.filter((post) => post.author.id === p.id).length, following: demoState.follows.length, followers: 0 };
       } else {
-        // Bound scanning for sparse boosts/replies. The next cursor stays usable
-        // even if none of the scanned pages contained matching activity.
-        for (let page = 0; page < 4; page++) {
-          const cursor = next;
-          if (cursor) p.visited.add(cursor);
-          const result = p.tab === "followers" || p.tab === "following"
-            ? await p.api.accountConnections(p.id, p.tab, cursor, p.controller.signal)
-            : p.tab === "likes"
-              ? await p.api.favourites(cursor, p.controller.signal)
-              : await p.api.accountPosts(p.id, p.tab, cursor, p.controller.signal);
-          if (!currentProfile(p, api)) return;
-          next = result.next && !p.visited.has(result.next) ? result.next : undefined;
-          if (page === 0 && !append) p.updated = Date.now();
-          if ("accounts" in result) {
-            peopleLoaded = [...new Map([...peopleLoaded, ...result.accounts].map((a) => [a.id, a])).values()];
-          } else {
-            const posts = p.server ? result.posts.filter((post) => canRepost(post)) : result.posts;
-            postsLoaded = [...new Map([...postsLoaded, ...posts].map((post) => [post.id, post])).values()];
-            if (p.owner && p.tab === "boosts") postsLoaded.forEach((post) => { post.reposted = true; });
-          }
-          const count = "accounts" in result ? result.accounts.length : result.posts.length;
-          if (count || !next) break;
-        }
-        p.posts = postsLoaded; p.people = peopleLoaded; p.next = next;
+        const fresh = { ...p, visited: new Set(p.visited) };
+        await fetchProfilePage(fresh, append);
+        if (!currentProfile(p, api) || p.controller !== fresh.controller) return;
+        Object.assign(p, { posts: fresh.posts, people: fresh.people, next: fresh.next,
+          updated: fresh.updated, visited: fresh.visited });
         saveProfile(p);
         render();
         profileRelationships(p, [...p.people.map((a) => a.id), ...p.posts.map((post) => post.author.id)]);
@@ -243,6 +312,7 @@ namespace Fedi {
     if (!p || !a) return `<header class="page-top"><a href="#home" class="text-button">${icon("back")} Home</a></header>${emptyState(p?.loading ? "Opening profile…" : "Profile unavailable", p?.error || "", p && !p.loading ? action("profile-refresh", "Try again", "", "button subtle") : "")}`;
     const tabs = profileTabs.filter((tab) => tab !== "followers" && tab !== "following" && (tab !== "likes" || p.owner));
     const editable = p.owner && !!state.api && !!state.session;
+    const imageError = editable && profileImageError?.api === state.api ? profileImageError.message : "";
     const uploading = editable && profileImageUpload?.api === state.api ? profileImageUpload.kind : undefined;
     const imageButton = (kind: ProfileImage) => {
       const label = kind === "avatar" ? "Change profile picture" : "Change background image";
@@ -264,6 +334,7 @@ namespace Fedi {
       <section class="profile-header"><div class="profile-cover">${a.header ? `<img src="${escapeHTML(safeURL(a.header, true))}" data-image-key="header:${escapeHTML(a.id)}" alt="${escapeHTML(a.name)}’s profile header" referrerpolicy="no-referrer">` : ""}${imageButton("header")}</div>
       <div class="profile-details"><div class="profile-identity"><div class="profile-avatar">${avatar(a, false, `profile:${a.id}`)}${imageButton("avatar")}</div><div class="profile-buttons">${p.owner ? '<a href="#drafts" class="button subtle">' + icon("edit") + ' Your writing</a><a href="#bookmarks" class="button subtle">' + icon("bookmark") + ' Saved</a>' : p.server ? "" : `${followButton(a, false)}${action("message-account", `${icon("mail")} Message`, a.id, "button subtle")}`}</div></div>
       ${uploading ? `<p class="profile-image-status" role="status">Updating ${uploading === "avatar" ? "profile picture" : "background image"}…</p>` : ""}
+      ${imageError ? `<p class="error-panel" role="alert">${escapeHTML(imageError)}</p>` : ""}
       <h1>${escapeHTML(a.name)}</h1><p class="profile-handle">@${escapeHTML(a.acct)} ${a.locked ? `<span title="Approves follow requests">${icon("lock")}</span>` : ""}</p>
       ${state.relationships.get(a.id)?.followed_by && !p.server && !p.owner ? '<span class="profile-badge">Follows you</span>' : ""}
       ${a.bio ? `<p class="profile-bio">${escapeHTML(a.bio)}</p>` : ""}

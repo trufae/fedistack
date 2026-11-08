@@ -28,6 +28,10 @@ function setup(
     Response,
     TextEncoder,
     AbortController,
+    Image: class {
+      naturalWidth = 32;
+      set src(value) { this.url = value; queueMicrotask(() => this.onload?.()); }
+    },
     crypto: webcrypto,
     btoa,
     atob,
@@ -968,6 +972,33 @@ test("new and changed avatar URLs load normally and removed images are not cache
   app.renderHTML(root, "a previously removed avatar returns");
   assert.deepEqual(root.images, [changed, returning]);
   assert.notEqual(root.images[1], previous);
+});
+
+test("a failed avatar gets a fresh image element when the profile is rendered again", () => {
+  const { app, root, content, image } = imageRenderFixture();
+  const failed = image("https://example.org/avatar.png"), loaded = image("https://example.org/cover.png");
+  failed.complete = true;
+  failed.naturalWidth = 0;
+  loaded.complete = true;
+  loaded.naturalWidth = 100;
+  root.images = [failed, loaded];
+  const retry = image(failed.src);
+  content.images = [retry, image(loaded.src)];
+  app.renderHTML(root, "refresh after the server's image becomes available");
+  assert.deepEqual(root.images, [retry, loaded]);
+  assert.equal(retry.src, failed.src);
+});
+
+test("failed avatar images reveal initials without hiding other page images", () => {
+  const { app } = setup();
+  const account = { id: "me", name: "Writer Me", avatar: "https://example.org/missing.png" };
+  assert.match(app.avatar(account), /<span class="avatar-initials">WM<\/span>/);
+  const avatar = { matches: (selector) => selector === "img[data-avatar-key]", hidden: false };
+  app.imageLoadError({ target: avatar });
+  assert.equal(avatar.hidden, true);
+  const cover = { matches: () => false, hidden: false };
+  app.imageLoadError({ target: cover });
+  assert.equal(cover.hidden, false);
 });
 
 test("appending another post by the same author keeps the suggestion avatar in its own slot", () => {
@@ -3562,10 +3593,81 @@ test("invalid files and failed image uploads preserve the profile and allow retr
   const file = new File(["image"], "image.png", { type: "image/png" });
   await assert.rejects(app.updateProfileImage("avatar", file), /Image is too large/);
   assert.equal(app.state.profile.account.avatar, "https://example.org/avatar.png");
+  assert.match(get("app").innerHTML, /role="alert">[^<]*Image is too large/);
   assert.doesNotMatch(get("app").innerHTML, /class="profile-image-button"[^>]* disabled/);
   reject = false;
   await app.updateProfileImage("avatar", file);
   assert.equal(app.state.profile.account.avatar, "https://example.org/retry.png");
+  assert.doesNotMatch(get("app").innerHTML, /Image is too large/);
+});
+
+test("image uploads reject empty, malformed, and unusable successful responses", async () => {
+  const file = new File(["image"], "image.png", { type: "image/png" });
+  const responses = [
+    [() => new Response(null, { status: 204 }), /valid account/],
+    [() => Response.json(null), /valid account/],
+    [() => Response.json({ error: "Upload ignored" }), /valid account/],
+    [() => new Response("<html>Proxy page</html>"), /invalid JSON response/],
+    ...["", "http://example.org/image.png", "/media/image.png", "javascript:alert(1)"].map((avatar) =>
+      [() => Response.json(profileAccount("me", { avatar })), /usable HTTPS image URL/]),
+  ];
+  for (const [response, message] of responses) {
+    const { app } = setup(response);
+    await assert.rejects(new app.API("example.org", "token").updateProfileImage("avatar", file), message);
+  }
+});
+
+test("an inaccessible uploaded image reports a persistent error and can be retried", async () => {
+  let account = profileAccount(), probe;
+  const { app, context, get } = await profileFixture(async (url, options) => {
+    if (options.method === "PATCH") account = profileAccount("me", { avatar: "https://example.org/missing.png" });
+    return Response.json(url.includes("/statuses") ? [] : account);
+  });
+  context.Image = class {
+    constructor() { probe = this; }
+    set src(url) { this.url = url; }
+  };
+  context.location.hash = "#profile";
+  await app.route();
+  const file = new File(["image"], "image.png", { type: "image/png" });
+  const upload = app.updateProfileImage("avatar", file);
+  await new Promise(setImmediate);
+  assert.equal(probe.url, "https://example.org/missing.png");
+  assert.equal(probe.referrerPolicy, "no-referrer");
+  assert.doesNotMatch(get("toast").textContent, /updated/);
+  const rejected = assert.rejects(upload, /saved your profile, but the image could not be loaded/);
+  probe.onerror();
+  await rejected;
+  assert.equal(app.loadSession().account.avatar, probe.url, "keep the server's saved account even if its media is inaccessible");
+  assert.match(get("app").innerHTML, /role="alert">[^<]*image could not be loaded/);
+  assert.doesNotMatch(get("app").innerHTML, /class="profile-image-button"[^>]* disabled/);
+  await app.refreshReading(Date.now() + 5100);
+  assert.match(get("app").innerHTML, /image could not be loaded/);
+  const retry = app.updateProfileImage("avatar", file);
+  await new Promise(setImmediate);
+  probe.naturalWidth = 32;
+  probe.onload();
+  await retry;
+  assert.match(get("toast").textContent, /updated/);
+  assert.doesNotMatch(get("app").innerHTML, /image could not be loaded/);
+});
+
+test("stalled image loading times out and releases the upload controls", async () => {
+  const { app, context, get } = await profileFixture(async (url) =>
+    Response.json(url.includes("/statuses") ? [] : profileAccount()));
+  context.location.hash = "#profile";
+  await app.route();
+  let expire;
+  context.Image = class { set src(_url) {} };
+  const setTimer = context.setTimeout;
+  context.setTimeout = (run, delay) => delay === 15000 ? (expire = run, 0) : setTimer(run, delay);
+  const upload = app.updateProfileImage("header", new File(["image"], "image.png", { type: "image/png" }));
+  await new Promise(setImmediate);
+  const rejected = assert.rejects(upload, /image could not be loaded/);
+  expire();
+  await rejected;
+  assert.equal(app.profileImageUpdating(), false);
+  assert.match(get("app").innerHTML, /role="alert"/);
 });
 
 test("an image response after switching accounts cannot update or persist the new session", async () => {
@@ -4207,4 +4309,103 @@ test("empty profiles refresh automatically so a background import becomes visibl
   await app.refreshReading(Date.now() + 5100);
   assert.deepEqual(Array.from(app.state.profile.posts, (p) => p.id), ["imported"]);
   assert.equal(app.state.profile.account.followers, 2);
+});
+
+test("unchanged background profile refreshes keep the visible DOM and never show a loader", async () => {
+  let pages = 0, finish;
+  const { app, context, get } = await profileFixture(async (url) => {
+    if (url.includes("/statuses")) {
+      if (++pages > 1) await new Promise((resolve) => { finish = resolve; });
+      return Response.json([]);
+    }
+    return Response.json(profileAccount());
+  });
+  context.location.hash = "#profile";
+  await app.route();
+  const p = app.state.profile, html = get("app").innerHTML;
+  let renders = 0;
+  const render = app.render;
+  app.render = () => { renders++; render(); };
+  const refresh = app.refreshReading(Date.now() + 5100);
+  await new Promise(setImmediate);
+  assert.equal(app.state.profile, p);
+  assert.equal(p.loading, false);
+  assert.equal(get("app").innerHTML, html);
+  assert.equal(renders, 0);
+  finish();
+  await refresh;
+  await new Promise(setImmediate);
+  assert.equal(pages, 2);
+  assert.equal(renders, 0, "an unchanged response must not rebuild the page");
+});
+
+test("background profile refreshes commit changed account and posts in one render", async () => {
+  let imported = false;
+  const { app, context, get } = await profileFixture(async (url) => {
+    const account = profileAccount("me", { followers_count: imported ? 124 : 123 });
+    return Response.json(url.includes("/statuses") ? imported ? [sharedStatus({ account })] : [] : account);
+  });
+  context.location.hash = "#profile";
+  await app.route();
+  const frames = [], render = app.render;
+  app.render = () => { render(); frames.push(get("app").innerHTML); };
+  imported = true;
+  await app.refreshReading(Date.now() + 5100);
+  await new Promise(setImmediate);
+  assert.equal(frames.length, 1);
+  assert.doesNotMatch(frames[0], /class="loading"/);
+  assert.equal(app.state.profile.account.followers, 124);
+  assert.equal(app.state.profile.posts.length, 1);
+});
+
+test("automatic refresh pauses during uploads and ignores an older in-flight account read", async () => {
+  let account = profileAccount(), delayRead = false, finishRead, finishUpload, reads = 0;
+  const { app, context } = await profileFixture(async (url, options) => {
+    if (options.method === "PATCH") {
+      await new Promise((resolve) => { finishUpload = resolve; });
+      account = profileAccount("me", { avatar: "https://example.org/new.png" });
+      return Response.json(account);
+    }
+    if (url.includes("/statuses")) return Response.json([]);
+    reads++;
+    if (delayRead) return new Promise((resolve) => { finishRead = resolve; });
+    return Response.json(account);
+  });
+  context.location.hash = "#profile";
+  await app.route();
+  delayRead = true;
+  const refresh = app.refreshReading(Date.now() + 5100);
+  const upload = app.updateProfileImage("avatar", new File(["image"], "image.png", { type: "image/png" }));
+  finishUpload();
+  await upload;
+  finishRead(Response.json(profileAccount()));
+  await refresh;
+  assert.equal(app.state.profile.account.avatar, "https://example.org/new.png");
+  const second = app.updateProfileImage("avatar", new File(["image"], "image.png", { type: "image/png" }));
+  const before = reads;
+  await app.refreshReading(Date.now() + 62000);
+  assert.equal(reads, before);
+  finishUpload();
+  await second;
+});
+
+test("a late background profile response cannot replace the page after navigation", async () => {
+  let finishRead, delayed = false;
+  const { app, context, get } = await profileFixture(async (url) => {
+    if (url.includes("/statuses")) return Response.json([]);
+    if (delayed) return new Promise((resolve) => { finishRead = resolve; });
+    return Response.json(profileAccount());
+  });
+  context.location.hash = "#profile";
+  await app.route();
+  delayed = true;
+  const refresh = app.refreshReading(Date.now() + 5100);
+  context.location.hash = "#settings";
+  await app.route();
+  const html = get("app").innerHTML;
+  finishRead(Response.json(profileAccount("me", { avatar: "https://example.org/stale.png" })));
+  await refresh;
+  assert.equal(app.state.view, "settings");
+  assert.equal(get("app").innerHTML, html);
+  assert.notEqual(app.state.session.account.avatar, "https://example.org/stale.png");
 });

@@ -185,7 +185,10 @@ namespace Fedi {
         const data =
           response.status === 204
             ? (undefined as T)
-            : ((await response.json()) as T);
+            : ((await response.json().catch((error) => {
+              if (error?.name !== "SyntaxError") throw error;
+              throw new APIError(`${method} ${url.pathname} (${response.status}): The server returned an invalid JSON response.`, response.status);
+            })) as T);
         if (method !== "GET" && /\/accounts\/[^/]+\/(follow|unfollow|block|unblock|mute|unmute)$/.test(url.pathname)) {
           this.relationshipVersion++;
           const id = decodeURIComponent(url.pathname.split("/").slice(-2)[0]);
@@ -237,7 +240,14 @@ namespace Fedi {
       const result = await this.request<MastodonAccount>(
         "/api/v1/accounts/update_credentials", "PATCH", body,
       );
-      return mapAccount(result.data);
+      const data = result.data;
+      if (!data || typeof data.id !== "string" || !data.id ||
+          typeof data.username !== "string" || typeof data.acct !== "string" ||
+          typeof data.note !== "string")
+        throw new Error("The server did not return a valid account after the image upload. Refresh your profile to check whether it was saved.");
+      if (typeof data[kind] !== "string" || !safeURL(data[kind]!, true).startsWith("https://"))
+        throw new Error("The server accepted the upload but did not return a usable HTTPS image URL. Refresh your profile or check your server’s media configuration.");
+      return mapAccount(data);
     }
     async capabilities(): Promise<Capabilities> {
       // v1 carries rich-text formats on Akkoma/Pleroma, even when v2 is supported.

@@ -98,7 +98,11 @@ namespace Fedi {
       .map((w) => w[0] || "")
       .slice(0, 2)
       .join("");
-    return `<span class="avatar ${small ? "small" : ""} ${escapeHTML(account.color || "sage")}">${account.avatar ? `<img data-avatar-key="${escapeHTML(key)}" src="${escapeHTML(safeURL(account.avatar, true))}" alt="" loading="lazy" referrerpolicy="no-referrer">` : escapeHTML(initials)}</span>`;
+    return `<span class="avatar ${small ? "small" : ""} ${escapeHTML(account.color || "sage")}">${account.avatar ? `<img data-avatar-key="${escapeHTML(key)}" src="${escapeHTML(safeURL(account.avatar, true))}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}<span class="avatar-initials">${escapeHTML(initials)}</span></span>`;
+  }
+  export function imageLoadError(event: Event): void {
+    const image = event.target as HTMLImageElement | null;
+    if (image?.matches?.("img[data-avatar-key]")) image.hidden = true;
   }
   export function renderHTML(element: HTMLElement, html: string): void {
     const images = new Map<string, HTMLImageElement[]>();
@@ -107,6 +111,8 @@ namespace Fedi {
       "crossorigin", "referrerpolicy",
     ].map((name) => image.getAttribute(name)));
     element.querySelectorAll<HTMLImageElement>("img").forEach((image) => {
+      // A failed image must get another load attempt on the next render.
+      if (image.complete && image.naturalWidth === 0) return;
       const id = key(image);
       const matches = images.get(id) || [];
       matches.push(image);

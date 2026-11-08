@@ -469,7 +469,7 @@ namespace Fedi {
   let refreshingReading = false;
   export async function refreshReading(now = Date.now()): Promise<void> {
     const api = state.api, p = state.profile;
-    if (!api || refreshingReading || state.loading || p?.loading || state.query ||
+    if (!api || refreshingReading || state.loading || p?.loading || profileImageUpdating() || state.query ||
         !["home", "discover", "profile"].includes(state.view) ||
         (typeof document !== "undefined" && (document.hidden || document.activeElement?.matches("input,textarea,[contenteditable=true]"))) ||
         (typeof navigator !== "undefined" && navigator.onLine === false) ||
@@ -484,11 +484,7 @@ namespace Fedi {
     if (now < Math.max(refresh.at, updated + interval)) return;
     refreshingReading = true;
     try {
-      if (p) {
-        const query = new URLSearchParams({ tab: p.tab });
-        if (p.server) query.set("server", p.server);
-        await openProfile(p.id, query.toString(), true);
-      }
+      if (p) await refreshProfile();
       else await loadFeed(false);
       const failed = p ? !!state.profile?.error : !!state.error;
       refresh.failures = failed ? refresh.failures + 1 : 0;

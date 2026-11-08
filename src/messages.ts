@@ -1,5 +1,6 @@
 namespace Fedi {
   let messageVersion = 0;
+  let viewportWidth = 0, unobscuredHeight = 0;
   const messageDrafts = new Map<string, string>();
   export function clearMessageDrafts(): void {
     messageDrafts.clear();
@@ -11,6 +12,17 @@ namespace Fedi {
     const thread = document.getElementById("message-thread");
     const atBottom =
       thread && thread.scrollHeight - thread.scrollTop - thread.clientHeight < 2;
+    const { innerWidth, innerHeight } = window;
+    const composing = document.activeElement?.id === "message-body";
+    // Some browsers shrink the layout viewport as well as the visual viewport.
+    unobscuredHeight = composing && innerWidth === viewportWidth
+      ? Math.max(unobscuredHeight, innerHeight)
+      : innerHeight;
+    viewportWidth = innerWidth;
+    document.body.classList.toggle(
+      "conversation-keyboard-open",
+      composing && viewport.scale === 1 && unobscuredHeight - viewport.height > 120,
+    );
     // iOS resizes/pans the visual viewport when the keyboard opens.
     document.documentElement.style.setProperty(
       "--conversation-height", `${viewport.height}px`,
@@ -49,7 +61,7 @@ namespace Fedi {
           .join("") ||
         '<p class="muted conversation-empty">Your conversations will appear here.</p>'
       }${state.conversationNext ? action("more-conversations", "Load older conversations", "", "button subtle") : ""}</div>
-      <section class="conversation-detail">${current ? `<div class="conversation-header"><a href="#messages" class="icon-button conversation-back" aria-label="All conversations">${icon("back")}</a>${current.accounts[0] ? avatar(current.accounts[0], true) : ""}<div><strong>${escapeHTML(current.accounts.map((a) => a.name).join(", "))}</strong><small>${escapeHTML(current.accounts.map((a) => "@" + a.acct).join(", "))}</small></div></div><div class="message-thread" id="message-thread">${current.messages.map((m) => `<div class="message ${m.author.id === (state.session?.account.id || "you") ? "outgoing" : ""}"><div class="message-bubble prose">${m.warning ? `<details><summary>${escapeHTML(m.warning)}</summary>${markdown(m.markdown)}</details>` : markdown(m.markdown)}</div><small>${escapeHTML(m.author.name)} · ${new Date(m.created).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</small></div>`).join("")}${feedback}</div><div class="message-composer"><form id="message-form" data-id="${escapeHTML(current.id)}"><label class="sr-only" for="message-body">Message</label><textarea id="message-body" name="body" rows="1" required placeholder="Write a thoughtful little something…">${escapeHTML(messageDrafts.get(current.id) || "")}</textarea><button type="submit" class="button primary" aria-label="Send message">${icon("send")}</button></form><p class="dm-note">${icon("lock")} Private mentions, not end-to-end encrypted.</p></div>` : emptyState("A conversation starts with hello", "Choose a conversation or reach out to someone new.", action("new-message", "Write a message", "", "button subtle"))}</section></div>
+      <section class="conversation-detail">${current ? `<div class="conversation-header"><a href="#messages" class="icon-button conversation-back" aria-label="All conversations">${icon("back")}</a>${current.accounts[0] ? avatar(current.accounts[0], true) : ""}<div><strong>${escapeHTML(current.accounts.map((a) => a.name).join(", "))}</strong><small>${escapeHTML(current.accounts.map((a) => "@" + a.acct).join(", "))}</small></div></div><div class="message-thread" id="message-thread">${current.messages.map((m) => `<div class="message ${m.author.id === (state.session?.account.id || "you") ? "outgoing" : ""}"><div class="message-bubble prose">${m.warning ? `<details><summary>${escapeHTML(m.warning)}</summary>${markdown(m.markdown)}</details>` : markdown(m.markdown)}</div><small>${escapeHTML(m.author.name)} · ${new Date(m.created).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</small></div>`).join("")}${feedback}</div><div class="message-composer"><form id="message-form" data-id="${escapeHTML(current.id)}"><label class="sr-only" for="message-body">Message</label><textarea id="message-body" name="body" rows="1" required placeholder="Write a message…">${escapeHTML(messageDrafts.get(current.id) || "")}</textarea><button type="submit" class="button primary" aria-label="Send message">${icon("send")}</button></form><p class="dm-note">${icon("lock")} Private mentions, not end-to-end encrypted.</p></div>` : emptyState("A conversation starts with hello", "Choose a conversation or reach out to someone new.", action("new-message", "Write a message", "", "button subtle"))}</section></div>
       ${current ? "" : feedback}`;
   }
   export async function loadConversations(append = false): Promise<void> {

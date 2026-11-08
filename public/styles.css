@@ -2541,6 +2541,9 @@ summary {
     padding-left: 0;
     padding-right: 0;
   }
+  .conversation-open.conversation-keyboard-open .mobile-nav {
+    display: none;
+  }
   .conversation-header > div {
     flex: 1;
   }

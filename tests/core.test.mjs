@@ -1100,12 +1100,14 @@ test("opening and leaving a chat switches the viewport layout and keeps its draf
   assert.equal(classes.get("conversation-open"), false);
 });
 
-test("keyboard viewport changes keep the latest message visible without interrupting history reading", () => {
+test("the DM keyboard hides navigation and keeps the latest message visible without interrupting history reading", () => {
   const { app, context } = setup();
   const { get } = elements(context);
-  context.window = {};
+  context.window = { innerWidth: 390, innerHeight: 800 };
   assert.doesNotThrow(() => app.updateConversationViewport());
 
+  const classes = new Map();
+  context.document.body.classList.toggle = (name, enabled) => classes.set(name, enabled);
   const thread = get("message-thread");
   thread.scrollHeight = 1800;
   thread.clientHeight = 600;
@@ -1121,21 +1123,32 @@ test("keyboard viewport changes keep the latest message visible without interrup
       if (name === "--conversation-height") thread.clientHeight = parseFloat(value) - 200;
     },
   };
-  context.window.visualViewport = { height: 500, offsetTop: 40 };
+  context.window.visualViewport = { height: 800, offsetTop: 0, scale: 1 };
   app.updateConversationViewport();
+  context.document.activeElement = { id: "message-body" };
+  app.updateConversationViewport();
+  assert.equal(classes.get("conversation-keyboard-open"), false);
+
+  Object.assign(context.window.visualViewport, { height: 500, offsetTop: 40 });
+  app.updateConversationViewport();
+  assert.equal(classes.get("conversation-keyboard-open"), true);
   assert.equal(styles.get("--conversation-height"), "500px");
   assert.equal(styles.get("--conversation-top"), "40px");
   assert.equal(thread.scrollTop, 1500);
 
   // Reading an earlier message must not jump to the newest one on a resize.
   thread.scrollTop = 100;
-  context.window.visualViewport = { height: 450, offsetTop: 60 };
+  context.window.innerHeight = 450;
+  Object.assign(context.window.visualViewport, { height: 450, offsetTop: 60 });
   app.updateConversationViewport();
+  assert.equal(classes.get("conversation-keyboard-open"), true);
   assert.equal(thread.scrollTop, 100);
 
   thread.scrollTop = thread.scrollHeight;
-  context.window.visualViewport = { height: 800, offsetTop: 0 };
+  context.window.innerHeight = 800;
+  Object.assign(context.window.visualViewport, { height: 800, offsetTop: 0 });
   app.updateConversationViewport();
+  assert.equal(classes.get("conversation-keyboard-open"), false);
   assert.equal(styles.get("--conversation-top"), "0px");
   assert.equal(thread.scrollTop, 1200);
 });

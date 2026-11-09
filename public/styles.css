@@ -2534,10 +2534,12 @@ summary {
     justify-content: center;
     color: var(--muted);
   }
-  .mobile-nav > .mobile-sign-in {
-    color: var(--accent);
-    font-size: 12px;
-    font-weight: 650;
+  .mobile-nav > .mobile-sign-in::before {
+    content: "";
+    width: 31px;
+    height: 31px;
+    border-radius: 50%;
+    background: var(--accent);
   }
   .mobile-nav > a[aria-current="page"] {
     color: var(--ink);

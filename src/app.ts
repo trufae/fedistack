@@ -180,7 +180,7 @@ namespace Fedi {
       ["drafts", "edit", "Your writing"],
       ["messages", "mail", "Messages"],
     ];
-    return `<nav class="mobile-nav" aria-label="Mobile navigation">${items.map(([view, symbol, name]) => `<a href="#${view}"${view === "drafts" ? ' class="mobile-write"' : ""} aria-label="${name}"${current === view ? ' aria-current="page"' : ""}>${icon(symbol)}</a>`).join("")}${state.session ? `<a href="#profile" aria-label="Your profile"${current === "profile" && state.profile?.owner ? ' aria-current="page"' : ""}>${avatar(me, false, "mobile-account")}</a>` : action("connect", "Sign in", "", "mobile-sign-in")}</nav>`;
+    return `<nav class="mobile-nav" aria-label="Mobile navigation">${items.map(([view, symbol, name]) => `<a href="#${view}"${view === "drafts" ? ' class="mobile-write"' : ""} aria-label="${name}"${current === view ? ' aria-current="page"' : ""}>${icon(symbol)}</a>`).join("")}${state.session ? `<a href="#profile" aria-label="Your profile"${current === "profile" && state.profile?.owner ? ' aria-current="page"' : ""}>${avatar(me, false, "mobile-account")}</a>` : '<button type="button" data-action="connect" class="mobile-sign-in" aria-label="Sign in" title="Sign in" aria-haspopup="dialog"></button>'}</nav>`;
   }
 
   export function render(): void {

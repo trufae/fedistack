@@ -6,6 +6,7 @@ namespace Fedi {
     if (!post) return;
     if (state.readerServer) return;
     if (kind === "repost" && !canRepost(post)) return;
+    rememberDiscoveryLikes([post]);
     const api = state.api;
     if (api) {
       const updated = await api.toggle(post, kind);
@@ -29,6 +30,7 @@ namespace Fedi {
       } else post.saved = !post.saved;
       saveDemo();
     }
+    rememberDiscoveryLikes([post]);
     const profile = state.profile;
     if (profile?.owner && ((profile.tab === "likes" && kind === "like") || (profile.tab === "saved" && kind === "save") || (profile.tab === "boosts" && kind === "repost")))
       profile.posts = profile.posts.filter((p) => kind === "like" ? p.liked : kind === "save" ? p.saved : p.reposted);
@@ -226,6 +228,12 @@ namespace Fedi {
         break;
       case "refresh":
         await loadFeed();
+        break;
+      case "discovery-timeline":
+        if (id === "local" || id === "federated") {
+          discovery.timeline = id;
+          render();
+        }
         break;
       case "load-more":
         await loadFeed(true);

@@ -3127,9 +3127,14 @@ test("Discover browses public articles and topics while Home keeps its own feed 
   assert.ok(discover.indexOf('id="discover-search"') < discover.indexOf("<h2>Topics"));
   assert.match(discover, /href="#discover\?q=%23Caf%C3%A9" class="topic">#Café/);
   assert.match(discover, /class="discover-article" href="#read\/guide"/);
-  assert.match(discover, /href="#discover\?timeline=local"/);
-  assert.doesNotMatch(discover, /Private draft|Hidden article|Reply article|A short public note|Personal timelines/);
-  assert.equal((discover.match(/%23Caf%C3%A9/g) || []).length, 1);
+  assert.match(discover, /data-action="discovery-timeline" data-id="local"/);
+  assert.match(discover, /href="#discover\?timeline=federated"/);
+  assert.match(discover, /A short public note/);
+  assert.doesNotMatch(discover, /Private draft|Hidden article|Reply article|Personal timelines/);
+  assert.ok(discover.indexOf('aria-label="People to follow"') < discover.indexOf('<h2>Public timelines'));
+  app.discovery.timeline = "local";
+  app.render();
+  assert.match(get("app").innerHTML, /href="#discover\?timeline=local"/);
 
   const local = await renderRoute("#discover?timeline=local");
   assert.match(local, /<h2>Local timeline<\/h2>/);
@@ -3138,7 +3143,200 @@ test("Discover browses public articles and topics while Home keeps its own feed 
 
   const returned = await renderRoute("#home");
   assert.match(returned, /data-id="post" class="selected" aria-pressed="true"/);
-  assert.deepEqual(requests, ["home", "federated", "local", "home"]);
+  assert.deepEqual(requests, ["home", "federated", "local", "local", "home"]);
+});
+
+function discoveryFixture() {
+  const fixture = feedFixture();
+  const { app, context, requests } = fixture;
+  app.state.session = { server: "https://discovery.example", account: { ...app.demoMe, id: "me" }, remember: true };
+  Object.assign(app.state.api, {
+    server: app.state.session.server,
+    favourites: async () => ({ posts: [] }),
+    followedTags: async () => ({ tags: [] }),
+    get: async () => [],
+    suggestions: async () => [],
+  });
+  vm.runInContext("Math.random = () => 0.5", context);
+  context.location.hash = "#discover";
+  const sources = {};
+  app.state.api.timeline = async (timeline, next) => {
+    requests.push({ timeline, next });
+    return { posts: sources[timeline] || [] };
+  };
+  return { ...fixture, sources };
+}
+
+test("Discover samples likes, followed hashtags and lists, and prefers matching articles from varied sources", async () => {
+  const { app, post, sources, requests } = discoveryFixture();
+  const author = (id, server) => ({ ...app.demoAuthors[0], id, acct: `${id}@${server}` });
+  const liked = post("liked", { liked: true, tags: ["rust"] });
+  const privateList = post("list-signal", { visibility: "private", tags: ["gardens"] });
+  sources.federated = [post("unrelated", { tags: [], author: author("stranger", "other.example") })];
+  sources.local = [];
+  sources["list:friends"] = [privateList];
+  sources["tag:rust"] = [post("rust-match", { tags: ["rust"], author: author("coder", "code.example") })];
+  sources["tag:space"] = [post("space-match", { tags: ["space"], author: author("sky", "space.example") })];
+  sources["tag:gardens"] = [post("garden-match", { tags: ["gardens"], author: author("grower", "plants.example") })];
+  let preferences = 0;
+  app.state.api.favourites = async () => { preferences++; return { posts: [liked] }; };
+  app.state.api.followedTags = async () => ({ tags: [{ name: "space" }] });
+  app.state.api.get = async () => [{ id: "friends", title: "Friends" }];
+  await app.route();
+  assert.deepEqual(new Set(app.discoveryArticles().map((p) => p.id)), new Set(["rust-match", "space-match", "garden-match"]));
+  assert.deepEqual(new Set(requests.map((r) => r.timeline)), new Set(["local", "federated", "list:friends", "tag:rust", "tag:space", "tag:gardens"]));
+  assert.equal(app.state.posts.some((p) => p.id === "list-signal" || p.id === "liked"), false);
+  await app.loadFeed();
+  assert.equal(preferences, 1);
+  app.clearFeedCache();
+  await app.loadFeed();
+  assert.equal(preferences, 2);
+});
+
+test("Discover excludes liked, private, warned, own, muted and reply posts, deduplicates boosts and keeps languages", async () => {
+  const { app, get, post, sources } = discoveryFixture();
+  app.state.discoveryLanguages = ["en"];
+  const good = post("good", { language: "en-US", title: "Fresh reading", url: "https://writer.example/p/1" });
+  const liked = post("liked", { liked: true, language: "en" });
+  sources.federated = [good, { ...good, id: "boost", boostedBy: "Another reader" }, liked,
+    post("past-like", { language: "en", title: "Previously liked" }),
+    post("private", { visibility: "private", language: "en" }),
+    post("warned", { warning: "Spoilers", language: "en" }),
+    post("reply", { isReply: true, language: "en" }),
+    post("mine", { author: app.state.session.account, language: "en" }),
+    post("muted", { author: { ...good.author, id: "muted" }, language: "en" }),
+    post("spanish", { language: "es" })];
+  sources.local = [good];
+  app.state.relationships.set("muted", { id: "muted", muting: true });
+  app.state.api.favourites = async () => ({ posts: [post("past-like", { liked: true })] });
+  await app.route();
+  assert.deepEqual(Array.from(app.state.posts, (p) => p.id), ["good"]);
+  assert.doesNotMatch(get("app").innerHTML, /Previously liked/);
+  const history = app.undiscoveredPosts([{ ...liked, liked: false }]);
+  assert.equal(history.length, 0);
+  assert.match(app.discoveryTimelineView(), /Fresh reading/);
+  app.discovery.timeline = "local";
+  assert.match(app.discoveryTimelineView(), /Fresh reading/);
+});
+
+test("Discover refreshes on return and rotates unseen articles before repeating older selections", async () => {
+  const { app, context, post, sources, requests } = discoveryFixture();
+  sources.federated = Array.from({ length: 9 }, (_, i) => post(`fresh-${i}`, { tags: [] }));
+  await app.route();
+  const first = Array.from(app.discoveryArticles(), (p) => p.id);
+  const repeatedRender = Array.from(app.discoveryArticles(), (p) => p.id);
+  assert.deepEqual(repeatedRender, first);
+  context.location.hash = "#home";
+  await app.route();
+  context.location.hash = "#discover";
+  await app.route();
+  const second = Array.from(app.discoveryArticles(), (p) => p.id);
+  assert.ok(second.every((id) => !first.includes(id)));
+  await app.loadFeed();
+  const third = Array.from(app.discoveryArticles(), (p) => p.id);
+  assert.ok(third.every((id) => ![...first, ...second].includes(id)));
+  await app.loadFeed();
+  assert.deepEqual(Array.from(app.discoveryArticles(), (p) => p.id), first);
+  assert.equal(requests.filter((r) => r.timeline === "federated").length, 4);
+  const reloaded = discoveryFixture();
+  reloaded.context.localStorage = context.localStorage;
+  reloaded.sources.federated = sources.federated;
+  await reloaded.app.route();
+  assert.deepEqual(Array.from(reloaded.app.discoveryArticles(), (p) => p.id), second);
+});
+
+test("Discover bounds page scans and continues older public pages on the next visit", async () => {
+  const { app, post, requests } = discoveryFixture();
+  app.state.api.timeline = async (timeline, next) => {
+    requests.push({ timeline, next });
+    if (timeline === "local") return { posts: [] };
+    const page = Number(next || 0);
+    return { posts: [post(`page-${page}`, { kind: page >= 3 ? "article" : "post", tags: [] })], next: String(page + 1) };
+  };
+  await app.route();
+  assert.deepEqual(requests.filter((r) => r.timeline === "federated").map((r) => r.next), [undefined, "1", "2"]);
+  await app.loadFeed();
+  assert.deepEqual(requests.filter((r) => r.timeline === "federated").map((r) => r.next), [undefined, "1", "2", undefined, "3", "4"]);
+  assert.deepEqual(new Set(app.discoveryArticles().map((p) => p.id)), new Set(["page-3", "page-4"]));
+});
+
+test("duplicate boosted articles do not stop discovery before scanning the next page", async () => {
+  const { app, post, requests } = discoveryFixture();
+  app.state.api.timeline = async (timeline, next) => {
+    requests.push({ timeline, next });
+    if (timeline === "local") return { posts: [] };
+    return next ? { posts: [post("second"), post("third")] }
+      : { posts: [post("first"), post("first"), post("first")], next: "older" };
+  };
+  await app.route();
+  assert.deepEqual(new Set(app.discoveryArticles().map((p) => p.id)), new Set(["first", "second", "third"]));
+  assert.equal(requests.filter((r) => r.timeline === "federated").length, 2);
+});
+
+test("Discover tolerates unavailable interests and a failed timeline, retaining its own reading on refresh failure", async () => {
+  const { app, context, get, post } = discoveryFixture();
+  const unavailable = async () => { throw new Error("Unavailable"); };
+  app.state.api.favourites = unavailable;
+  app.state.api.followedTags = unavailable;
+  app.state.api.get = unavailable;
+  app.state.api.timeline = async (timeline) => {
+    if (timeline === "local") throw new Error("Local timeline unavailable");
+    return { posts: [post("readable", { title: "Readable discovery" })] };
+  };
+  await app.route();
+  assert.equal(app.state.error, "");
+  assert.match(get("app").innerHTML, /Readable discovery/);
+  app.discovery.timeline = "local";
+  assert.match(app.discoveryTimelineView(), /Local timeline unavailable/);
+  context.location.hash = "#home";
+  app.state.api.timeline = async () => ({ posts: [post("home-only", { title: "Home only", visibility: "private" })] });
+  await app.route();
+  app.state.api.timeline = unavailable;
+  context.location.hash = "#discover";
+  await app.route();
+  assert.match(get("app").innerHTML, /Readable discovery/);
+  assert.doesNotMatch(get("app").innerHTML, /Home only/);
+  assert.equal(app.state.loading, false);
+  assert.match(app.state.error, /Could not refresh/);
+});
+
+test("navigating away cancels Discover and late responses cannot replace Home or contaminate its history", async () => {
+  const { app, context, post } = discoveryFixture();
+  const pending = [];
+  app.state.api.timeline = (timeline, next, signal) => timeline === "home"
+    ? Promise.resolve({ posts: [post("home")] })
+    : new Promise((resolve) => pending.push({ resolve, signal }));
+  const discoveryLoad = app.route();
+  context.location.hash = "#home";
+  await app.route();
+  assert.ok(pending.every(({ signal }) => signal.aborted));
+  pending.forEach(({ resolve }) => resolve({ posts: [post("late", { liked: true })] }));
+  await discoveryLoad;
+  assert.equal(app.state.view, "home");
+  assert.deepEqual(Array.from(app.state.posts, (p) => p.id), ["home"]);
+  assert.equal(app.undiscoveredPosts([post("late")]).length, 1);
+});
+
+test("discovery likes survive reload, stay account scoped, and a successful like disappears from the preview immediately", async () => {
+  const { app, context, get, click } = await postActionFixture();
+  app.state.session = { server: "https://example.org", account: { ...app.demoMe, id: "me" }, remember: true };
+  app.state.api = { server: "https://example.org", toggle: async (post) => ({ ...post, liked: true }) };
+  const post = { ...app.demoPosts[0], id: "new-article", title: "Like this article" };
+  app.state.posts = [post];
+  app.state.view = "discover";
+  app.state.exploring = true;
+  app.discovery.federated = ["id:new-article"];
+  click("new-article", "like");
+  await new Promise(setImmediate);
+  assert.doesNotMatch(get("app").innerHTML, /Like this article/);
+  const reloaded = setup(undefined, { localStorage: context.localStorage }).app;
+  reloaded.state.session = app.state.session;
+  assert.equal(reloaded.undiscoveredPosts([{ ...post, liked: false }]).length, 0);
+  reloaded.state.session = { ...app.state.session, account: { ...app.demoMe, id: "other" } };
+  assert.equal(reloaded.undiscoveredPosts([{ ...post, liked: false }]).length, 1);
+  click("local", "discovery-timeline");
+  await new Promise(setImmediate);
+  assert.match(get("app").innerHTML, /href="#discover\?timeline=local"/);
 });
 
 test("federated browsing and new searches show remote notes before optional filtering", async () => {

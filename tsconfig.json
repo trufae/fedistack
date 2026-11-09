@@ -18,6 +18,7 @@
     "src/demo.ts",
     "src/ui.ts",
     "src/app.ts",
+    "src/discovery.ts",
     "src/profile.ts",
     "src/editor.ts",
     "src/editor-input.ts",

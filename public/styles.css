@@ -485,6 +485,16 @@ main {
   padding-top: 24px;
   padding-bottom: 8px;
 }
+.home-intro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.home-intro .feed-controls {
+  padding: 0;
+}
 .timeline-tabs {
   display: flex;
   gap: 26px;
@@ -846,15 +856,39 @@ main {
   margin: 16px 34px;
   overflow-wrap: anywhere;
 }
-.discover-section > h2 {
+.discover-section > h2,
+.discover-section > .section-heading h2 {
   font-size: 17px;
   margin-bottom: 8px;
 }
 .discover-section > .muted {
   font-size: 13px;
 }
+.discover-section > .section-heading {
+  margin-bottom: 8px;
+}
+.discover-section > .section-heading h2 {
+  margin-bottom: 0;
+}
+.discover-section > .section-heading button {
+  flex-shrink: 0;
+}
 .discover-section .error-panel {
   margin-inline: 0;
+}
+.discover-timelines .timeline-tabs {
+  padding: 0;
+}
+.discover-timelines .timeline-tabs button,
+.discover-section > .section-heading button,
+.discover-more {
+  min-height: 44px;
+}
+.discover-timelines .post-card {
+  margin-inline: 0;
+}
+.discover-timelines > .muted {
+  margin-top: 12px;
 }
 .discover-links {
   display: flex;
@@ -2729,6 +2763,9 @@ summary {
   .feed-controls {
     padding: 8px 22px 1px;
   }
+  .home-intro .filter-pills button {
+    padding-inline: 8px;
+  }
   .post-card {
     margin: 0 22px;
     padding-top: 23px;
@@ -2782,12 +2819,6 @@ summary {
     align-items: center;
     justify-content: center;
     color: var(--muted);
-  }
-  .mobile-nav a:has(> span:not(.avatar)) {
-    flex-direction: column;
-    gap: 2px;
-    font-size: 11px;
-    line-height: 1.2;
   }
   .mobile-nav > .mobile-sign-in::before {
     content: "";

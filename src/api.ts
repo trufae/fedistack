@@ -188,7 +188,7 @@ namespace Fedi {
             response.status,
           );
         }
-        if (method !== "GET" && /^\/api\/v[12]\/(?:statuses(?:\/|$)|bookmarks(?:\/|$)|filters(?:\/|$)|lists(?:\/|$)|accounts\/[^/]+\/(?:follow|unfollow|block|unblock|mute|unmute)$)/.test(url.pathname))
+        if (method !== "GET" && /^\/api\/v[12]\/(?:statuses(?:\/|$)|bookmarks(?:\/|$)|filters(?:\/|$)|lists(?:\/|$)|tags(?:\/|$)|accounts\/[^/]+\/(?:follow|unfollow|block|unblock|mute|unmute)$)/.test(url.pathname))
           clearFeedCache();
         const data =
           response.status === 204 || response.status === 206
@@ -540,8 +540,8 @@ namespace Fedi {
         `/api/v1/accounts/${encodeURIComponent(id)}/${unfollow ? "unfollow" : "follow"}`,
       );
     }
-    async followedTags(next?: string): Promise<{ tags: FollowedTag[]; next?: string }> {
-      const result = await this.request<FollowedTag[]>(next || "/api/v1/followed_tags?limit=100");
+    async followedTags(next?: string, signal?: AbortSignal): Promise<{ tags: FollowedTag[]; next?: string }> {
+      const result = await this.request<FollowedTag[]>(next || "/api/v1/followed_tags?limit=100", "GET", undefined, undefined, signal);
       return { tags: result.data, next: result.next };
     }
     async followTag(name: string, unfollow = false): Promise<FollowedTag> {

@@ -304,6 +304,9 @@ namespace Fedi {
       case "own-more":
         await loadOwnPosts(true);
         break;
+      case "save-draft":
+        saveCurrentDraft();
+        break;
       case "preview":
         captureDraft();
         flushDraft();

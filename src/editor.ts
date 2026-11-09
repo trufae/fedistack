@@ -57,7 +57,7 @@ namespace Fedi {
       return `This publication is ${count.toLocaleString()} characters. Your server allows ${capabilities.maxChars.toLocaleString()}. Shorten it or export it for a server with a higher limit.`;
     return "";
   }
-  function draftStatus(d: Draft): string {
+  function draftSaveControls(d: Draft): string {
     const stored = getDrafts().find((saved) => saved.id === d.id);
     const saved = stored && JSON.stringify(stored) === JSON.stringify(d);
     const status = saved
@@ -65,7 +65,7 @@ namespace Fedi {
       : d.title || d.body || d.subtitle || d.media?.length
         ? "pending"
         : "empty";
-    return `<div class="draft-save-state"><span class="draft-badge">${d.editingId ? "Editing published writing · unsent changes" : "Draft · unpublished"}</span><span id="save-status" role="status" aria-live="polite" data-state="${status}">${saved ? savedLabel(d.updated) : status === "empty" ? "Not saved yet · start writing" : "Unsaved changes"}</span>${state.session ? `<span id="server-save-status" role="status" aria-live="polite">${escapeHTML(serverDraftLabel(d))}</span>` : ""}</div>`;
+    return `<div class="draft-save-controls"><button type="button" class="button subtle small-button" data-action="save-draft" title="Save draft (⌘/Ctrl+S)">Save draft</button><span id="save-status" role="status" aria-live="polite" data-state="${status}">${saved ? "Saved" : status === "empty" ? "" : "Unsaved"}</span></div>`;
   }
   function publicationSettings(d: Draft): string {
     return `<details class="publishing-options"><summary>${d.kind === "post" ? "Audience & content warning" : "Publication settings"} ${icon("down")}</summary><div><label>Who can read this?${d.editingId ? " (unchanged when editing)" : ""}<select id="draft-visibility" ${d.editingId ? "disabled" : ""}><option value="public" ${d.visibility === "public" ? "selected" : ""}>Everyone · public</option><option value="unlisted" ${d.visibility === "unlisted" ? "selected" : ""}>Unlisted · visible by link</option><option value="private" ${d.visibility === "private" ? "selected" : ""}>Followers only</option></select></label><label>Content warning (optional)<input id="draft-warning" value="${escapeHTML(d.warning)}" placeholder="Let readers choose before opening"></label></div>${d.kind === "post" ? action("export-current", "Export draft .md", "", "text-button") : ""}</details>`;
@@ -80,8 +80,8 @@ namespace Fedi {
       <label class="sr-only" for="draft-body">Note text</label><textarea id="draft-body" class="note-input" placeholder="What's on your mind?" spellcheck="true">${escapeHTML(d.body)}</textarea>
       ${draftMediaView(d)}
       ${publicationSettings(d)}
-      <div class="note-save-row">${draftStatus(d)}<span id="character-count"></span></div>
-      <footer class="note-footer"><a class="text-button" href="#drafts">Save & close</a>${scheduleButton(d)}<button id="note-publish" class="button primary" data-action="publish-note" ${(!d.body.trim() && !d.media?.length) || mediaBusy(d) ? "disabled" : ""}>${d.editingId ? "Update note" : "Note"}</button></footer>
+      <div class="note-save-row"><span id="character-count"></span></div>
+      <footer class="note-footer">${draftSaveControls(d)}${scheduleButton(d)}<button id="note-publish" class="button primary" data-action="publish-note" ${(!d.body.trim() && !d.media?.length) || mediaBusy(d) ? "disabled" : ""}>${d.editingId ? "Update note" : "Note"}</button></footer>
     </section>`;
   }
   export function editorView(): string {
@@ -104,7 +104,7 @@ namespace Fedi {
       ["divider", "―", "Divider"],
     ];
     const toolbar = `<div class="editor-toolbar" role="toolbar" aria-label="Markdown formatting">${tools.map(([name, label, title]) => `<button type="button" data-action="format" data-id="${name}" title="${title}" aria-label="${title}">${label}</button>`).join("")}<button type="button" data-action="upload-media" title="Upload images" aria-label="Upload images">${icon("image")}+</button><button type="button" data-action="markdown-help" title="Markdown help" aria-label="Markdown help">?</button></div>`;
-    return `<header class="page-top editor-top"><a class="text-button" href="#drafts">${icon("back")} Your writing</a><div>${draftStatus(d)}${state.preview ? '<button class="zen-preview-edit text-button" data-action="preview">Edit</button>' : ""}<button class="button subtle small-button zen-toggle" data-action="focus" aria-label="${state.focus ? "Exit" : "Enter"} Zen mode" aria-pressed="${state.focus}" title="Zen mode (⌘/Ctrl+Shift+F)">${icon("expand")}<span data-zen-label>${state.focus ? "Exit Zen" : "Zen mode"}</span></button></div></header>
+    return `<header class="page-top editor-top"><a class="text-button" href="#drafts">${icon("back")} Your writing</a><div>${draftSaveControls(d)}${state.preview ? '<button class="zen-preview-edit text-button" data-action="preview">Edit</button>' : ""}<button class="button subtle small-button zen-toggle" data-action="focus" aria-label="${state.focus ? "Exit" : "Enter"} Zen mode" aria-pressed="${state.focus}" title="Zen mode (⌘/Ctrl+Shift+F)">${icon("expand")}<span data-zen-label>${state.focus ? "Exit Zen" : "Zen mode"}</span></button></div></header>
       <div class="editor-controls"><span class="editor-kind">Article</span><div><button class="button subtle" data-action="preview">${icon(state.preview ? "edit" : "eye")} ${state.preview ? "Edit" : "Preview"}</button>${scheduleButton(d)}<button class="button primary" data-action="publish">${d.editingId ? "Update article" : state.session ? "Publish" : "Publish in demo"} ${icon("arrow")}</button></div></div>
       <div class="editor-paper">${
         state.preview
@@ -114,12 +114,9 @@ namespace Fedi {
       ${draftMediaView(d)}
       <div class="editor-bottom"><span id="word-count"></span><span id="character-count"></span>${action("export-current", `${icon("download")} Export .md`, "", "text-button")}</div>
       ${publicationSettings(d)}
-      <p class="editor-note">${state.session ? `${state.session.maxChars.toLocaleString()} characters per publication · ${state.session.format === "text/markdown" ? "Native Markdown" : state.session.format === "text/html" ? "Rich text" : "Plain text only"}` : "Not signed in · drafts save on this device · sign in to publish to the fediverse."}</p>`;
+      <p class="editor-note">${state.session ? `${state.session.maxChars.toLocaleString()} characters per publication · ${state.session.format === "text/markdown" ? "Native Markdown" : state.session.format === "text/html" ? "Rich text" : "Plain text only"}` : "Sign in to publish to the fediverse."}</p>`;
   }
 
-  function savedLabel(date: string): string {
-    return `Saved at ${new Date(date).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })} · this device`;
-  }
   function saveIndicator(
     value: string,
     status: "saved" | "pending" | "empty" | "error",
@@ -192,7 +189,7 @@ namespace Fedi {
     if (!d || publishing) return;
     d.updated = new Date().toISOString();
     if (resetKeys) d.publishKey = d.scheduleKey = d.scheduleTime = undefined;
-    saveIndicator("Unsaved changes · saving…", "pending");
+    saveIndicator("Saving…", "pending");
     clearTimeout(saveTimer);
     saveTimer = setTimeout(flushDraft, 300);
     updateEditorMeta();
@@ -207,14 +204,23 @@ namespace Fedi {
     saveIndicator(
       success
         ? empty
-          ? "Not saved yet · draft is empty"
-          : savedLabel(d.updated)
+          ? ""
+          : "Saved"
         : "Save failed · export a copy",
       success ? (empty ? "empty" : "saved") : "error",
     );
-    const serverStatus = document.getElementById("server-save-status");
-    if (serverStatus) serverStatus.textContent = serverDraftLabel(d);
     return success;
+  }
+  export function saveCurrentDraft(): void {
+    const d = state.draft;
+    if (!d || publishing) return;
+    captureDraft();
+    if (!flushDraft()) {
+      toast("Could not save your draft. Export a copy to keep your writing.");
+      return;
+    }
+    toast(d.title.trim() || d.subtitle.trim() || d.body.trim() || d.media?.length
+      ? "Draft saved." : "Nothing to save yet.");
   }
   export function insertEditorText(text: string, start?: number, end?: number): void {
     if (publishing) return;
@@ -738,7 +744,7 @@ namespace Fedi {
     const key = event.key.toLowerCase();
     if (key === "s") {
       event.preventDefault();
-      flushDraft();
+      saveCurrentDraft();
       return;
     }
     if (

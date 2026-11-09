@@ -1301,16 +1301,17 @@ test("DM recipient checks also catch mentions adjacent to punctuation", async ()
   }
 });
 
-test("the editor distinguishes an unpublished draft, a saved draft, and a failed save", () => {
+test("the editor uses concise save feedback and still reports failed saves", () => {
   const { app, context } = setup();
   const { get } = elements(context);
   app.state.draft = { ...article };
-  assert.match(app.editorView(), /Draft · unpublished/);
-  assert.match(app.editorView(), /Unsaved changes/);
+  assert.match(app.editorView(), /data-action="save-draft"[^>]*>Save draft<\/button>/);
+  assert.match(app.editorView(), />Unsaved<\/span>/);
+  assert.doesNotMatch(app.editorView(), /Draft · unpublished|Saved at|this device|server-save-status/);
   get("save-status");
   assert.equal(app.flushDraft(), true);
   assert.equal(get("save-status").dataset.state, "saved");
-  assert.match(get("save-status").textContent, /Saved at .*this device/);
+  assert.equal(get("save-status").textContent, "Saved");
   assert.match(app.editorView(), /data-state="saved"/);
   context.localStorage.setItem = () => {
     throw new Error("Quota exceeded");
@@ -1319,6 +1320,53 @@ test("the editor distinguishes an unpublished draft, a saved draft, and a failed
   assert.equal(app.flushDraft(), false);
   assert.equal(get("save-status").dataset.state, "error");
   assert.match(get("save-status").textContent, /Save failed/);
+});
+
+for (const kind of ["article", "post"]) test(`Save draft captures the latest ${kind} text without publishing or leaving the editor`, async () => {
+  const { app, context, get, click } = await postActionFixture();
+  app.state.view = "editor";
+  app.state.draft = { ...article, kind };
+  get("draft-body").value = "Latest text, before the autosave timer runs.";
+  get("save-status");
+  const output = app.editorView();
+  assert.match(output, /data-action="save-draft"[^>]*>Save draft<\/button>/);
+  assert.doesNotMatch(output, /Draft · unpublished|Save &amp; close|Save & close|server-save-status/);
+  click("", "save-draft");
+  await new Promise(setImmediate);
+  assert.equal(app.getDrafts()[0].body, get("draft-body").value);
+  assert.equal(get("save-status").textContent, "Saved");
+  assert.equal(get("toast").textContent, "Draft saved.");
+  assert.equal(app.state.view, "editor");
+  assert.equal(context.location.hash, "");
+
+  context.localStorage.setItem = () => { throw new Error("Quota exceeded"); };
+  get("draft-body").value = "Changes that cannot be saved";
+  click("", "save-draft");
+  await new Promise(setImmediate);
+  assert.equal(get("save-status").dataset.state, "error");
+  assert.match(get("toast").textContent, /Could not save/);
+  assert.equal(app.state.draft.body, "Changes that cannot be saved");
+  assert.equal(app.getDrafts()[0].body, "Latest text, before the autosave timer runs.");
+});
+
+test("the save shortcut captures current input and does not create empty drafts", () => {
+  const { app, context } = setup();
+  const { get } = elements(context);
+  app.state.view = "editor";
+  app.state.draft = app.newDraft();
+  get("draft-body").value = "";
+  get("save-status");
+  get("modal").open = false;
+  let prevented = 0;
+  const save = () => app.editorKeydown({ key: "s", ctrlKey: true, preventDefault() { prevented++; } });
+  save();
+  assert.equal(app.getDrafts().length, 0);
+  assert.equal(get("toast").textContent, "Nothing to save yet.");
+  get("draft-body").value = "Text captured by the keyboard shortcut";
+  save();
+  assert.equal(app.getDrafts()[0].body, get("draft-body").value);
+  assert.equal(get("toast").textContent, "Draft saved.");
+  assert.equal(prevented, 2);
 });
 
 test("publication management controls are visible only on the current user's publications", () => {

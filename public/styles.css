@@ -1182,46 +1182,22 @@ footer p {
   padding-top: 13px;
   padding-bottom: 13px;
 }
-.draft-save-state #save-status,
-.draft-save-state #server-save-status {
-  font-size: 11px;
-  color: var(--muted);
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  overflow-wrap: anywhere;
-}
-.draft-save-state {
+.draft-save-controls {
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
+  align-items: center;
+  gap: 10px;
 }
-.draft-badge {
-  font-size: 10px;
-  font-weight: 650;
-  color: var(--ink);
-  background: var(--wash);
-  border: 1px solid var(--line);
-  padding: 2px 7px;
-  border-radius: 4px;
+.draft-save-controls .button {
+  flex-shrink: 0;
 }
-.draft-save-state #save-status::before {
-  content: "";
-  height: 6px;
-  width: 6px;
-  border-radius: 50%;
-  background: currentColor;
+#save-status {
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
 }
-.draft-save-state #save-status[data-state="saved"] {
-  color: var(--saved);
-}
-.draft-save-state #save-status[data-state="pending"],
-.draft-save-state #save-status[data-state="error"] {
+#save-status[data-state="error"] {
   color: var(--accent);
-}
-.draft-save-state #save-status[data-state="error"] {
   font-weight: 650;
 }
 .post-owner-actions .delete-link,
@@ -2548,10 +2524,6 @@ summary {
   .editor-top .zen-toggle {
     flex-shrink: 0;
   }
-  .draft-save-state #save-status,
-  .draft-save-state #server-save-status {
-    font-size: 9px;
-  }
   .editor-controls {
     padding: 17px 20px;
   }
@@ -2926,10 +2898,7 @@ label.language-add select {
 }
 .note-save-row {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  justify-content: flex-end;
   padding: 14px 0;
 }
 .note-save-row > span {
@@ -2941,7 +2910,10 @@ label.language-add select {
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
-  gap: 20px;
+  gap: 12px;
+}
+.note-footer .draft-save-controls {
+  margin-right: auto;
 }
 #note-publish {
   min-width: 88px;
@@ -2990,7 +2962,7 @@ body.zen-mode {
   min-width: 0;
   gap: 10px;
 }
-.zen-mode .draft-save-state {
+.zen-mode .draft-save-controls {
   min-width: 0;
   margin-right: auto;
 }
@@ -3002,12 +2974,8 @@ body.zen-mode {
   text-overflow: ellipsis;
   font-size: 11px;
 }
-.zen-mode #save-status::before {
-  display: inline-block;
-  margin-right: 6px;
-  vertical-align: middle;
-}
-.zen-mode .zen-toggle {
+.zen-mode .zen-toggle,
+.zen-mode .draft-save-controls .button {
   flex-shrink: 0;
   padding: 5px 9px;
   font-size: 11px;
@@ -3063,7 +3031,6 @@ body.zen-mode {
   overflow-y: auto;
 }
 .zen-mode .editor-top > a,
-.zen-mode .draft-badge,
 .zen-mode .editor-controls,
 .zen-mode .article-heading,
 .zen-mode .article-preview-heading,

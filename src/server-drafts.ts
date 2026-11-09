@@ -119,12 +119,9 @@ namespace Fedi {
       ? "Saved on server" : "Server save pending";
   }
 
-  function showSyncState(key: string, id: string): void {
+  function showSyncState(key: string): void {
     if (draftKey() !== key || typeof document === "undefined") return;
-    if (state.draft?.id === id) {
-      const element = document.getElementById("server-save-status");
-      if (element) element.textContent = serverDraftLabel(state.draft);
-    } else if (state.view === "drafts") render();
+    if (state.view === "drafts") render();
   }
 
   export function queueDraftSync(d: Draft): void {
@@ -151,7 +148,7 @@ namespace Fedi {
       syncErrors.set(`${key}:${id}`, (error as Error).message);
       throw error;
     } finally {
-      showSyncState(key, id);
+      showSyncState(key);
     }
   }
 

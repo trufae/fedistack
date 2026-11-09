@@ -1,12 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
-  <title id="title">Fedistack</title>
-  <desc id="desc">A cream pancake stack with a butter pat cut out in orange negative space, on a warm orange tile.</desc>
-  <rect width="64" height="64" rx="14" fill="#c9512c"/>
-  <g fill="#fff6e8">
-    <path d="M10 37a22 7.5 0 0 0 44 0v4.5a22 7.5 0 0 1-44 0Z"/>
-    <path d="M10 30a22 7.5 0 0 0 44 0v4.5a22 7.5 0 0 1-44 0Z"/>
-    <path d="M10 23a22 7.5 0 0 0 44 0v4.5a22 7.5 0 0 1-44 0Z"/>
-    <ellipse cx="32" cy="23" rx="22" ry="7.5"/>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="128" height="128" viewBox="0 0 128 128">
+  <title>favicon.svg</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M28 0 L100 0 C115.464 0 128 12.536 128 28 L128 100 C128 115.464 115.464 128 100 128 L28 128 C12.536 128 0 115.464 0 100 L0 28 C0 12.536 12.536 0 28 0 Z" fill="#c9512c"/>
+    <path d="M20 74 C20 82.284 39.699 89 64 89 C88.301 89 108 82.284 108 74 L108 83 C108 91.284 88.301 98 64 98 C39.699 98 20 91.284 20 83 Z" fill="#fff6e8"/>
+    <path d="M20 60 C20 68.284 39.699 75 64 75 C88.301 75 108 68.284 108 60 L108 69 C108 77.284 88.301 84 64 84 C39.699 84 20 77.284 20 69 Z" fill="#fff6e8"/>
+    <path d="M20 46 C20 37.716 39.699 31 64 31 C88.301 31 108 37.716 108 46 L108 55 C108 63.284 88.301 70 64 70 C39.699 70 20 63.284 20 55 Z" fill="#fff6e8"/>
+    <path d="M80.677 39.982 L90.765 38.865 C91.485 38.785 92.211 38.966 92.783 39.369 C93.355 39.772 93.726 40.364 93.815 41.014 L94.577 46.613 C94.665 47.263 94.464 47.918 94.017 48.434 C93.57 48.95 92.915 49.284 92.194 49.364 L82.106 50.481 C80.606 50.647 79.24 49.685 79.056 48.332 L78.294 42.733 C78.11 41.379 79.176 40.148 80.677 39.982 Z" fill="#c9512c"/>
   </g>
-  <rect x="28" y="20" width="8" height="6" rx="1.4" fill="#c9512c" transform="rotate(-7 32 23)"/>
 </svg>

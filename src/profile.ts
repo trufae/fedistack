@@ -366,19 +366,81 @@ namespace Fedi {
       ${!p.loading && p.next ? `<div class="load-more">${action("profile-more", people ? "Load more people" : "Load older activity", "", "button subtle")}</div>` : ""}`;
   }
 
+  const dismissedSuggestions = new Map<string, Set<string>>();
+  function suggestionDismissals(): { key: string; ids: Set<string> } {
+    const key = `dismissed-suggestions:${JSON.stringify([state.session?.server || "demo", state.session?.account.id || "you"])}`;
+    let ids = dismissedSuggestions.get(key);
+    if (!ids) {
+      const saved = readStore<unknown>(key, []);
+      ids = new Set(Array.isArray(saved) ? saved.filter((id): id is string => typeof id === "string") : []);
+      dismissedSuggestions.set(key, ids);
+    }
+    return { key, ids };
+  }
+  export function dismissSuggestion(id: string): void {
+    const { key, ids } = suggestionDismissals();
+    ids.add(id);
+    writeStore(key, [...ids]);
+    render();
+  }
   export function suggestedAccounts(): Account[] {
     if (state.readerServer) return [];
+    const { ids } = suggestionDismissals();
     const candidates = state.session ? [...state.suggestions, ...state.posts.map((p) => p.author)] : demoAuthors;
     return [...new Map(candidates.map((a) => [a.id, a])).values()].filter((a) => {
       const r = state.relationships.get(a.id);
-      return a.id !== (state.session?.account.id || demoMe.id) &&
+      return !ids.has(a.id) && a.id !== (state.session?.account.id || demoMe.id) &&
         (state.session ? !!r && !r.following && !r.requested && !r.blocking && !r.blocked_by && !r.muting : !demoState.follows.includes(a.id));
-    }).slice(0, 3);
+    });
+  }
+  function suggestionPerson(account: Account, card: boolean, key: string): string {
+    const subtitle = account.publication || `@${account.acct}`;
+    return `<li class="${card ? "suggestion-card" : "suggestion-row"}">
+      ${profileAvatar(account, false, `${key}:${account.id}`)}
+      <div class="suggestion-identity"><a class="author-link" href="#${escapeHTML(profilePath(account.id))}" title="${escapeHTML(account.name)}">${escapeHTML(account.name)}</a><p title="${escapeHTML(subtitle)}">${escapeHTML(subtitle)}</p></div>
+      ${followButton(account)}
+      <button type="button" class="suggestion-dismiss" data-action="dismiss-suggestion" data-id="${escapeHTML(account.id)}" aria-label="Dismiss ${escapeHTML(account.name)}" title="Dismiss suggestion">${icon("close")}</button>
+    </li>`;
   }
   export function suggestionsView(inline = false): string {
     const accounts = suggestedAccounts();
     if (!accounts.length) return "";
-    return `<section class="${inline ? "feed-suggestions" : "rail-section"}" aria-label="People to follow"><div class="section-heading"><h3>People to follow</h3>${icon("users")}</div>${inline ? '<p class="muted">A few more voices for your reading room.</p>' : ""}${accounts.map((a) => accountRow(a, inline ? "feed-suggested" : "rail-suggested")).join("")}</section>`;
+    const heading = '<div class="section-heading"><h3>People to follow</h3><a class="suggestions-see-all" href="#people">See all</a></div>';
+    if (!inline) return `<section class="rail-section" aria-label="People to follow">${heading}${accounts.slice(0, 3).map((a) => accountRow(a, "rail-suggested")).join("")}</section>`;
+    const key = "feed-suggested";
+    return `<section class="feed-suggestions" aria-label="People to follow">${heading}
+      <div class="suggestion-carousel">
+        <button type="button" class="suggestion-arrow previous" data-action="suggestion-previous" data-id="${key}" aria-label="Previous suggestions" aria-controls="${key}" disabled>${icon("chevron")}</button>
+        <ul class="suggestion-track" id="${key}" tabindex="0" aria-label="Suggested people">${accounts.map((a) => suggestionPerson(a, true, key)).join("")}</ul>
+        <button type="button" class="suggestion-arrow next" data-action="suggestion-next" data-id="${key}" aria-label="Next suggestions" aria-controls="${key}">${icon("chevron")}</button>
+      </div></section>`;
+  }
+  export function peopleView(): string {
+    const accounts = suggestedAccounts();
+    return `<header class="people-heading"><a class="text-button" href="#discover">${icon("back")} Discover</a><h1>People to follow</h1></header>
+      ${accounts.length ? `<ul class="suggestion-list" aria-label="People to follow">${accounts.map((a) => suggestionPerson(a, false, "people")).join("")}</ul>` : state.loading
+        ? '<div class="loading" role="status">Finding people to follow…</div>'
+        : emptyState("You’re all caught up", "Explore Discover to find more people and writing.", '<a class="button subtle" href="#discover">Explore Discover</a>')}`;
+  }
+  export function setupSuggestionCarousels(scrolls: Map<string, number>): void {
+    document.getElementById("app")!.querySelectorAll<HTMLElement>(".suggestion-track").forEach((track) => {
+      track.scrollLeft = scrolls.get(track.id) || 0;
+      track.addEventListener("scroll", updateSuggestionArrows, { passive: true });
+    });
+    updateSuggestionArrows();
+  }
+  export function updateSuggestionArrows(): void {
+    document.getElementById("app")!.querySelectorAll<HTMLElement>(".suggestion-track").forEach((track) => {
+      track.parentElement!.querySelector<HTMLButtonElement>(".previous")!.disabled = track.scrollLeft <= 1;
+      track.parentElement!.querySelector<HTMLButtonElement>(".next")!.disabled = track.scrollLeft + track.clientWidth >= track.scrollWidth - 5;
+    });
+  }
+  export function scrollSuggestions(id: string, direction: number): void {
+    const track = document.getElementById(id);
+    if (!track) return;
+    const card = track.querySelector<HTMLElement>(".suggestion-card");
+    const step = card ? card.offsetWidth + 8 : track.clientWidth;
+    track.scrollBy({ left: direction * step, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   }
   let suggestionRequest: { api: API; promise: Promise<void> } | undefined;
   let suggestionRetry: { api: API; at: number } | undefined;
@@ -397,7 +459,7 @@ namespace Fedi {
         state.suggestions = accounts;
         state.suggestionsLoaded = true;
         suggestionRetry = { api, at: Date.now() + 300000 };
-        if (["home", "discover"].includes(state.view)) render();
+        if (["home", "discover", "people"].includes(state.view)) render();
       } catch (error) {
         if (state.api === api) {
           state.suggestionsLoaded = false;

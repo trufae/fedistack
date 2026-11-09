@@ -146,7 +146,7 @@ namespace Fedi {
   }
 
   function sidebar(): string {
-    const current = state.view === "editor" ? "drafts" : state.view === "bookmarks" ? "home" : state.view;
+    const current = state.view === "editor" ? "drafts" : state.view === "bookmarks" ? "home" : state.view === "people" ? "discover" : state.view;
     const me = state.session?.account || demoMe;
     const items = [
       ["home", "home", "Home"],
@@ -165,14 +165,14 @@ namespace Fedi {
 
   function rightRail(): string {
     return `<aside class="right-rail"><form class="search-box" id="search-form">${icon("search")}<input name="query" aria-label="Search publications and people" placeholder="Search your corner of the world" value="${escapeHTML(state.query)}"><button type="submit" class="sr-only">Search</button></form>
-      ${suggestionsView()}
+      ${state.view === "people" ? "" : suggestionsView()}
       <section class="rail-section"><h3>Follow your curiosity</h3><div class="topics">${["Technology", "Culture", "Design", "Nature", "Life", "Writing"].map((t) => action("topic", t, t, "topic")).join("")}</div></section>
       <section class="little-note">${icon("globe")}<p>Your words. Your community.<br><strong>Your corner of the fediverse.</strong></p></section>
       <footer>Fedistack <span>·</span> Made for the open web<br><a href="#settings">About & settings</a>${!state.session && !state.readerServer ? "<p>Demo stories and people are fictional.</p>" : ""}</footer></aside>`;
   }
 
   function mobileNav(): string {
-    const current = state.view === "editor" ? "drafts" : state.view === "bookmarks" ? "home" : state.view;
+    const current = state.view === "editor" ? "drafts" : state.view === "bookmarks" ? "home" : state.view === "people" ? "discover" : state.view;
     const me = state.session?.account || demoMe;
     const items = [
       ["home", "home", "Home"],
@@ -184,6 +184,8 @@ namespace Fedi {
   }
 
   export function render(): void {
+    const app = document.getElementById("app")!;
+    const suggestionScrolls = new Map(Array.from(app.querySelectorAll<HTMLElement>(".suggestion-track"), (track) => [track.id, track.scrollLeft]));
     const languagePicker = document.activeElement?.closest(".language-picker");
     const languageFocus = languagePicker ? document.activeElement?.id : "";
     const languageSelect = languagePicker?.querySelector("select")?.id;
@@ -212,11 +214,14 @@ namespace Fedi {
                 ? settingsView()
                 : state.view === "profile"
                   ? profileView()
-                  : feedView();
+                  : state.view === "people"
+                    ? peopleView()
+                    : feedView();
     renderHTML(
       document.getElementById("app")!,
       `<div class="layout">${sidebar()}${!state.session ? action("connect", "Sign in", "", "button primary desktop-sign-in") : ""}<main id="main" tabindex="-1">${content}</main>${rightRail()}</div>${mobileNav()}`,
     );
+    setupSuggestionCarousels(suggestionScrolls);
     if (languageFocus) {
       const target = document.getElementById(languageFocus) ||
         document.getElementById(languageSelect || "");
@@ -226,7 +231,7 @@ namespace Fedi {
     }
     if (state.view === "editor") updateEditorMeta();
     updateEditorViewport();
-    document.title = `${state.view === "reader" && state.reading ? state.reading.title || (state.reading.kind === "article" ? "Article" : "Note") : state.view === "editor" ? (state.draft?.kind === "post" ? "New note" : state.draft?.title) || "New draft" : state.view === "profile" ? state.profile?.account?.name || "Profile" : "Your reading room"} — Fedistack`;
+    document.title = `${state.view === "reader" && state.reading ? state.reading.title || (state.reading.kind === "article" ? "Article" : "Note") : state.view === "editor" ? (state.draft?.kind === "post" ? "New note" : state.draft?.title) || "New draft" : state.view === "profile" ? state.profile?.account?.name || "Profile" : state.view === "people" ? "People to follow" : "Your reading room"} — Fedistack`;
   }
 
   function normalizeDiscoveryLanguages(value: unknown): string[] {
@@ -641,6 +646,7 @@ namespace Fedi {
       [
         "home",
         "discover",
+        "people",
         "bookmarks",
         "drafts",
         "messages",
@@ -649,6 +655,17 @@ namespace Fedi {
         ? page
         : "home"
     ) as View;
+    if (state.view === "people") {
+      const api = state.api;
+      state.loading = !!api && !state.suggestionsLoaded;
+      render();
+      await loadSuggestions();
+      if (state.view === "people" && state.api === api) {
+        state.loading = false;
+        render();
+      }
+      return;
+    }
     if (state.view === "messages") {
       state.conversation = id;
       await loadConversations();

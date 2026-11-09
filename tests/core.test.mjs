@@ -4183,6 +4183,60 @@ test("recommendations filter followed, requested, muted, blocked and own account
   context.location.hash = "#settings";
 });
 
+test("See all loads every eligible suggestion and following or dismissing updates the list", async () => {
+  const ids = ["one", "two", "three", "four", "five"];
+  const { app, context, get, click } = await profileFixture(async (url) => {
+    const path = new URL(url).pathname;
+    if (path.endsWith("/suggestions")) return Response.json(ids.map((id) => ({ account: profileAccount(id) })));
+    if (path.endsWith("/follow")) return Response.json({ id: "one", following: true });
+    if (path.endsWith("/relationships")) return Response.json(ids.map((id) => ({ id, following: false })));
+    throw new Error(`Unexpected request: ${path}`);
+  });
+  context.location.hash = "#people";
+  await app.route();
+  assert.equal(app.state.view, "people");
+  assert.equal(app.state.loading, false);
+  assert.equal(context.document.title, "People to follow — Fedistack");
+  assert.deepEqual(Array.from(app.suggestedAccounts(), (a) => a.id), ids);
+  assert.equal((get("app").innerHTML.match(/class="suggestion-row"/g) || []).length, 5);
+  assert.doesNotMatch(get("app").innerHTML, /class="suggestion-card"/);
+  assert.match(app.suggestionsView(true), /href="#people">See all/);
+  assert.equal((app.suggestionsView(true).match(/class="suggestion-card"/g) || []).length, 5);
+  assert.equal((app.suggestionsView().match(/class="recommended"/g) || []).length, 3);
+  assert.doesNotMatch(app.suggestionsView(), /suggestion-card|suggestion-carousel/);
+  assert.match(app.suggestionsView(), /href="#people">See all/);
+
+  click("one", "follow");
+  await new Promise(setImmediate);
+  assert.deepEqual(Array.from(app.suggestedAccounts(), (a) => a.id), ids.slice(1));
+  click("two", "dismiss-suggestion");
+  await new Promise(setImmediate);
+  assert.deepEqual(Array.from(app.suggestedAccounts(), (a) => a.id), ids.slice(2));
+  assert.equal(app.state.view, "people");
+  assert.doesNotMatch(app.peopleView(), /data-id="(?:one|two)"/);
+});
+
+test("suggestion dismissals survive reload and remain scoped to their server and account", () => {
+  const localStorage = storage();
+  const { app, context } = setup(undefined, { localStorage });
+  elements(context);
+  const account = { ...app.demoAuthors[1], id: "new" };
+  app.state.session = { server: "https://one.example", account: { ...app.demoMe, id: "me" } };
+  app.state.suggestions = [account];
+  app.state.relationships.set(account.id, { id: account.id, following: false });
+  app.dismissSuggestion(account.id);
+  assert.equal(app.suggestedAccounts().length, 0);
+  const { app: reloaded } = setup(undefined, { localStorage });
+  reloaded.state.session = app.state.session;
+  reloaded.state.suggestions = [account];
+  reloaded.state.relationships.set(account.id, { id: account.id, following: false });
+  assert.equal(reloaded.suggestedAccounts().length, 0);
+  reloaded.state.session = { server: "https://two.example", account: { id: "me" } };
+  assert.equal(reloaded.suggestedAccounts().length, 1);
+  reloaded.state.session = { server: "https://one.example", account: { id: "other" } };
+  assert.equal(reloaded.suggestedAccounts().length, 1);
+});
+
 test("unavailable suggestions fall back to v1 only for unsupported endpoints and never block reading", async () => {
   const calls = [];
   const { app } = setup(async (url) => {

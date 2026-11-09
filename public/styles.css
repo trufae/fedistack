@@ -2155,16 +2155,13 @@ summary {
   height: 44px;
   font-size: 16px;
 }
-.profile-people .author-link,
-.feed-suggestions .author-link {
+.profile-people .author-link {
   font-size: 14px;
 }
-.profile-people p,
-.feed-suggestions .recommended p {
+.profile-people p {
   font-size: 12px;
 }
-.profile-people .follow,
-.feed-suggestions .recommended .follow {
+.profile-people .follow {
   min-height: 44px;
   padding: 8px 12px;
   font-size: 12px;
@@ -2176,23 +2173,180 @@ summary {
   overflow: hidden;
 }
 .feed-suggestions {
-  margin: 24px 34px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 20px;
-  background: var(--wash);
+  margin: 28px 0;
+  padding: 22px 0 24px;
+  border-block: 1px solid var(--line);
 }
 .feed-suggestions .section-heading {
-  margin-bottom: 6px;
+  margin: 0 34px 18px;
 }
 .feed-suggestions h3 {
-  font: 22px Georgia, serif;
+  font: 700 20px/1.25 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: -0.4px;
 }
-.feed-suggestions > .muted {
-  font-size: 12px;
+.suggestions-see-all {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 600;
 }
-.feed-suggestions .recommended:last-child {
-  margin-bottom: 0;
+.suggestions-see-all:hover {
+  text-decoration: underline;
+}
+.suggestion-carousel {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) 30px;
+  align-items: center;
+}
+.suggestion-track {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline: 4px;
+  scrollbar-width: none;
+  list-style: none;
+  margin: 0;
+  padding: 4px 4px 8px;
+}
+.suggestion-track::-webkit-scrollbar {
+  display: none;
+}
+.suggestion-track:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.suggestion-card {
+  position: relative;
+  display: flex;
+  flex: 0 0 176px;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  min-height: 246px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--paper);
+  box-shadow: 0 3px 5px #0000000c;
+  scroll-snap-align: start;
+}
+.suggestion-card .avatar {
+  width: 100px;
+  height: 100px;
+  font-size: 32px;
+}
+.suggestion-identity {
+  min-width: 0;
+}
+.suggestion-card .suggestion-identity {
+  width: 100%;
+  margin: 12px 0 24px;
+  text-align: center;
+}
+.suggestion-identity .author-link {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  font-weight: 600;
+  text-align: inherit;
+}
+.suggestion-identity p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 2px;
+}
+.suggestion-card .follow,
+.suggestion-row .follow {
+  flex-shrink: 0;
+  min-height: 40px;
+  padding: 8px 14px;
+  border-radius: 9px;
+  border: 1px solid #ffffff20;
+  background: #ff5b00;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+}
+.suggestion-card .follow {
+  width: 100%;
+  margin-top: auto;
+}
+.suggestion-card .follow:hover,
+.suggestion-row .follow:hover {
+  background: #e95200;
+}
+.suggestion-dismiss,
+.suggestion-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  width: 32px;
+  height: 40px;
+  border-radius: 6px;
+}
+.suggestion-card .suggestion-dismiss {
+  position: absolute;
+  top: 7px;
+  right: 5px;
+  width: 28px;
+  height: 28px;
+}
+.suggestion-dismiss .icon {
+  width: 20px;
+  height: 20px;
+}
+.suggestion-arrow {
+  width: 30px;
+  color: var(--muted);
+}
+.suggestion-arrow.previous .icon {
+  transform: rotate(180deg);
+}
+.suggestion-arrow:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+.suggestion-dismiss:hover,
+.suggestion-arrow:not(:disabled):hover {
+  color: var(--ink);
+  background: var(--wash);
+}
+.people-heading {
+  padding: 26px 34px 16px;
+}
+.people-heading h1 {
+  margin-top: 16px;
+  font: 700 26px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: -0.6px;
+}
+.suggestion-list {
+  list-style: none;
+  margin: 0;
+  padding: 8px 34px 32px;
+}
+.suggestion-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+}
+.suggestion-row .avatar {
+  width: 44px;
+  height: 44px;
+  font-size: 16px;
+}
+.suggestion-row .suggestion-identity {
+  flex: 1;
+}
+.suggestion-row .suggestion-dismiss {
+  flex-shrink: 0;
 }
 .version-badge,
 .profile-badge {
@@ -2228,20 +2382,29 @@ summary {
   .profile-counts {
     gap: 4px 16px;
   }
-  .feed-suggestions {
-    margin-left: 20px;
-    margin-right: 20px;
+  .feed-suggestions .section-heading {
+    margin-left: 24px;
+    margin-right: 24px;
   }
   .profile-people,
   .profile-notice {
     padding-left: 20px;
     padding-right: 20px;
   }
-  .feed-suggestions {
-    padding: 16px;
+  .people-heading {
+    padding: 20px 20px 12px;
   }
-  .feed-suggestions .account-bio {
-    display: none;
+  .suggestion-list {
+    padding: 0 16px 24px;
+  }
+  .suggestion-row {
+    gap: 9px;
+  }
+  .suggestion-row .follow {
+    padding: 8px 11px;
+  }
+  .suggestion-row .suggestion-dismiss {
+    width: 28px;
   }
 }
 .publish-preview {

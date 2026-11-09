@@ -12,6 +12,7 @@ namespace Fedi {
   export type View =
     | "home"
     | "discover"
+    | "people"
     | "bookmarks"
     | "drafts"
     | "editor"

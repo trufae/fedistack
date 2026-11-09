@@ -242,6 +242,13 @@ namespace Fedi {
       case "follow":
         await toggleFollow(id);
         break;
+      case "dismiss-suggestion":
+        dismissSuggestion(id);
+        break;
+      case "suggestion-previous":
+      case "suggestion-next":
+        scrollSuggestions(id, name === "suggestion-next" ? 1 : -1);
+        break;
       case "profile":
         navigate(profilePath(id));
         break;
@@ -515,6 +522,7 @@ namespace Fedi {
     window.visualViewport?.addEventListener("resize", updateEditorViewport);
     window.visualViewport?.addEventListener("scroll", updateEditorViewport);
     window.addEventListener("resize", updateEditorViewport);
+    window.addEventListener("resize", updateSuggestionArrows);
     document.addEventListener("focusin", () => { updateEditorTyping(); updateEditorViewport(); });
     document.addEventListener("focusout", () => { setTimeout(updateEditorViewport, 0); });
     document.addEventListener("selectionchange", updateEditorTyping);

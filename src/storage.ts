@@ -67,8 +67,9 @@ namespace Fedi {
   }
   export function feedCacheKey(timeline: Timeline): string | undefined {
     const session = state.session;
+    // Older mapped posts contain synthetic titles and link-card subtitles.
     return session && state.api?.server === session.server
-      ? JSON.stringify([session.server, session.account.id, timeline]) : undefined;
+      ? JSON.stringify([2, session.server, session.account.id, timeline]) : undefined;
   }
   function cachedFeeds(): FeedCache[] {
     const value = readStore<unknown>("feed-cache", [], true);

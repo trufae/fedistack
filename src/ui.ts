@@ -220,6 +220,9 @@ namespace Fedi {
   export function postCard(post: Post, featured = false): string {
     const hidden = post.warning && !state.revealed.has(post.id);
     const href = escapeHTML(postReadLink(post.id));
+    const excerpt = !hidden && post.kind === "article"
+      ? (post.subtitle || plainText(articleBody(post))).slice(0, featured ? 210 : 160)
+      : "";
     return `<article class="post-card ${featured ? "featured" : ""} ${post.kind}">
       ${post.boostedBy ? `<p class="boost-label">${icon("refresh")} Shared by ${escapeHTML(post.boostedBy)}</p>` : ""}
       ${post.replyTo ? `<p class="reply-context"><a href="${escapeHTML(postReadLink(post.replyTo))}">${icon("comment")} View conversation ${icon("arrow")}</a></p>` : ""}
@@ -230,7 +233,7 @@ namespace Fedi {
           : `
       ${featured && post.image ? `<a href="${href}" class="cover-link"><img class="feature-cover" data-image-key="cover:${escapeHTML(post.id)}" src="${escapeHTML(post.image)}" alt="${escapeHTML(post.imageAlt || "")}"></a>` : ""}
       <div class="post-content ${!featured && post.image ? "with-thumbnail" : ""}"><div>
-      ${post.kind === "article" ? `<a href="${href}" class="article-link"><h2>${escapeHTML(post.title)}</h2><p class="excerpt">${escapeHTML((post.subtitle || plainText(post.markdown)).slice(0, featured ? 210 : 160))}</p></a><div class="article-meta"><span>${escapeHTML(post.tags[0] || "Article")}</span><span>·</span><span>${readingTime(post.markdown)} min read</span></div>` : `<div class="prose note-body">${markdown(post.markdown)}</div>`}
+      ${post.kind === "article" ? `<a href="${href}" class="article-link">${post.title ? `<h2>${escapeHTML(post.title)}</h2>` : ""}${excerpt || !post.title ? `<p class="excerpt">${escapeHTML(excerpt || "Read article")}</p>` : ""}</a><div class="article-meta"><span>${escapeHTML(post.tags[0] || "Article")}</span><span>·</span><span>${readingTime(post.markdown)} min read</span></div>` : `<div class="prose note-body">${markdown(post.markdown)}</div>`}
       </div>${!featured && post.image ? `<a href="${href}"><img class="thumbnail" data-image-key="cover:${escapeHTML(post.id)}" src="${escapeHTML(post.image)}" alt="${escapeHTML(post.imageAlt || "")}" loading="lazy"></a>` : ""}</div>`
       }
       ${postActions(post)}</article>`;

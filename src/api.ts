@@ -687,12 +687,12 @@ namespace Fedi {
     const content = htmlToMarkdown(s.content),
       tags = (s.tags || []).map((t) => t.name);
     const card = s.card?.type === "link" && s.card.title ? s.card : undefined;
-    const heading = /^#\s+(.+)$/m.exec(content)?.[1];
-    const title = s.title || heading || card?.title || "";
-    // A link preview describes the linked page, not the length or kind of this post.
+    const heading = leadingHeading(content);
+    const title = s.title?.trim() || (heading ? plainText(heading[1]) : "");
+    // Link preview metadata belongs to the linked page.
     const article =
       s.object_type === "Article" ||
-      !!heading ||
+      !!title ||
       tags.some((t) => t.toLowerCase() === "article") ||
       plainText(content).length > 900;
     const media = s.media_attachments?.find((m) => m.type === "image");
@@ -703,10 +703,8 @@ namespace Fedi {
     return {
       id: s.id,
       author: mapAccount(s.account),
-      title: article
-        ? title || plainText(content).split("\n")[0].slice(0, 120)
-        : "",
-      subtitle: card?.description || "",
+      title,
+      subtitle: "",
       markdown: content,
       kind: article ? "article" : "post",
       created: s.created_at,

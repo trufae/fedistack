@@ -1092,7 +1092,7 @@ footer p {
 .reader > .eyebrow {
   color: var(--accent);
 }
-.reader h1 {
+.reader > h1 {
   overflow-wrap: anywhere;
   font-size: 43px;
   font-weight: 500;
@@ -1100,9 +1100,10 @@ footer p {
   margin: 19px 0 14px;
 }
 .reader-subtitle {
+  overflow-wrap: anywhere;
   font-family: Georgia, serif;
   color: var(--muted);
-  font-size: 20px;
+  font-size: clamp(16px, 3vw, 19px);
   line-height: 1.5;
   margin-bottom: 26px;
 }
@@ -2548,11 +2549,8 @@ summary {
   .reader {
     padding: 15px 24px 0;
   }
-  .reader h1 {
+  .reader > h1 {
     font-size: 37px;
-  }
-  .reader-subtitle {
-    font-size: 19px;
   }
   .reading-prose {
     font-size: 18px;

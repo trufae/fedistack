@@ -539,7 +539,11 @@ main {
   padding: 3px;
   border-radius: 6px;
 }
-.filter-pills button {
+.search-tags {
+  flex-wrap: wrap;
+}
+.filter-pills button,
+.search-tags a {
   font-size: 11px;
   padding: 5px 12px;
   border-radius: 4px;

@@ -2615,9 +2615,7 @@ test("hashtag subscriptions paginate, follow once, retain failed removals, and o
   assert.doesNotMatch(modal.innerHTML, /#café/);
   app.state.query = "old search";
   await app.interestAction("read-tag", "Nature");
-  assert.equal(app.state.timeline, "tag:Nature");
-  assert.equal(app.state.query, "");
-  assert.equal(context.location.hash, "discover");
+  assert.equal(context.location.hash, "discover?q=%23Nature");
   assert.equal(modal.open, false);
 });
 
@@ -3026,8 +3024,10 @@ test("federated browsing and new searches show remote notes before optional filt
   context.matchMedia = () => ({ matches: false, addEventListener() {} });
   context.FormData = class { constructor(form) { return new Map(form.fields); } };
   get("modal").addEventListener = () => {};
+  const route = app.route;
   app.route = async () => {};
   await app.boot();
+  app.route = route;
   const remote = post("remote-note", { kind: "post", title: "", markdown: "Remote note from another instance",
     author: { ...app.demoAuthors[0], id: "remote", acct: "writer@remote.example" } });
   app.state.api.timeline = async () => ({ posts: [post("local-article"), remote] });
@@ -3041,12 +3041,13 @@ test("federated browsing and new searches show remote notes before optional filt
   assert.match(get("app").innerHTML, /Remote note from another instance/);
   await click("filter", "article");
   assert.doesNotMatch(get("app").innerHTML, /Remote note from another instance/);
-  app.navigate = () => {};
   app.state.api.search = async () => ({ accounts: [], posts: [remote] });
   listeners.get("submit")({ target: { id: "discover-search", fields: [["query", "remote"]], dataset: {}, querySelector: () => null }, preventDefault() {} });
   await new Promise(setImmediate);
+  assert.equal(context.location.hash, "discover?q=remote");
+  context.location.hash = `#${context.location.hash}`;
+  await app.route();
   assert.equal(app.state.filter, "all");
-  await app.loadFeed();
   assert.match(get("app").innerHTML, /Remote note from another instance/);
 });
 
@@ -3321,7 +3322,7 @@ test("the Note composer keeps save and limit checks without article formatting o
   const { get } = elements(context);
   app.state.view = "editor";
   app.state.draft = app.newDraft("post");
-  app.state.session = { format: "text/plain", maxChars: 10 };
+  app.state.session = { account: app.demoMe, format: "text/plain", maxChars: 10 };
   const textarea = get("draft-body");
   textarea.value = "";
   textarea.id = "draft-body";
@@ -5234,20 +5235,30 @@ test("anonymous search omits authenticated resolution and pagination parameters"
   assert.equal(result.next, undefined);
 });
 
-test("exact hashtag searches read the tag timeline and keep older pages", async () => {
-  const { app, post, get, requests } = feedFixture();
+test("post hashtags open a prefilled search and paginate the exact tag timeline", async () => {
+  const { app, context, post, get, requests } = feedFixture();
   app.state.session = { account: app.demoMe, server: "https://example.org", token: "token" };
-  app.state.query = "#Café";
-  app.state.view = "discover";
-  app.state.filter = "all";
+  const markdown = "[#Café](https://remote.example/tags/caf%C3%A9) #cafe_tools `#code` [#docs](https://example.org/docs)";
+  const note = post("note", { kind: "post", markdown });
+  const card = app.postCard(note);
+  const [, href] = /href="([^"]+)">#Café<\/a>/.exec(card);
+  assert.equal(href, "#discover?q=%23Caf%C3%A9");
+  assert.match(card, /href="#discover\?q=%23cafe_tools">#cafe_tools<\/a>/);
+  assert.match(card, /<code>#code<\/code>/);
+  assert.match(card, /href="https:\/\/example\.org\/docs" target="_blank"[^>]*>#docs<\/a>/);
+  assert.match(app.markdown(markdown), /href="https:\/\/remote\.example\/tags\/caf%C3%A9"/);
   app.state.api.search = async () => { throw new Error("Hashtags must not depend on full-text search"); };
   app.state.api.timeline = async (timeline, next) => {
     requests.push({ timeline, next });
     return { posts: Array.from({ length: 10 }, (_, i) => post(`${next ? "old" : "new"}-${i}`)), next: next ? undefined : "older" };
   };
-  await app.loadFeed();
+  context.location.hash = href;
+  await app.route();
+  assert.equal(app.state.view, "discover");
+  assert.equal(app.state.filter, "all");
   assert.equal(app.state.error, "");
   assert.deepEqual(requests, [{ timeline: "tag:Café", next: undefined }]);
+  assert.match(get("app").innerHTML, /id="discover-search"[^\n]*value="#Café"/);
   assert.match(get("app").innerHTML, /Load more results/);
   await app.loadFeed(true);
   assert.equal(app.state.posts.length, 20);
@@ -5268,7 +5279,7 @@ test("search renders clickable tags and appends deduplicated people and posts", 
       hashtags: next ? ["rust", "rustlang"] : ["rust"], next: next ? undefined : "search-page-2" };
   };
   await app.loadFeed();
-  assert.match(get("app").innerHTML, /data-action="read-tag" data-id="rust"/);
+  assert.match(get("app").innerHTML, /href="#discover\?q=%23rust"[^>]*>#rust<\/a>/);
   assert.match(get("app").innerHTML, /Load more results/);
   await app.loadFeed(true);
   assert.deepEqual(cursors, [undefined, "search-page-2"]);

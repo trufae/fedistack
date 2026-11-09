@@ -209,10 +209,6 @@ input[type="checkbox"] {
   width: 29px;
   height: 29px;
 }
-.brand > span {
-  color: var(--accent);
-  margin-left: -5px;
-}
 .brand-block {
   min-width: 0;
 }

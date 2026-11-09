@@ -155,7 +155,7 @@ namespace Fedi {
       ["messages", "mail", "Messages"],
       ["settings", "settings", "Settings"],
     ];
-    return `<aside class="sidebar"><div class="brand-block"><a class="brand" href="#home"><img src="assets/favicon.svg" alt="">fedistack<span>•</span></a><p class="brand-date">${new Date().toLocaleDateString("en", { weekday: "long", month: "long", day: "numeric" })}</p></div>
+    return `<aside class="sidebar"><div class="brand-block"><a class="brand" href="#home"><img src="assets/favicon.svg" alt="">fedistack</a><p class="brand-date">${new Date().toLocaleDateString("en", { weekday: "long", month: "long", day: "numeric" })}</p></div>
       ${state.session ? action("disconnect", "Sign out", "", "button subtle account-action") : action("connect", "Sign in", "", "button primary account-action mobile-account-action")}
       <nav aria-label="Main navigation">${items.map(([view, symbol, name]) => `<a href="#${view}" class="nav-item ${state.view === view || (view === "drafts" && state.view === "editor") ? "active" : ""}" ${state.view === view ? 'aria-current="page"' : ""}>${icon(symbol)}<span>${name}</span>${view === "drafts" && getDrafts().length ? `<span class="nav-count">${getDrafts().length}</span>` : ""}${view === "messages" && state.conversations.some((c) => c.unread) ? '<span class="unread-dot"></span>' : ""}</a>`).join("")}</nav>
       <a href="#write" class="button primary write-button">${icon("edit")}<span>Write an article</span></a><a href="#note" class="button subtle note-button">${icon("comment")}<span>Note</span></a>

@@ -305,12 +305,16 @@ input[type="checkbox"] {
   min-height: 34px;
 }
 .account-action {
-  margin-top: 24px;
   min-height: 44px;
   flex-shrink: 0;
 }
-.mobile-account-action {
+.sidebar > .mobile-account-action {
   display: none;
+}
+.account-menu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 .desktop-sign-in {
   grid-column: 3;
@@ -478,7 +482,8 @@ main {
   margin-top: 11px;
 }
 .feed-intro {
-  padding-top: 28px;
+  padding-top: 24px;
+  padding-bottom: 8px;
 }
 .timeline-tabs {
   display: flex;
@@ -554,18 +559,6 @@ main {
   color: var(--ink);
   box-shadow: 0 1px 3px #0000000b;
   font-weight: 600;
-}
-.following-toggle {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 400;
-}
-.following-toggle input {
-  width: 13px;
-  height: 13px;
 }
 .post-card {
   margin: 0 34px;
@@ -787,13 +780,6 @@ main {
   align-items: center;
   flex-wrap: wrap;
 }
-.search-summary {
-  padding: 18px 34px 0;
-  font-size: 12px;
-  color: var(--muted);
-  display: flex;
-  justify-content: space-between;
-}
 .account-results {
   padding: 10px 34px;
   border-bottom: 1px solid var(--line);
@@ -841,9 +827,68 @@ main {
   outline-offset: 1px;
 }
 .discover-search {
-  margin: 15px 34px;
+  margin: 8px 34px 18px;
+  padding-right: 0;
+  min-height: 46px;
 }
 .discover-search input {
+  font-size: 14px;
+}
+.discover-search > button {
+  min-width: 44px;
+  min-height: 44px;
+  border: 0;
+}
+.discover-search > button .icon {
+  color: var(--accent);
+}
+.discover-section {
+  margin: 16px 34px;
+  overflow-wrap: anywhere;
+}
+.discover-section > h2 {
+  font-size: 17px;
+  margin-bottom: 8px;
+}
+.discover-section > .muted {
+  font-size: 13px;
+}
+.discover-section .error-panel {
+  margin-inline: 0;
+}
+.discover-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+.discover-links a,
+.discover-results > a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 13px;
+}
+.discover-links .topic {
+  color: var(--accent);
+  background: var(--wash);
+}
+.discover-article {
+  display: block;
+  margin-top: 6px;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--wash);
+}
+.discover-article:hover h3 {
+  color: var(--accent);
+}
+.discover-article h3 {
+  margin: 4px 0;
+  font-size: 22px;
+  line-height: 1.2;
+}
+.discover-article small {
+  color: var(--muted);
   font-size: 12px;
 }
 .text-button {
@@ -2526,6 +2571,10 @@ summary {
   .timeline-tabs {
     padding: 0 25px;
   }
+  .discover-search,
+  .discover-section {
+    margin-inline: 25px;
+  }
   .post-card {
     margin: 0 25px;
   }
@@ -2615,7 +2664,7 @@ summary {
   .sidebar {
     position: relative;
     height: auto;
-    padding: 20px 20px 13px;
+    padding: 6px 20px;
     flex-direction: row;
     align-items: center;
     justify-content: space-between;
@@ -2627,13 +2676,16 @@ summary {
     font-size: clamp(22px, 7vw, 28px);
   }
   .brand-date {
-    font-size: 10px;
+    display: none;
   }
-  .account-action {
-    margin-top: 0;
-  }
-  .mobile-account-action {
+  .sidebar > .mobile-account-action {
     display: inline-flex;
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .sidebar .mobile-account-action .avatar {
+    width: 31px;
+    height: 31px;
   }
   .desktop-sign-in {
     display: none;
@@ -2654,7 +2706,10 @@ summary {
     padding: 8px 22px 25px;
   }
   .feed-intro {
-    padding-top: 22px;
+    padding-block: 12px 6px;
+  }
+  .feed-intro h1 {
+    font-size: 31px;
   }
   .feed-lists {
     padding: 16px 22px;
@@ -2666,10 +2721,13 @@ summary {
     padding: 0 22px;
     gap: 26px;
   }
+  .timeline-tabs button,
+  .feed-controls button {
+    min-height: 44px;
+    min-width: 44px;
+  }
   .feed-controls {
-    padding: 18px 22px 1px;
-    flex-wrap: wrap;
-    gap: 12px;
+    padding: 8px 22px 1px;
   }
   .post-card {
     margin: 0 22px;
@@ -2724,6 +2782,12 @@ summary {
     align-items: center;
     justify-content: center;
     color: var(--muted);
+  }
+  .mobile-nav a:has(> span:not(.avatar)) {
+    flex-direction: column;
+    gap: 2px;
+    font-size: 11px;
+    line-height: 1.2;
   }
   .mobile-nav > .mobile-sign-in::before {
     content: "";
@@ -2905,15 +2969,12 @@ summary {
   .focus-mode #toast {
     bottom: 25px;
   }
-  .discover-search {
-    margin: 15px 22px;
+  .discover-search,
+  .discover-section {
+    margin-inline: 22px;
   }
   .error-panel {
     margin: 20px 22px;
-  }
-  .search-summary {
-    padding-left: 22px;
-    padding-right: 22px;
   }
   .account-results {
     padding: 0 22px;

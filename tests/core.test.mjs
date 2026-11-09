@@ -2741,11 +2741,13 @@ test("list management creates, renames, edits members, and requires confirmation
   assert.equal(app.state.lists.length, 2);
   assert.match(get("interest-error").textContent, /Cannot delete now/);
   rejectDelete = false;
-  app.state.timeline = "list:1";
+  app.state.view = "home";
+  app.state.homeTimeline = app.state.timeline = "list:1";
   app.state.next = "stale-list-page";
   await app.interestAction("delete-list-confirm", "");
   assert.deepEqual(Array.from(app.state.lists, (list) => list.id), ["2"]);
   assert.equal(app.state.timeline, "home");
+  assert.equal(app.state.homeTimeline, "home");
   assert.equal(app.state.next, undefined);
   assert.doesNotMatch(modal.innerHTML, /Best friends/);
   assert.equal(calls.some((call) => /\/accounts\/.*\/(?:unfollow|follow)$/.test(call.path)), false);
@@ -2859,7 +2861,7 @@ test("interest buttons, forms, and list selection are wired through application 
   app.loadSuggestions = async () => {};
   app.state.lists = [{ id: "1", title: "Friends" }];
   app.state.view = "home";
-  app.state.timeline = "home";
+  app.state.homeTimeline = app.state.timeline = "home";
   const clickTimeline = async (id) => {
     const button = { dataset: { action: "timeline", id }, disabled: false };
     listeners.get("click")({ target: { closest: () => button } });
@@ -2874,21 +2876,20 @@ test("interest buttons, forms, and list selection are wired through application 
   assert.deepEqual(timelines, ["list:1"]);
   assert.match(get("app").innerHTML, /data-id="lists" class="active"/);
   assert.match(get("app").innerHTML, /value="list:1" selected>Friends/);
-  await clickTimeline("local");
-  assert.deepEqual(timelines, ["list:1", "local"]);
-  assert.doesNotMatch(get("app").innerHTML, /id="list-select"/);
   listeners.get("change")({ target: { id: "list-select", value: "" } });
   await new Promise(setImmediate);
   assert.equal(app.state.timeline, "lists");
-  assert.deepEqual(timelines, ["list:1", "local"]);
+  await clickTimeline("home");
+  assert.deepEqual(timelines, ["list:1", "home"]);
+  assert.doesNotMatch(get("app").innerHTML, /id="list-select"/);
 });
 
-test("Saved is a Home tab that loads bookmarks and returns to the selected list or another timeline", async () => {
+test("Saved is a Home tab that loads bookmarks and returns to the selected list or Following", async () => {
   const { app, context, get, click } = await postActionFixture();
   app.state.session = { ...longServer, server: "https://example.org", token: "test", account: app.demoMe };
   app.state.api = new app.API("https://example.org", "test");
   app.state.filter = "all";
-  app.state.timeline = "list:friends";
+  app.state.homeTimeline = app.state.timeline = "list:friends";
   app.state.lists = [{ id: "friends", title: "Friends" }];
   app.loadSuggestions = async () => {};
   app.state.api.relationships = async () => [];
@@ -2925,10 +2926,10 @@ test("Saved is a Home tab that loads bookmarks and returns to the selected list 
   assert.equal(app.state.timeline, "list:friends");
   assert.match(get("app").innerHTML, /value="list:friends" selected>Friends/);
   await select("bookmarks");
-  await select("local");
+  await select("home");
   assert.equal(app.state.view, "home");
-  assert.equal(app.state.timeline, "local");
-  assert.deepEqual(timelines, ["bookmarks", "list:friends", "local"]);
+  assert.equal(app.state.timeline, "home");
+  assert.deepEqual(timelines, ["bookmarks", "list:friends", "home"]);
 });
 
 test("the Saved tab also opens bookmarked posts in the offline demo", async () => {
@@ -3095,6 +3096,51 @@ function feedFixture() {
   return { app, context, get, post, requests };
 }
 
+test("Discover browses public articles and topics while Home keeps its own feed and filter", async () => {
+  const { app, context, get, post, requests } = feedFixture();
+  const article = post("guide", { title: "A public guide", tags: ["Café", "café"] });
+  const note = post("note", { kind: "post", markdown: "A short public note", tags: ["Notes"] });
+  const hidden = [
+    post("private", { visibility: "private", title: "Private draft", tags: ["Private"] }),
+    post("warning", { warning: "CW", title: "Hidden article", tags: ["Hidden"] }),
+    post("reply", { replyTo: "guide", title: "Reply article", tags: ["Reply"] }),
+  ];
+  app.state.api.timeline = async (timeline) => {
+    requests.push(timeline);
+    return { posts: timeline === "federated" ? [note, ...hidden, article] : [note] };
+  };
+  const renderRoute = async (hash) => {
+    context.location.hash = hash;
+    await app.route();
+    return get("app").innerHTML;
+  };
+
+  const home = await renderRoute("#home");
+  assert.match(home, /<h1>Home<\/h1>/);
+  assert.match(home, /A short public note/);
+  assert.doesNotMatch(home, /Public timelines|id="discover-search"|Following only/);
+  app.setFeedFilter("post");
+  assert.equal(app.readStore("home-filter", "all"), "post");
+
+  const discover = await renderRoute("#discover");
+  assert.match(discover, /<h1>Discover<\/h1>/);
+  assert.ok(discover.indexOf('id="discover-search"') < discover.indexOf("<h2>Topics"));
+  assert.match(discover, /href="#discover\?q=%23Caf%C3%A9" class="topic">#Café/);
+  assert.match(discover, /class="discover-article" href="#read\/guide"/);
+  assert.match(discover, /href="#discover\?timeline=local"/);
+  assert.doesNotMatch(discover, /Private draft|Hidden article|Reply article|A short public note|Personal timelines/);
+  assert.equal((discover.match(/%23Caf%C3%A9/g) || []).length, 1);
+
+  const local = await renderRoute("#discover?timeline=local");
+  assert.match(local, /<h2>Local timeline<\/h2>/);
+  assert.match(local, /A short public note/);
+  assert.doesNotMatch(local, /Articles to explore|Personal timelines/);
+
+  const returned = await renderRoute("#home");
+  assert.match(returned, /data-id="post" class="selected" aria-pressed="true"/);
+  assert.deepEqual(requests, ["home", "federated", "local", "home"]);
+});
+
 test("federated browsing and new searches show remote notes before optional filtering", async () => {
   const { app, context, get, post } = feedFixture();
   const listeners = new Map();
@@ -3114,8 +3160,8 @@ test("federated browsing and new searches show remote notes before optional filt
     listeners.get("click")({ target: { closest: () => ({ dataset: { action, id }, disabled: false }) } });
     await new Promise(setImmediate);
   };
-  assert.equal(app.state.filter, "article");
-  await click("timeline", "federated");
+  context.location.hash = "#discover?timeline=federated";
+  await app.route();
   assert.equal(app.state.filter, "all");
   assert.match(get("app").innerHTML, /Remote note from another instance/);
   await click("filter", "article");
@@ -3132,6 +3178,7 @@ test("federated browsing and new searches show remote notes before optional filt
 
 test("sparse timelines scan past notes and duplicate boosts for ten new articles per load", async () => {
   const { app, get, post, requests } = feedFixture();
+  app.state.filter = "article";
   const articles = Array.from({ length: 20 }, (_, i) => post(`article-${i}`));
   const note = post("note", { kind: "post", markdown: "A short note" });
   const pages = [
@@ -3179,22 +3226,20 @@ test("automatic scanning is bounded and the next load resumes after the scanned 
   assert.equal(requests.length, 4);
 });
 
-test("scanning counts articles in any selected language that match the following filter", async () => {
+test("scanning counts articles in any selected language", async () => {
   const { app, post, requests } = feedFixture();
   app.state.view = "discover";
   app.state.discoveryLanguages = ["en", "es", "ca"];
-  app.state.followingOnly = true;
-  const author = (id) => ({ ...app.demoAuthors[0], id });
+  app.state.filter = "article";
   const pages = [
-    Array.from({ length: 10 }, (_, i) => post(`french-${i}`, { language: "fr", author: author("friend") })),
-    Array.from({ length: 10 }, (_, i) => post(`stranger-${i}`, { language: "en", author: author("stranger") })),
-    Array.from({ length: 10 }, (_, i) => post(`match-${i}`, { language: ["en-US", "es", "ca"][i % 3], author: author("friend") })),
+    Array.from({ length: 10 }, (_, i) => post(`french-${i}`, { language: "fr" })),
+    Array.from({ length: 10 }, (_, i) => post(`note-${i}`, { language: "en", kind: "post" })),
+    Array.from({ length: 10 }, (_, i) => post(`match-${i}`, { language: ["en-US", "es", "ca"][i % 3] })),
   ];
   app.state.api.timeline = async (timeline, next) => {
     requests.push({ timeline, next });
     return { posts: pages[requests.length - 1], next: `page-${requests.length}` };
   };
-  app.state.api.relationships = async (ids) => ids.map((id) => ({ id, following: id === "friend" }));
   await app.loadFeed();
   assert.equal(requests.length, 3);
   assert.equal(app.state.posts.length, 30);
@@ -4243,7 +4288,7 @@ for (const tab of ["likes", "saved"]) test(`public profiles reject private ${tab
   assert.match(app.postReadLink("public-post"), /server=https%3A%2F%2Fremote.example/);
 });
 
-test("recommendations filter followed, requested, muted, blocked and own accounts, and stay out of Saved", async () => {
+test("recommendations filter followed, requested, muted, blocked and own accounts, and appear inline only on Discover", async () => {
   const { app, context, get } = await profileFixture(async (url) => {
     if (url.includes("/suggestions")) return Response.json(["me", "following", "requested", "blocked", "muted", "new"].map((id) => ({ account: profileAccount(id) })));
     return Response.json(["me", "following", "requested", "blocked", "muted", "new"].map((id) => ({
@@ -4254,6 +4299,10 @@ test("recommendations filter followed, requested, muted, blocked and own account
   app.state.filter = "all";
   await app.loadSuggestions();
   assert.deepEqual(Array.from(app.suggestedAccounts(), (a) => a.id), ["new"]);
+  assert.doesNotMatch(get("app").innerHTML, /class="feed-suggestions"/);
+  app.state.view = "discover";
+  app.state.exploring = true;
+  app.render();
   assert.match(get("app").innerHTML, /class="feed-suggestions"/);
   app.state.view = "bookmarks";
   app.render();

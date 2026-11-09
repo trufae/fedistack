@@ -1,11 +1,15 @@
 namespace Fedi {
+  type FeedFilter = "all" | "article" | "post";
+  const storedFilter = readStore<unknown>("home-filter", "all");
+  let homeFilter: FeedFilter = storedFilter === "article" || storedFilter === "post" ? storedFilter : "all";
   export const state = {
     session: loadSession(),
     api: null as API | null,
     view: "home" as View,
     timeline: "home" as Timeline,
-    filter: "article" as "all" | "article" | "post",
-    followingOnly: false,
+    homeTimeline: "home" as HomeTimeline,
+    filter: homeFilter,
+    exploring: false,
     query: "",
     posts: [] as Post[],
     accounts: [] as Account[],
@@ -160,17 +164,17 @@ namespace Fedi {
       ["settings", "settings", "Settings"],
     ];
     return `<aside class="sidebar"><div class="brand-block"><a class="brand" href="#home"><img src="assets/favicon.svg" alt="">fedistack</a><p class="brand-date">${new Date().toLocaleDateString("en", { weekday: "long", month: "long", day: "numeric" })}</p></div>
-      ${state.session ? action("disconnect", "Sign out", "", "button subtle account-action") : action("connect", "Sign in", "", "button primary account-action mobile-account-action")}
+      ${state.session ? `<button class="icon-button mobile-account-action" data-action="account" aria-label="Account" aria-haspopup="dialog">${avatar(me, false, "header-account")}</button>` : action("connect", "Sign in", "", "button primary account-action mobile-account-action")}
       <nav aria-label="Main navigation">${items.map(([view, symbol, name]) => `<a href="#${view}" class="nav-item ${current === view ? "active" : ""}" ${current === view ? 'aria-current="page"' : ""}>${icon(symbol)}<span>${name}</span>${view === "drafts" && getDrafts().length ? `<span class="nav-count">${getDrafts().length}</span>` : ""}${view === "messages" && state.conversations.some((c) => c.unread) ? '<span class="unread-dot"></span>' : ""}</a>`).join("")}</nav>
       <a href="#write" class="button primary write-button">${icon("edit")}<span>Write an article</span></a><a href="#note" class="button subtle note-button">${icon("comment")}<span>Note</span></a>
       <div class="sidebar-bottom"><div class="sidebar-tools"><button class="icon-button" data-action="theme" aria-label="Toggle light and dark theme">${icon(document.documentElement.dataset.theme === "dark" ? "sun" : "moon")}</button></div>
-      ${state.session ? `<button class="profile-switch" data-action="account">${avatar(me, false, "sidebar")}<span><strong>${escapeHTML(me.name)}</strong><small>${escapeHTML(new URL(state.session.server).host)}</small></span>${icon("chevron")}</button>` : ""}</div></aside>`;
+      ${state.session ? `<button class="profile-switch" data-action="account" aria-haspopup="dialog">${avatar(me, false, "sidebar")}<span><strong>${escapeHTML(me.name)}</strong><small>${escapeHTML(new URL(state.session.server).host)}</small></span>${icon("chevron")}</button>` : ""}</div></aside>`;
   }
 
   function rightRail(): string {
-    return `<aside class="right-rail"><form class="search-box" id="search-form">${icon("search")}<input name="query" aria-label="Search publications and people" placeholder="Search your corner of the world" value="${escapeHTML(state.query)}"><button type="submit" class="sr-only">Search</button></form>
+    return `<aside class="right-rail">${state.view === "discover" ? "" : `<form class="search-box" id="search-form">${icon("search")}<input name="query" aria-label="Search publications and people" placeholder="Search your corner of the world" value="${escapeHTML(state.query)}"><button type="submit" class="sr-only">Search</button></form>`}
       ${state.view === "people" ? "" : suggestionsView()}
-      <section class="rail-section"><h3>Follow your curiosity</h3><div class="topics">${["Technology", "Culture", "Design", "Nature", "Life", "Writing"].map((t) => action("topic", t, t, "topic")).join("")}</div></section>
+      ${state.view === "discover" ? "" : `<section class="rail-section"><h3>Follow your curiosity</h3><div class="topics">${["Technology", "Culture", "Design", "Nature", "Life", "Writing"].map((t) => action("topic", t, t, "topic")).join("")}</div></section>`}
       <section class="little-note">${icon("globe")}<p>Your words. Your community.<br><strong>Your corner of the fediverse.</strong></p></section>
       <footer>Fedistack <span>·</span> Made for the open web<br><a href="#settings">About & settings</a>${!state.session && !state.readerServer ? "<p>Demo stories and people are fictional.</p>" : ""}</footer></aside>`;
   }
@@ -184,12 +188,20 @@ namespace Fedi {
       ["drafts", "edit", "Your writing"],
       ["messages", "mail", "Messages"],
     ];
-    return `<nav class="mobile-nav" aria-label="Mobile navigation">${items.map(([view, symbol, name]) => `<a href="#${view}"${view === "drafts" ? ' class="mobile-write"' : ""} aria-label="${name}"${current === view ? ' aria-current="page"' : ""}>${icon(symbol)}</a>`).join("")}${state.session ? `<a href="#profile" aria-label="Your profile"${current === "profile" && state.profile?.owner ? ' aria-current="page"' : ""}>${avatar(me, false, "mobile-account")}</a>` : '<button type="button" data-action="connect" class="mobile-sign-in" aria-label="Sign in" title="Sign in" aria-haspopup="dialog"></button>'}</nav>`;
+    return `<nav class="mobile-nav" aria-label="Mobile navigation">${items.map(([view, symbol, name]) => `<a href="#${view}"${view === "drafts" ? ' class="mobile-write"' : ""} aria-label="${name}"${current === view ? ' aria-current="page"' : ""}>${icon(symbol)}${view === "home" || view === "discover" ? `<span>${name}</span>` : ""}</a>`).join("")}${state.session ? `<a href="#profile" aria-label="Your profile"${current === "profile" && state.profile?.owner ? ' aria-current="page"' : ""}>${avatar(me, false, "mobile-account")}</a>` : '<button type="button" data-action="connect" class="mobile-sign-in" aria-label="Sign in" title="Sign in" aria-haspopup="dialog"></button>'}</nav>`;
   }
 
   export function render(): void {
     const app = document.getElementById("app")!;
     const suggestionScrolls = new Map(Array.from(app.querySelectorAll<HTMLElement>(".suggestion-track"), (track) => [track.id, track.scrollLeft]));
+    const search = document.activeElement as HTMLInputElement | null;
+    const discovery = state.view === "discover" && search?.id === "discover-query" &&
+      search.defaultValue === state.query ? document.getElementById("discover-content") : null;
+    if (discovery) {
+      renderHTML(discovery, discoverContent());
+      setupSuggestionCarousels(suggestionScrolls);
+      return;
+    }
     const languagePicker = document.activeElement?.closest(".language-picker");
     const languageFocus = languagePicker ? document.activeElement?.id : "";
     const languageSelect = languagePicker?.querySelector("select")?.id;
@@ -220,7 +232,7 @@ namespace Fedi {
                   ? profileView()
                   : state.view === "people"
                     ? peopleView()
-                    : feedView();
+                    : state.view === "discover" ? discoverView() : homeView();
     renderHTML(
       document.getElementById("app")!,
       `<div class="layout">${sidebar()}${!state.session ? action("connect", "Sign in", "", "button primary desktop-sign-in") : ""}<main id="main" tabindex="-1">${content}</main>${rightRail()}</div>${mobileNav()}`,
@@ -235,7 +247,7 @@ namespace Fedi {
     }
     if (state.view === "editor") updateEditorMeta();
     updateEditorViewport();
-    document.title = `${state.view === "reader" && state.reading ? state.reading.title || (state.reading.kind === "article" ? "Article" : "Note") : state.view === "editor" ? (state.draft?.kind === "post" ? "New note" : state.draft?.title) || "New draft" : state.view === "profile" ? state.profile?.account?.name || "Profile" : state.view === "people" ? "People to follow" : "Your reading room"} — Fedistack`;
+    document.title = `${state.view === "reader" && state.reading ? state.reading.title || (state.reading.kind === "article" ? "Article" : "Note") : state.view === "editor" ? (state.draft?.kind === "post" ? "New note" : state.draft?.title) || "New draft" : state.view === "profile" ? state.profile?.account?.name || "Profile" : state.view === "people" ? "People to follow" : state.view === "discover" ? "Discover" : "Your reading room"} — Fedistack`;
   }
 
   function normalizeDiscoveryLanguages(value: unknown): string[] {
@@ -264,10 +276,6 @@ namespace Fedi {
       (p) => state.filter === "all" || p.kind === state.filter,
     );
     if (state.view === "discover") posts = filterByLanguages(posts, state.discoveryLanguages);
-    if (state.followingOnly)
-      posts = posts.filter(
-        (p) => state.relationships.get(p.author.id)?.following,
-      );
     if (state.query && !state.session)
       posts = posts.filter((p) =>
         `${p.title} ${p.markdown} ${p.author.name} ${p.tags.join(" ")}`
@@ -286,31 +294,94 @@ namespace Fedi {
     const selected = state.timeline.startsWith("list:");
     return `<section class="feed-lists" aria-label="List timeline"><div class="list-picker-row">${state.lists.length || selected ? `<label for="list-select">List<select id="list-select"><option value="">Choose a list…</option>${selected && !state.lists.some((list) => `list:${list.id}` === state.timeline) ? `<option value="${escapeHTML(state.timeline)}" selected>Current list</option>` : ""}${state.lists.map((list) => `<option value="list:${escapeHTML(list.id)}" ${state.timeline === `list:${list.id}` ? "selected" : ""}>${escapeHTML(list.title)}</option>`).join("")}</select></label>` : '<p>No lists yet. Create one to group people you follow.</p>'}${action("manage-lists", "Manage lists", "", "button subtle")}</div>${!selected && state.lists.length ? '<p class="muted">Choose a list to read its posts.</p>' : ""}</section>`;
   }
+  export function setFeedFilter(filter: FeedFilter): void {
+    state.filter = filter;
+    if (state.view === "home") {
+      homeFilter = filter;
+      writeStore("home-filter", filter);
+    }
+    updateFeedFilters();
+  }
+
+  function feedFilters(): string {
+    const filters = [["all", "All"], ["article", "Articles"], ["post", "Notes"]];
+    return `<div class="feed-controls"><div class="filter-pills" aria-label="Content type">${filters.map(([type, label]) => `<button data-action="filter" data-id="${type}" class="${state.filter === type ? "selected" : ""}" aria-pressed="${state.filter === type}">${label}</button>`).join("")}</div></div>`;
+  }
+
+  function homeView(): string {
+    const saved = state.view === "bookmarks";
+    const lists = !!state.session && !saved && state.timeline !== "home";
+    const tabs = [["home", "Following"], ...(state.session ? [["lists", "Lists"]] : []), ["bookmarks", "Saved"]];
+    const heading = `<header class="page-intro feed-intro"><h1>Home</h1></header>
+      <div class="timeline-tabs" aria-label="Personal timelines">${tabs.map(([type, label]) => {
+        const active = type === (saved ? "bookmarks" : lists ? "lists" : "home");
+        return `<button data-action="timeline" data-id="${type}" class="${active ? "active" : ""}" aria-pressed="${active}">${label}</button>`;
+      }).join("")}</div>${lists ? feedLists() : ""}`;
+    if (lists && state.timeline === "lists") return heading;
+    return heading + (saved ? "" : feedFilters()) + feedView();
+  }
+
+  function explorePosts(posts: Post[]): Post[] {
+    return posts.filter((p) => p.visibility === "public" && !p.warning && !p.replyTo);
+  }
+
+  function discoverView(): string {
+    return `<header class="page-intro feed-intro"><h1>Discover</h1></header>
+      <form id="discover-search" role="search" class="search-box discover-search">${icon("search")}<input id="discover-query" type="search" name="query" aria-label="Search people, posts, and hashtags" placeholder="People, posts, #tags" value="${escapeHTML(state.query)}"><button class="button subtle" aria-label="Search">${icon("arrow")}</button></form>
+      <div id="discover-content">${discoverContent()}</div>`;
+  }
+
+  function discoverContent(): string {
+    if (!state.exploring || state.query) {
+      const title = state.query ? `Results for “${escapeHTML(state.query)}”`
+        : state.timeline === "local" ? "Local timeline" : "Federated timeline";
+      return `<div class="discover-section discover-results"><a class="text-button" href="#discover">${icon("back")} Discover</a><h2>${title}</h2>
+        ${state.query ? '<p class="muted">Search covers content known to your server. Try #topic, a full @user@server address, or a post URL.</p>' : ""}</div>
+        ${feedFilters()}${feedView()}`;
+    }
+
+    const posts = explorePosts(visibleFeedPosts());
+    const topics = new Map<string, string>();
+    for (const post of posts) {
+      for (const tag of post.tags) {
+        const key = tag.toLowerCase();
+        if (hashtagName(`#${tag}`) && !topics.has(key)) topics.set(key, tag);
+        if (topics.size === 6) break;
+      }
+      if (topics.size === 6) break;
+    }
+    const articles = posts.filter((p) => p.kind === "article").slice(0, 3);
+    return `${topics.size ? `<section class="discover-section"><h2>Topics</h2><div class="discover-links">${Array.from(topics.values(), (tag) => hashtagLink(tag, "topic")).join("")}</div></section>` : ""}
+      <section class="discover-section"><h2>Articles to explore</h2>
+        ${articles.map((post) => `<a class="discover-article" href="${escapeHTML(postReadLink(post.id))}"><span class="eyebrow">${post.tags[0] ? escapeHTML(post.tags[0]) : "Article"} · ${readingTime(post.markdown)} min read</span>
+          <h3>${escapeHTML(post.title || plainText(articleBody(post)).slice(0, 110) || "Read article")}</h3><small>${escapeHTML(post.author.name)} · @${escapeHTML(post.author.acct)}</small></a>`).join("")}
+        ${state.loading && !articles.length ? '<p class="muted" role="status">Finding articles…</p>' : ""}
+        ${!articles.length && !state.loading && !state.error ? `<p class="muted">No articles in the recent public posts${state.discoveryLanguages.length ? ' match your <a href="#settings">language settings</a>' : ""}.</p>` : ""}${feedError()}
+      </section>
+      <section class="discover-section"><h2>Public timelines</h2><div class="discover-links"><a class="text-button" href="#discover?timeline=local">Local ${icon("arrow")}</a><a class="text-button" href="#discover?timeline=federated">Federated ${icon("arrow")}</a></div></section>
+      ${suggestionsView(true)}`;
+  }
+
+  function feedError(): string {
+    return state.error ? `<div class="error-panel" role="alert">${escapeHTML(state.error)}${action("refresh", "Try again", "", "button subtle")}</div>` : "";
+  }
+
   function feedView(): string {
-    const title =
-      state.view === "bookmarks"
-        ? "Your reading list"
-        : state.view === "discover"
-          ? "A world of good writing"
-          : state.session ? "Your reading room" : "Welcome to Fedistack";
     const posts = visibleFeedPosts();
     const hasLanguages = state.view === "discover" && state.discoveryLanguages.length > 0;
-    const recommendations = !state.query && ["home", "discover"].includes(state.view) ? suggestionsView(true) : "";
-    const lists = !!state.session && state.view !== "bookmarks" && (state.timeline === "lists" || state.timeline.startsWith("list:"));
-    const choosingList = lists && state.timeline === "lists";
-    const heading = `<header class="page-intro feed-intro"><h1>${title}<span class="accent">.</span></h1><p>${state.view === "bookmarks" ? "Good things are worth coming back to." : "Independent voices. A little more perspective."}</p></header>
-      <div class="timeline-tabs" aria-label="Timelines">${[["home", "Following"], ["local", "Local"], ["federated", "Federated"], ...(state.session ? [["lists", "Lists"]] : []), ["bookmarks", "Saved"]].map(([t, label]) => { const active = t === "bookmarks" ? state.view === "bookmarks" : state.view !== "bookmarks" && (t === "lists" ? lists : state.timeline === t); return `<button data-action="timeline" data-id="${t}" class="${active ? "active" : ""}" aria-pressed="${active}">${label}</button>`; }).join("")}</div>${lists ? feedLists() : ""}`;
-    if (choosingList) return heading;
-    return `${heading}
-      <div class="feed-controls"><div class="filter-pills" aria-label="Content type">${(["all", "article", "post"] as const).map((f, i) => `<button data-action="filter" data-id="${f}" class="${state.filter === f ? "selected" : ""}" aria-pressed="${state.filter === f}">${["All", "Articles", "Notes"][i]}</button>`).join("")}</div><label class="following-toggle"><input type="checkbox" id="following-only" ${state.followingOnly ? "checked" : ""}> Following only</label></div>
-      ${state.view === "discover" ? `<form id="discover-search" class="search-box discover-search">${icon("search")}<input name="query" aria-label="Search people and writing" placeholder="Search people, writing, or #topics" value="${escapeHTML(state.query)}"><button class="button subtle">Search</button></form>` : ""}
-      ${state.query ? `<div class="search-summary">Results for “${escapeHTML(state.query)}” ${action("clear-search", "Clear", "", "text-button")}</div><p class="muted">Search covers content known to your server. Try #topic, a full @user@server address, or a post URL.</p>` : ""}
-      ${state.timeline.startsWith("tag:") && !state.query && state.view !== "bookmarks" ? `<div class="search-summary">Posts tagged #${escapeHTML(state.timeline.slice(4))}</div>` : ""}
-      ${state.query && state.searchTags.length ? `<div class="filter-pills search-tags" aria-label="Matching hashtags">${state.searchTags.map((tag) => hashtagLink(tag, "button subtle")).join("")}</div>` : ""}
-      ${state.accounts.length ? `<div class="account-results">${state.accounts.map((a) => accountRow(a, "search")).join("")}</div>` : ""}
-      ${state.error ? `<div class="error-panel" role="alert">${escapeHTML(state.error)}${action("refresh", "Try again", "", "button subtle")}</div>` : ""}
-      <div class="feed">${posts.map((p, i) => postCard(p, i === 0 && p.kind === "article") + (i === Math.min(2, posts.length - 1) ? recommendations : "")).join("")}${!posts.length ? recommendations : ""}${!posts.length && !state.loading && !state.error ? emptyState("A little quiet here", hasLanguages ? "No posts in the selected languages match the loaded results. Load older posts or change your languages in Settings." : state.filter !== "all" ? "No matching writing in the loaded posts. Try another filter or load older posts." : state.query || state.timeline.startsWith("tag:") ? "No matching posts are available here. Your server may not have received them yet, or may limit full-text search. Try a hashtag or a specific post URL." : "Follow a writer, explore another timeline, or start a conversation.", hasLanguages ? '<a href="#settings" class="button subtle">Change language settings</a>' : action("discover", "Explore the fediverse", "", "button subtle")) : ""}</div>
-      ${state.loading ? `<div class="loading" role="status">${posts.length ? "Updating your reading…" : "Gathering your reading…"}</div>` : state.next ? `<div class="load-more">${action("load-more", state.query ? "Load more results" : "Load older posts", "", "button subtle")}</div>` : posts.length ? `<div class="end-note">${state.query ? "End of available search results." : "You’re all caught up. Go make a little something."}</div>` : ""}`;
+    const searching = !!state.query;
+    const empty = hasLanguages ? "No posts in the selected languages match the loaded results. Load older posts or change your languages in Settings."
+      : state.filter !== "all" ? "No matching writing in the loaded posts. Try another filter or load older posts."
+      : searching ? "No matching posts are available here. Your server may not have received them yet, or may limit full-text search. Try a hashtag or a specific post URL."
+      : state.view === "bookmarks" ? "Bookmark a post to come back to it later."
+      : "Follow a writer, explore a public timeline, or start a conversation.";
+    const emptyLink = hasLanguages ? '<a href="#settings" class="button subtle">Change language settings</a>'
+      : state.view === "home" && state.filter === "all" ? '<a href="#discover" class="button subtle">Explore the fediverse</a>' : "";
+    return `${searching && state.searchTags.length ? `<div class="filter-pills search-tags" aria-label="Matching hashtags">${state.searchTags.map((tag) => hashtagLink(tag, "button subtle")).join("")}</div>` : ""}
+      ${searching && state.accounts.length ? `<div class="account-results">${state.accounts.map((a) => accountRow(a, "search")).join("")}</div>` : ""}
+      ${feedError()}
+      <div class="feed">${posts.map((post) => postCard(post)).join("")}${!posts.length && !state.loading && !state.error && !state.accounts.length && !state.searchTags.length ? emptyState("A little quiet here", empty, emptyLink) : ""}</div>
+      ${state.loading ? `<div class="loading" role="status">${posts.length ? "Updating your reading…" : "Gathering your reading…"}</div>` : state.next ? `<div class="load-more">${action("load-more", searching ? "Load more results" : "Load older posts", "", "button subtle")}</div>` : posts.length ? `<div class="end-note">${searching ? "End of available search results." : "You’re all caught up. Go make a little something."}</div>` : ""}`;
   }
 
   export function loadFeed(
@@ -320,7 +391,7 @@ namespace Fedi {
   ): Promise<void> {
     const api = state.api;
     const key = JSON.stringify([state.view, state.timeline, state.query, state.filter,
-      state.followingOnly, state.discoveryLanguages, append, target]);
+      state.exploring, state.discoveryLanguages, append, target]);
     if (state.loading && feedInFlight?.api === api && feedInFlight.key === key)
       return feedInFlight.promise;
     const promise = runLoadFeed(append, target, force);
@@ -343,6 +414,7 @@ namespace Fedi {
     const controller = feedController = new AbortController();
     const existing = new Set(append ? state.posts.map((p) => p.id) : []);
     const visited = new Set<string>();
+    const exploring = state.view === "discover" && state.exploring;
     const tagQuery = hashtagName(state.query.trim());
     const searching = !!state.query && !tagQuery;
     const timeline = tagQuery ? `tag:${tagQuery}` as Timeline : state.view === "bookmarks" ? "bookmarks" : state.timeline;
@@ -392,7 +464,7 @@ namespace Fedi {
       }
     }
     render();
-    if (!append) void loadSuggestions();
+    if (!append && state.view !== "bookmarks") void loadSuggestions();
     if (reuseCache) return;
     try {
       let posts: Post[];
@@ -403,13 +475,14 @@ namespace Fedi {
         });
         posts = demoState.posts.filter((p) => p.visibility !== "direct");
         if (state.view === "bookmarks") posts = posts.filter((p) => p.saved);
-        else if (state.timeline === "home")
+        else if (timeline === "home")
           posts = posts.filter(
             (p) =>
               demoState.follows.includes(p.author.id) || p.author.id === "you",
           );
-        else if (state.timeline === "local")
+        else if (timeline === "local")
           posts = posts.filter((p) => p.local || p.author.id === "you");
+        if (timeline === "home") posts.sort((a, b) => b.created.localeCompare(a.created));
         if (state.view === "discover" && state.query)
           state.accounts = demoAuthors.filter((a) =>
             `${a.name} ${a.acct}`
@@ -461,20 +534,20 @@ namespace Fedi {
             ])].filter((id) => !requestedRelationships.has(id));
           ids.forEach((id) => requestedRelationships.add(id));
           if (ids.length) {
-            const relationships = api.relationships(ids).then((relations) => {
+            void api.relationships(ids).then((relations) => {
               if (!current()) return;
               relations.forEach((r) => state.relationships.set(r.id, r));
               save();
               render();
             }).catch(() => { /* Relationship metadata is optional for reading. */ });
-            if (state.followingOnly) await relationships;
           }
         }
         if (!current()) return;
         if (
           !paginated || searching ||
           !state.next ||
-          visibleFeedPosts(loaded).filter((p) => !existing.has(p.id)).length >= target
+          (exploring ? explorePosts(visibleFeedPosts(loaded)).filter((p) => p.kind === "article").length >= 3
+            : visibleFeedPosts(loaded).filter((p) => !existing.has(p.id)).length >= target)
         )
           break;
         render();
@@ -699,11 +772,17 @@ namespace Fedi {
       render();
       return;
     }
-    state.query = state.view === "discover" ? new URLSearchParams(query).get("q")?.trim() || "" : "";
-    if (state.view === "discover" && (state.query || state.timeline === "home")) {
-      state.timeline = "federated";
-      state.filter = "all";
+    const params = new URLSearchParams(query);
+    state.query = state.view === "discover" ? params.get("q")?.trim() || "" : "";
+    if (state.view === "discover") {
+      const timeline = params.get("timeline");
+      state.exploring = !state.query && timeline !== "local" && timeline !== "federated";
+      state.timeline = !state.query && timeline === "local" ? "local" : "federated";
+    } else {
+      state.exploring = false;
+      state.timeline = state.homeTimeline;
     }
+    state.filter = state.view === "home" ? homeFilter : "all";
     await loadFeed(false, feedTarget, false);
   }
 
@@ -850,7 +929,7 @@ namespace Fedi {
     clearMessageDrafts();
     state.relationships.clear();
     state.query = "";
-    state.timeline = "home";
+    state.homeTimeline = state.timeline = "home";
     closeModal();
     if (/^#(?:read|p|@[^/]*)\//.test(location.hash)) await route();
     else navigate("home");

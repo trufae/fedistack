@@ -9,6 +9,7 @@ namespace Fedi {
     query: "",
     posts: [] as Post[],
     accounts: [] as Account[],
+    searchTags: [] as string[],
     profile: null as ProfileState | null,
     suggestions: [] as Account[],
     suggestionsLoaded: false,
@@ -300,12 +301,13 @@ namespace Fedi {
     return `${heading}
       <div class="feed-controls"><div class="filter-pills" aria-label="Content type">${(["all", "article", "post"] as const).map((f, i) => `<button data-action="filter" data-id="${f}" class="${state.filter === f ? "selected" : ""}" aria-pressed="${state.filter === f}">${["All", "Articles", "Notes"][i]}</button>`).join("")}</div><label class="following-toggle"><input type="checkbox" id="following-only" ${state.followingOnly ? "checked" : ""}> Following only</label></div>
       ${state.view === "discover" ? `<form id="discover-search" class="search-box discover-search">${icon("search")}<input name="query" aria-label="Search people and writing" placeholder="Search people, writing, or #topics" value="${escapeHTML(state.query)}"><button class="button subtle">Search</button></form>` : ""}
-      ${state.query ? `<div class="search-summary">Results for “${escapeHTML(state.query)}” ${action("clear-search", "Clear", "", "text-button")}</div>` : ""}
+      ${state.query ? `<div class="search-summary">Results for “${escapeHTML(state.query)}” ${action("clear-search", "Clear", "", "text-button")}</div><p class="muted">Search covers content known to your server. Try #topic, a full @user@server address, or a post URL.</p>` : ""}
       ${state.timeline.startsWith("tag:") && !state.query && state.view !== "bookmarks" ? `<div class="search-summary">Posts tagged #${escapeHTML(state.timeline.slice(4))}</div>` : ""}
+      ${state.query && state.searchTags.length ? `<div class="filter-pills" aria-label="Matching hashtags">${state.searchTags.map((tag) => action("read-tag", `#${tag}`, tag, "button subtle")).join("")}</div>` : ""}
       ${state.accounts.length ? `<div class="account-results">${state.accounts.map((a) => accountRow(a, "search")).join("")}</div>` : ""}
       ${state.error ? `<div class="error-panel" role="alert">${escapeHTML(state.error)}${action("refresh", "Try again", "", "button subtle")}</div>` : ""}
-      <div class="feed">${posts.map((p, i) => postCard(p, i === 0 && p.kind === "article") + (i === Math.min(2, posts.length - 1) ? recommendations : "")).join("")}${!posts.length ? recommendations : ""}${!posts.length && !state.loading && !state.error ? emptyState("A little quiet here", hasLanguages ? "No posts in the selected languages match the loaded results. Load older posts or change your languages in Settings." : state.filter !== "all" ? "No matching writing in the loaded posts. Try another filter or load older posts." : "Follow a writer, explore another timeline, or start a conversation.", hasLanguages ? '<a href="#settings" class="button subtle">Change language settings</a>' : action("discover", "Explore the fediverse", "", "button subtle")) : ""}</div>
-      ${state.loading ? `<div class="loading" role="status">${posts.length ? "Updating your reading…" : "Gathering your reading…"}</div>` : state.next ? `<div class="load-more">${action("load-more", "Load older posts", "", "button subtle")}</div>` : posts.length ? '<div class="end-note">You’re all caught up. Go make a little something.</div>' : ""}`;
+      <div class="feed">${posts.map((p, i) => postCard(p, i === 0 && p.kind === "article") + (i === Math.min(2, posts.length - 1) ? recommendations : "")).join("")}${!posts.length ? recommendations : ""}${!posts.length && !state.loading && !state.error ? emptyState("A little quiet here", hasLanguages ? "No posts in the selected languages match the loaded results. Load older posts or change your languages in Settings." : state.filter !== "all" ? "No matching writing in the loaded posts. Try another filter or load older posts." : state.query || state.timeline.startsWith("tag:") ? "No matching posts are available here. Your server may not have received them yet, or may limit full-text search. Try a hashtag or a specific post URL." : "Follow a writer, explore another timeline, or start a conversation.", hasLanguages ? '<a href="#settings" class="button subtle">Change language settings</a>' : action("discover", "Explore the fediverse", "", "button subtle")) : ""}</div>
+      ${state.loading ? `<div class="loading" role="status">${posts.length ? "Updating your reading…" : "Gathering your reading…"}</div>` : state.next ? `<div class="load-more">${action("load-more", state.query ? "Load more results" : "Load older posts", "", "button subtle")}</div>` : posts.length ? `<div class="end-note">${state.query ? "End of available search results." : "You’re all caught up. Go make a little something."}</div>` : ""}`;
   }
 
   export function loadFeed(
@@ -338,7 +340,9 @@ namespace Fedi {
     const controller = feedController = new AbortController();
     const existing = new Set(append ? state.posts.map((p) => p.id) : []);
     const visited = new Set<string>();
-    const timeline = state.view === "bookmarks" ? "bookmarks" : state.timeline;
+    const tagQuery = /^#([\p{L}\p{M}\p{N}_-]+)$/u.exec(state.query.trim())?.[1];
+    const searching = !!state.query && !tagQuery;
+    const timeline = tagQuery ? `tag:${tagQuery}` as Timeline : state.view === "bookmarks" ? "bookmarks" : state.timeline;
     if (timeline === "lists") {
       state.posts = [];
       state.accounts = [];
@@ -377,6 +381,7 @@ namespace Fedi {
         state.next = undefined;
       }
       state.accounts = [];
+      state.searchTags = tagQuery ? [tagQuery] : [];
       feedSource = key;
       if (cached && !force && Date.now() - cached.updated < (cached.posts.length ? 60000 : 5000)) {
         state.loading = false;
@@ -418,17 +423,19 @@ namespace Fedi {
             },
           ]),
         );
-      } else if (state.query) {
-        const result = await api.search(state.query, controller.signal);
-        if (!current()) return;
-        posts = result.posts;
-        state.accounts = result.accounts;
       } else posts = [];
-      const paginated = !!api && !state.query;
+      const paginated = !!api;
       for (let page = 0; page < feedPageLimit; page++) {
         if (api && paginated) {
           if (cursor) visited.add(cursor);
-          const result = await api.timeline(timeline, cursor, controller.signal);
+          let result: { posts: Post[]; next?: string };
+          if (searching) {
+            const found = await api.search(state.query, controller.signal, cursor);
+            if (!current()) return;
+            state.accounts = [...new Map([...state.accounts, ...found.accounts].map((account) => [account.id, account])).values()];
+            state.searchTags = [...new Set([...state.searchTags, ...(found.hashtags || [])])];
+            result = found;
+          } else result = await api.timeline(timeline, cursor, controller.signal);
           if (!current()) return;
           posts = result.posts;
           if (page === 0 && !append) updated = Date.now();
@@ -462,7 +469,7 @@ namespace Fedi {
         }
         if (!current()) return;
         if (
-          !paginated ||
+          !paginated || searching ||
           !state.next ||
           visibleFeedPosts(loaded).filter((p) => !existing.has(p.id)).length >= target
         )

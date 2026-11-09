@@ -575,22 +575,39 @@ namespace Fedi {
     async search(
       query: string,
       signal?: AbortSignal,
-    ): Promise<{ accounts: Account[]; posts: Post[] }> {
-      const result = await this.get<{
-        accounts: MastodonAccount[];
-        statuses: MastodonStatus[];
-      }>(
-        `/api/v2/search?${new URLSearchParams({ q: query, resolve: "true", limit: "20" })}`, signal,
-      );
+      next?: string,
+    ): Promise<{ accounts: Account[]; posts: Post[]; hashtags: string[]; next?: string }> {
+      type Kind = "accounts" | "statuses" | "hashtags";
+      type Results = { accounts: MastodonAccount[]; statuses: MastodonStatus[]; hashtags?: { name: string }[] };
+      const kinds: Kind[] = ["accounts", "statuses", "hashtags"];
+      const offsets: Partial<Record<Kind, number>> = next ? JSON.parse(next) : {};
+      const result: Results = { accounts: [], statuses: [], hashtags: [] };
+      const more: Partial<Record<Kind, number>> = {};
+      // Mastodon ignores offset unless type is present. Each category advances independently.
+      await Promise.all((next ? kinds.filter((kind) => offsets[kind] !== undefined) : [undefined]).map(async (kind) => {
+        const params = new URLSearchParams({ q: query, limit: "20" });
+        if (this.token) params.set("resolve", next ? "false" : "true");
+        if (kind) {
+          params.set("type", kind);
+          params.set("offset", String(offsets[kind]));
+        }
+        const page = await this.get<Results>(`/api/v2/search?${params}`, signal);
+        for (const category of kind ? [kind] : kinds) {
+          const values = page[category] || [];
+          if (category === "accounts") result.accounts = page.accounts || [];
+          else if (category === "statuses") result.statuses = page.statuses || [];
+          else result.hashtags = page.hashtags || [];
+          // Count raw results: hidden statuses still occupy positions on the server.
+          if (this.token && values.length >= 20) more[category] = (offsets[category] || 0) + values.length;
+        }
+      }));
       return {
         accounts: result.accounts.map(mapAccount),
         posts: result.statuses
-          .filter(
-            (s) =>
-              s.visibility !== "direct" &&
-              !s.filtered?.some((f) => f.filter.filter_action === "hide"),
-          )
+          .filter((s) => s.visibility !== "direct" && !s.filtered?.some((f) => f.filter.filter_action === "hide"))
           .map(mapStatus),
+        hashtags: (result.hashtags || []).map((tag) => tag.name),
+        next: Object.keys(more).length ? JSON.stringify(more) : undefined,
       };
     }
     async conversations(

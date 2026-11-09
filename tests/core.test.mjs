@@ -5191,3 +5191,92 @@ test("keyboard punctuation normalization preserves existing quotes, paste, compo
   type("“code”", "insertText");
   assert.equal(textarea.value, '```c\n"code"');
 });
+
+test("search keeps hashtags and paginates each raw result category with type and offset", async () => {
+  const calls = [];
+  const { app } = setup(async (input) => {
+    const url = new URL(input); calls.push(url);
+    assert.equal(url.searchParams.get("q"), "rust & tools");
+    const type = url.searchParams.get("type");
+    if (!type) return Response.json({
+      accounts: Array.from({ length: 20 }, (_, i) => sharedStatus().account),
+      statuses: Array.from({ length: 20 }, (_, i) => sharedStatus({ id: `hidden-${i}`, visibility: "direct" })),
+      hashtags: [{ name: "rust" }, { name: "rustlang" }],
+    });
+    assert.equal(url.searchParams.get("offset"), "20");
+    assert.equal(url.searchParams.get("resolve"), "false");
+    return Response.json({ accounts: [], statuses: type === "statuses" ? [sharedStatus({ id: "older" })] : [], hashtags: [] });
+  });
+  app.htmlToMarkdown = (text) => text;
+  const api = new app.API("https://example.org", "token");
+  const first = await api.search("rust & tools");
+  assert.equal(first.posts.length, 0);
+  assert.deepEqual(Array.from(first.hashtags), ["rust", "rustlang"]);
+  assert.deepEqual(JSON.parse(first.next), { accounts: 20, statuses: 20 });
+  const second = await api.search("rust & tools", undefined, first.next);
+  assert.equal(second.posts[0].id, "older");
+  assert.equal(second.next, undefined);
+  assert.equal(calls.length, 3);
+  assert.equal(calls[0].searchParams.has("offset"), false);
+  assert.equal(calls[0].searchParams.get("resolve"), "true");
+  assert.deepEqual(calls.slice(1).map((url) => url.searchParams.get("type")).sort(), ["accounts", "statuses"]);
+});
+
+test("anonymous search omits authenticated resolution and pagination parameters", async () => {
+  const { app } = setup(async (input) => {
+    const params = new URL(input).searchParams;
+    assert.equal(params.has("resolve"), false);
+    assert.equal(params.has("offset"), false);
+    return Response.json({ accounts: [], statuses: [], hashtags: Array.from({ length: 20 }, (_, i) => ({ name: `tag${i}` })) });
+  });
+  const result = await new app.API("https://example.org").search("tag");
+  assert.equal(result.hashtags.length, 20);
+  assert.equal(result.next, undefined);
+});
+
+test("exact hashtag searches read the tag timeline and keep older pages", async () => {
+  const { app, post, get, requests } = feedFixture();
+  app.state.session = { account: app.demoMe, server: "https://example.org", token: "token" };
+  app.state.query = "#Café";
+  app.state.view = "discover";
+  app.state.filter = "all";
+  app.state.api.search = async () => { throw new Error("Hashtags must not depend on full-text search"); };
+  app.state.api.timeline = async (timeline, next) => {
+    requests.push({ timeline, next });
+    return { posts: Array.from({ length: 10 }, (_, i) => post(`${next ? "old" : "new"}-${i}`)), next: next ? undefined : "older" };
+  };
+  await app.loadFeed();
+  assert.equal(app.state.error, "");
+  assert.deepEqual(requests, [{ timeline: "tag:Café", next: undefined }]);
+  assert.match(get("app").innerHTML, /Load more results/);
+  await app.loadFeed(true);
+  assert.equal(app.state.posts.length, 20);
+  assert.equal(requests[1].next, "older");
+  assert.equal(app.state.next, undefined);
+});
+
+test("search renders clickable tags and appends deduplicated people and posts", async () => {
+  const { app, post, get } = feedFixture();
+  app.state.session = { account: app.demoMe, server: "https://example.org", token: "token" };
+  app.state.view = "discover";
+  app.state.query = "rust";
+  app.state.filter = "all";
+  const cursors = [];
+  app.state.api.search = async (_query, _signal, next) => {
+    cursors.push(next);
+    return { accounts: [app.demoAuthors[0]], posts: [post("one"), ...(next ? [post("two")] : [])],
+      hashtags: next ? ["rust", "rustlang"] : ["rust"], next: next ? undefined : "search-page-2" };
+  };
+  await app.loadFeed();
+  assert.match(get("app").innerHTML, /data-action="read-tag" data-id="rust"/);
+  assert.match(get("app").innerHTML, /Load more results/);
+  await app.loadFeed(true);
+  assert.deepEqual(cursors, [undefined, "search-page-2"]);
+  assert.equal(app.state.posts.length, 2);
+  assert.equal(app.state.accounts.length, 1);
+  assert.deepEqual(Array.from(app.state.searchTags), ["rust", "rustlang"]);
+  app.state.query = "";
+  await app.loadFeed();
+  assert.equal(app.state.searchTags.length, 0);
+  assert.doesNotMatch(get("app").innerHTML, /Matching hashtags/);
+});

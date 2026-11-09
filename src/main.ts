@@ -200,7 +200,7 @@ namespace Fedi {
         render();
         break;
       case "timeline":
-        state.timeline = id as Timeline;
+        if (id !== "lists" || !state.timeline.startsWith("list:")) state.timeline = id as Timeline;
         if (id === "federated") state.filter = "all";
         state.query = "";
         if (state.view === "bookmarks") navigate("home");
@@ -591,16 +591,11 @@ namespace Fedi {
         state.followingOnly = el.checked;
         updateFeedFilters();
       }
-      if (el.id === "list-select" && el.value) {
-        if (el.value === "manage") {
-          el.value = state.timeline.startsWith("list:") ? state.timeline : "";
-          void showInterests("lists").catch(formError);
-        } else {
-          state.timeline = el.value as Timeline;
-          state.query = "";
-          if (state.view === "bookmarks") navigate("home");
-          else void loadFeed();
-        }
+      if (el.id === "list-select") {
+        state.timeline = el.value ? el.value as Timeline : "lists";
+        state.query = "";
+        if (state.view === "bookmarks") navigate("home");
+        else void loadFeed(false, undefined, false);
       }
       if (el.id === "draft-visibility") captureDraft();
       if (el.id === "settings-language" && el.value)
@@ -689,9 +684,6 @@ namespace Fedi {
         /* Optional capability. */
       }
     }
-    document
-      .querySelector(".refresh-button")
-      ?.setAttribute("aria-label", "Refresh timeline");
   }
   if (typeof document !== "undefined") void boot().catch(formError);
 }

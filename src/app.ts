@@ -155,11 +155,11 @@ namespace Fedi {
       ["messages", "mail", "Messages"],
       ["settings", "settings", "Settings"],
     ];
-    return `<aside class="sidebar"><a class="brand" href="#home"><img src="assets/favicon.svg" alt="">fedistack<span>•</span></a><div class="brand-caption">Independent voices, connected.</div>
+    return `<aside class="sidebar"><div class="brand-block"><a class="brand" href="#home"><img src="assets/favicon.svg" alt="">fedistack<span>•</span></a><p class="brand-date">${new Date().toLocaleDateString("en", { weekday: "long", month: "long", day: "numeric" })}</p></div>
       ${state.session ? action("disconnect", "Sign out", "", "button subtle account-action") : action("connect", "Sign in", "", "button primary account-action mobile-account-action")}
       <nav aria-label="Main navigation">${items.map(([view, symbol, name]) => `<a href="#${view}" class="nav-item ${state.view === view || (view === "drafts" && state.view === "editor") ? "active" : ""}" ${state.view === view ? 'aria-current="page"' : ""}>${icon(symbol)}<span>${name}</span>${view === "drafts" && getDrafts().length ? `<span class="nav-count">${getDrafts().length}</span>` : ""}${view === "messages" && state.conversations.some((c) => c.unread) ? '<span class="unread-dot"></span>' : ""}</a>`).join("")}</nav>
       <a href="#write" class="button primary write-button">${icon("edit")}<span>Write an article</span></a><a href="#note" class="button subtle note-button">${icon("comment")}<span>Note</span></a>
-      <div class="sidebar-bottom"><div class="sidebar-tools"><button class="icon-button" data-action="theme" aria-label="Toggle light and dark theme">${icon(document.documentElement.dataset.theme === "dark" ? "sun" : "moon")}</button><span>${state.session ? "Signed in" : "Not signed in"}</span></div>
+      <div class="sidebar-bottom"><div class="sidebar-tools"><button class="icon-button" data-action="theme" aria-label="Toggle light and dark theme">${icon(document.documentElement.dataset.theme === "dark" ? "sun" : "moon")}</button></div>
       ${state.session ? `<button class="profile-switch" data-action="account">${avatar(me, false, "sidebar")}<span><strong>${escapeHTML(me.name)}</strong><small>${escapeHTML(new URL(state.session.server).host)}</small></span>${icon("chevron")}</button>` : ""}</div></aside>`;
   }
 
@@ -273,6 +273,10 @@ namespace Fedi {
     if (state.api && !state.query && state.next && !state.loading && missing > 0)
       void loadFeed(true, missing);
   }
+  function feedLists(): string {
+    const selected = state.timeline.startsWith("list:");
+    return `<section class="feed-lists" aria-label="List timeline"><div class="list-picker-row">${state.lists.length || selected ? `<label for="list-select">List<select id="list-select"><option value="">Choose a list…</option>${selected && !state.lists.some((list) => `list:${list.id}` === state.timeline) ? `<option value="${escapeHTML(state.timeline)}" selected>Current list</option>` : ""}${state.lists.map((list) => `<option value="list:${escapeHTML(list.id)}" ${state.timeline === `list:${list.id}` ? "selected" : ""}>${escapeHTML(list.title)}</option>`).join("")}</select></label>` : '<p>No lists yet. Create one to group people you follow.</p>'}${action("manage-lists", "Manage lists", "", "button subtle")}</div>${!selected && state.lists.length ? '<p class="muted">Choose a list to read its posts.</p>' : ""}</section>`;
+  }
   function feedView(): string {
     const title =
       state.view === "bookmarks"
@@ -283,9 +287,12 @@ namespace Fedi {
     const posts = visibleFeedPosts();
     const hasLanguages = state.view === "discover" && state.discoveryLanguages.length > 0;
     const recommendations = !state.query && ["home", "discover"].includes(state.view) ? suggestionsView(true) : "";
-    return `<header class="page-top"><span>${state.view === "bookmarks" ? "SAVED FOR A QUIET MOMENT" : new Date().toLocaleDateString("en", { weekday: "long", month: "long", day: "numeric" }).toUpperCase()}</span><div>${state.session ? '<span class="connected-dot">Signed in</span>' : ""}${action("refresh", icon("refresh"), "", "icon-button refresh-button")}</div></header>
-      <div class="page-intro"><h1>${title}<span class="accent">.</span></h1><p>${state.view === "bookmarks" ? "Good things are worth coming back to." : "Independent voices. A little more perspective."}</p></div>
-      <div class="timeline-tabs" aria-label="Timelines">${(["home", "local", "federated"] as Timeline[]).map((t, i) => `<button data-action="timeline" data-id="${t}" class="${state.timeline === t ? "active" : ""}" aria-pressed="${state.timeline === t}">${["Following", "Local", "Federated"][i]}</button>`).join("")}${state.session ? `<select id="list-select" aria-label="Your lists"><option value="">Your lists</option>${state.lists.map((l) => `<option value="list:${escapeHTML(l.id)}" ${state.timeline === `list:${l.id}` ? "selected" : ""}>${escapeHTML(l.title)}</option>`).join("")}<option value="manage">Manage lists…</option></select>` : ""}</div>
+    const lists = !!state.session && state.view !== "bookmarks" && (state.timeline === "lists" || state.timeline.startsWith("list:"));
+    const choosingList = lists && state.timeline === "lists";
+    const heading = `<header class="page-intro feed-intro"><div class="feed-title"><h1>${title}<span class="accent">.</span></h1>${choosingList ? "" : `<button type="button" data-action="refresh" class="icon-button refresh-button" aria-label="Refresh timeline" title="Refresh timeline">${icon("refresh")}</button>`}</div><p>${state.view === "bookmarks" ? "Good things are worth coming back to." : "Independent voices. A little more perspective."}</p></header>
+      <div class="timeline-tabs" aria-label="Timelines">${(["home", "local", "federated", ...(state.session ? ["lists"] : [])] as Timeline[]).map((t, i) => { const active = state.view !== "bookmarks" && (t === "lists" ? lists : state.timeline === t); return `<button data-action="timeline" data-id="${t}" class="${active ? "active" : ""}" aria-pressed="${active}">${["Following", "Local", "Federated", "Lists"][i]}</button>`; }).join("")}</div>${lists ? feedLists() : ""}`;
+    if (choosingList) return heading;
+    return `${heading}
       <div class="feed-controls"><div class="filter-pills" aria-label="Content type">${(["all", "article", "post"] as const).map((f, i) => `<button data-action="filter" data-id="${f}" class="${state.filter === f ? "selected" : ""}" aria-pressed="${state.filter === f}">${["All", "Articles", "Notes"][i]}</button>`).join("")}</div><label class="following-toggle"><input type="checkbox" id="following-only" ${state.followingOnly ? "checked" : ""}> Following only</label></div>
       ${state.view === "discover" ? `<form id="discover-search" class="search-box discover-search">${icon("search")}<input name="query" aria-label="Search people and writing" placeholder="Search people, writing, or #topics" value="${escapeHTML(state.query)}"><button class="button subtle">Search</button></form>` : ""}
       ${state.query ? `<div class="search-summary">Results for “${escapeHTML(state.query)}” ${action("clear-search", "Clear", "", "text-button")}</div>` : ""}
@@ -327,6 +334,16 @@ namespace Fedi {
     const existing = new Set(append ? state.posts.map((p) => p.id) : []);
     const visited = new Set<string>();
     const timeline = state.view === "bookmarks" ? "bookmarks" : state.timeline;
+    if (timeline === "lists") {
+      state.posts = [];
+      state.accounts = [];
+      state.next = undefined;
+      state.loading = false;
+      state.error = "";
+      feedSource = undefined;
+      render();
+      return;
+    }
     const key = !state.query ? feedCacheKey(timeline) : undefined;
     const generation = feedCacheGeneration();
     const cached = key ? readFeedCache(key) : undefined;
@@ -472,6 +489,7 @@ namespace Fedi {
   export async function refreshReading(now = Date.now()): Promise<void> {
     const api = state.api, p = state.profile;
     if (!api || refreshingReading || state.loading || p?.loading || profileImageUpdating() || state.query ||
+        (state.view !== "profile" && state.timeline === "lists") ||
         !["home", "discover", "profile"].includes(state.view) ||
         (typeof document !== "undefined" && (document.hidden || document.activeElement?.matches("input,textarea,[contenteditable=true]"))) ||
         (typeof navigator !== "undefined" && navigator.onLine === false) ||

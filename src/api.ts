@@ -301,7 +301,7 @@ namespace Fedi {
     }
 
     async timeline(
-      timeline: Timeline,
+      timeline: Exclude<Timeline, "lists">,
       next?: string,
       signal?: AbortSignal,
     ): Promise<{ posts: Post[]; next?: string }> {

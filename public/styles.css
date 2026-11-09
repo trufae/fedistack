@@ -213,10 +213,14 @@ input[type="checkbox"] {
   color: var(--accent);
   margin-left: -5px;
 }
-.brand-caption {
-  font-size: 10px;
+.brand-block {
+  min-width: 0;
+}
+.brand-date {
+  font-size: 11px;
   color: var(--muted);
-  margin-top: 14px;
+  margin-top: 9px;
+  line-height: 1.4;
   letter-spacing: 0.2px;
 }
 .sidebar nav {
@@ -464,18 +468,6 @@ main {
   align-items: center;
   gap: 14px;
 }
-.connected-dot {
-  font-size: 10px;
-}
-.connected-dot:before {
-  content: "";
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: #729565;
-  margin-right: 6px;
-}
 .page-intro {
   padding: 9px 34px 28px;
 }
@@ -488,6 +480,18 @@ main {
   font-size: 12px;
   color: var(--muted);
   margin-top: 11px;
+}
+.feed-intro {
+  padding-top: 28px;
+}
+.feed-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.feed-title .refresh-button {
+  flex-shrink: 0;
 }
 .timeline-tabs {
   display: flex;
@@ -508,13 +512,32 @@ main {
   color: var(--ink);
   font-weight: 650;
 }
-.timeline-tabs select {
-  max-width: 130px;
-  padding: 4px;
-  border: 0;
-  background: transparent;
-  font-size: 11px;
-  margin: auto 0 auto auto;
+.feed-lists {
+  padding: 18px 34px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+.list-picker-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+.list-picker-row label,
+.list-picker-row > p {
+  flex: 1;
+  min-width: 140px;
+  margin: 0;
+}
+.list-picker-row select {
+  min-height: 44px;
+  margin-bottom: 0;
+}
+.list-picker-row .button {
+  min-height: 44px;
+}
+.feed-lists > p {
+  margin-top: 12px;
 }
 .feed-controls {
   display: flex;
@@ -2299,7 +2322,7 @@ summary {
   .brand {
     font-size: 28px;
   }
-  .brand-caption {
+  .brand-date {
     font-size: 9px;
   }
   .page-top {
@@ -2414,7 +2437,10 @@ summary {
     border-bottom: 1px solid var(--line);
   }
   .brand {
-    font-size: 28px;
+    font-size: clamp(22px, 7vw, 28px);
+  }
+  .brand-date {
+    font-size: 10px;
   }
   .account-action {
     margin-top: 0;
@@ -2425,7 +2451,6 @@ summary {
   .desktop-sign-in {
     display: none;
   }
-  .brand-caption,
   .sidebar nav,
   .write-button,
   .sidebar-bottom {
@@ -2440,6 +2465,12 @@ summary {
   }
   .page-intro {
     padding: 8px 22px 25px;
+  }
+  .feed-intro {
+    padding-top: 22px;
+  }
+  .feed-lists {
+    padding: 16px 22px;
   }
   .page-intro h1 {
     font-size: 36px;
@@ -3024,7 +3055,7 @@ body.zen-mode {
   textarea,
   select,
   .search-box input,
-  .timeline-tabs select,
+  .feed-lists select,
   label.language-add select,
   #message-form textarea {
     font-size: 16px;

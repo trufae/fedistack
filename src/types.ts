@@ -6,6 +6,7 @@ namespace Fedi {
     | "local"
     | "federated"
     | "bookmarks"
+    | "lists"
     | `list:${string}`
     | `tag:${string}`;
   export type View =

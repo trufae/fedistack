@@ -2705,10 +2705,19 @@ test("interest management remains reachable with no lists and escapes names retu
   assert.match(get("app").innerHTML, /data-action="manage-lists"/);
   app.state.view = "home";
   app.render();
-  assert.match(get("app").innerHTML, /<option value="manage">Manage lists…/);
+  assert.match(get("app").innerHTML, /data-id="lists"[^>]*>Lists<\/button>/);
+  assert.doesNotMatch(get("app").innerHTML, /id="list-select"|connected-dot|>Signed in</);
+  assert.match(get("app").innerHTML, /class="brand-date"/);
+  app.state.timeline = "lists";
+  app.render();
+  assert.match(get("app").innerHTML, /No lists yet/);
+  assert.match(get("app").innerHTML, /data-action="manage-lists"/);
+  assert.doesNotMatch(get("app").innerHTML, /class="feed"|id="list-select"/);
   await app.showInterests("lists");
   assert.doesNotMatch(modal.innerHTML, /<img src=x/);
   assert.match(modal.innerHTML, /&lt;img/);
+  assert.doesNotMatch(get("app").innerHTML, /<img src=x/);
+  assert.match(get("app").innerHTML, /id="list-select"/);
   app.state.session = null;
   app.state.api = null;
   assert.match(app.interestsSettings(), /Sign in to manage/);
@@ -2753,11 +2762,7 @@ test("interest buttons, forms, and list selection are wired through application 
     listeners.get("click")({ target: { closest: () => button } });
     await new Promise(setImmediate);
   }
-  app.state.timeline = "list:1";
-  const select = { id: "list-select", value: "manage" };
-  listeners.get("change")({ target: select });
-  assert.equal(select.value, "list:1");
-  assert.deepEqual(opened, [["tags"], ["lists"], ["members", "1"], ["lists"]]);
+  assert.deepEqual(opened, [["tags"], ["lists"], ["members", "1"]]);
   for (const [id, field, value] of [["follow-tag-form", "tag", "#nature"], ["save-list-form", "title", "Friends"], ["list-member-search", "query", "person"]]) {
     listeners.get("submit")({
       target: { id, fields: [[field, value]], dataset: {}, querySelector: () => null },
@@ -2771,6 +2776,59 @@ test("interest buttons, forms, and list selection are wired through application 
   listeners.get("change")({ target: { id: "list-select", value: "list:1" } });
   assert.equal(context.location.hash, "home");
   assert.equal(app.state.query, "");
+
+  const timelines = [];
+  app.state.api.timeline = async (timeline) => { timelines.push(timeline); return { posts: [] }; };
+  app.loadSuggestions = async () => {};
+  app.state.lists = [{ id: "1", title: "Friends" }];
+  app.state.view = "home";
+  app.state.timeline = "home";
+  const clickTimeline = async (id) => {
+    const button = { dataset: { action: "timeline", id }, disabled: false };
+    listeners.get("click")({ target: { closest: () => button } });
+    await new Promise(setImmediate);
+  };
+  await clickTimeline("lists");
+  assert.deepEqual(timelines, []);
+  assert.match(get("app").innerHTML, /data-id="lists" class="active" aria-pressed="true"/);
+  assert.match(get("app").innerHTML, /Choose a list to read its posts/);
+  listeners.get("change")({ target: { id: "list-select", value: "list:1" } });
+  await new Promise(setImmediate);
+  assert.deepEqual(timelines, ["list:1"]);
+  assert.match(get("app").innerHTML, /data-id="lists" class="active"/);
+  assert.match(get("app").innerHTML, /value="list:1" selected>Friends/);
+  await clickTimeline("local");
+  assert.deepEqual(timelines, ["list:1", "local"]);
+  assert.doesNotMatch(get("app").innerHTML, /id="list-select"/);
+  listeners.get("change")({ target: { id: "list-select", value: "" } });
+  await new Promise(setImmediate);
+  assert.equal(app.state.timeline, "lists");
+  assert.deepEqual(timelines, ["list:1", "local"]);
+});
+
+test("opening Lists cancels a pending timeline and does not fetch or refresh an unselected list", async () => {
+  const { app, context, get } = interestsFixture();
+  app.state.view = "home";
+  app.loadSuggestions = async () => {};
+  let finish, signal;
+  app.state.api.timeline = async (_timeline, _next, currentSignal) => {
+    if (_timeline === "lists") throw new Error("List selection must not fetch a timeline");
+    signal = currentSignal;
+    return new Promise((resolve) => { finish = resolve; });
+  };
+  const pending = app.loadFeed();
+  app.state.timeline = "lists";
+  await app.loadFeed();
+  assert.equal(signal.aborted, true);
+  finish({ posts: app.demoPosts, next: "older" });
+  await pending;
+  assert.equal(app.state.posts.length, 0);
+  assert.equal(app.state.loading, false);
+  assert.equal(app.state.next, undefined);
+  assert.match(get("app").innerHTML, /No lists yet/);
+  app.state.api.timeline = async () => { assert.fail("No list has been selected"); };
+  context.document.hidden = false;
+  await app.refreshReading(Date.now());
 });
 
 test("API mapping uses the original publication's language when it is boosted", () => {

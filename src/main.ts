@@ -307,6 +307,9 @@ namespace Fedi {
       case "save-draft":
         saveCurrentDraft();
         break;
+      case "finish-editing":
+        finishMobileEditing();
+        break;
       case "preview":
         captureDraft();
         flushDraft();
@@ -511,6 +514,19 @@ namespace Fedi {
     updateConversationViewport();
     window.visualViewport?.addEventListener("resize", updateConversationViewport);
     window.visualViewport?.addEventListener("scroll", updateConversationViewport);
+    updateEditorViewport();
+    window.visualViewport?.addEventListener("resize", updateEditorViewport);
+    window.visualViewport?.addEventListener("scroll", updateEditorViewport);
+    window.addEventListener("resize", updateEditorViewport);
+    document.addEventListener("focusin", () => { updateEditorTyping(); updateEditorViewport(); });
+    document.addEventListener("focusout", () => { setTimeout(updateEditorViewport, 0); });
+    document.addEventListener("selectionchange", updateEditorTyping);
+    document.addEventListener("beforeinput", editorBeforeInput);
+    document.addEventListener("pointerdown", rememberEditorSelection);
+    document.addEventListener("mousedown", (event) => {
+      if (document.activeElement?.id === "draft-body" &&
+          (event.target as Element).closest('.editor-toolbar button')) event.preventDefault();
+    });
     if (state.session?.server && state.session.token)
       state.api = new API(state.session.server, state.session.token);
     else state.session = null;
@@ -535,6 +551,7 @@ namespace Fedi {
       if (mutations.has(key)) return;
       mutations.add(key);
       button.disabled = true;
+      document.querySelector(".editor-more[open]")?.removeAttribute("open");
       void handleAction(name, id, button)
         .catch(formError)
         .finally(() => {
@@ -560,6 +577,7 @@ namespace Fedi {
     });
     document.addEventListener("input", (event) => {
       const el = event.target as HTMLInputElement;
+      editorInput(event as InputEvent);
       if (el.id.startsWith("draft-")) captureDraft();
       if (el.dataset.mediaAlt) updateMediaDescription(el.dataset.mediaAlt, el.value);
       if (el.id === "message-body") rememberMessage();
@@ -568,6 +586,7 @@ namespace Fedi {
     });
     document.addEventListener("change", (event) => {
       const el = event.target as HTMLInputElement;
+      if (el.id === "editor-smart-punctuation") setEditorSmartPunctuation(el.checked);
       if (el.id === "following-only") {
         state.followingOnly = el.checked;
         updateFeedFilters();

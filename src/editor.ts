@@ -65,13 +65,16 @@ namespace Fedi {
       : d.title || d.body || d.subtitle || d.media?.length
         ? "pending"
         : "empty";
-    return `<div class="draft-save-controls"><button type="button" class="button subtle small-button" data-action="save-draft" title="Save draft (⌘/Ctrl+S)">Save draft</button><span id="save-status" role="status" aria-live="polite" data-state="${status}">${saved ? "Saved" : status === "empty" ? "" : "Unsaved"}</span></div>`;
+    return `<div class="draft-save-controls"><button type="button" class="button subtle small-button" data-action="save-draft" aria-describedby="save-status" title="Save draft (⌘/Ctrl+S)">Save draft</button><span id="save-status" role="status" aria-live="polite" data-state="${status}">${saved ? "Saved" : status === "empty" ? "" : "Unsaved"}</span></div>`;
   }
   function publicationSettings(d: Draft): string {
     return `<details class="publishing-options"><summary>${d.kind === "post" ? "Audience & content warning" : "Publication settings"} ${icon("down")}</summary><div><label>Who can read this?${d.editingId ? " (unchanged when editing)" : ""}<select id="draft-visibility" ${d.editingId ? "disabled" : ""}><option value="public" ${d.visibility === "public" ? "selected" : ""}>Everyone · public</option><option value="unlisted" ${d.visibility === "unlisted" ? "selected" : ""}>Unlisted · visible by link</option><option value="private" ${d.visibility === "private" ? "selected" : ""}>Followers only</option></select></label><label>Content warning (optional)<input id="draft-warning" value="${escapeHTML(d.warning)}" placeholder="Let readers choose before opening"></label></div>${d.kind === "post" ? action("export-current", "Export draft .md", "", "text-button") : ""}</details>`;
   }
   function scheduleButton(d: Draft): string {
     return state.session && !d.editingId ? action("schedule", "Schedule", "", "button subtle") : "";
+  }
+  function editorOptions(d: Draft): string {
+    return `<details class="editor-more"><summary class="icon-button" aria-label="More editor options" title="More editor options">···</summary><div class="editor-menu">${scheduleButton(d)}<button class="button subtle zen-toggle" data-action="focus" aria-pressed="${state.focus}" title="Zen mode (⌘/Ctrl+Shift+F)"><span data-zen-label>${state.focus ? "Exit Zen" : "Zen mode"}</span></button><label class="editor-typing-option"><input id="editor-smart-punctuation" type="checkbox" ${editorSmartPunctuation ? "checked" : ""}> Smart punctuation</label><p>Keyboard quotes and corrections. Always off in code.</p></div></details>`;
   }
   function noteComposerView(d: Draft): string {
     const me = state.session?.account || demoMe;
@@ -103,13 +106,12 @@ namespace Fedi {
       ["inline-code", "`", "Inline code"],
       ["divider", "―", "Divider"],
     ];
-    const toolbar = `<div class="editor-toolbar" role="toolbar" aria-label="Markdown formatting">${tools.map(([name, label, title]) => `<button type="button" data-action="format" data-id="${name}" title="${title}" aria-label="${title}">${label}</button>`).join("")}<button type="button" data-action="upload-media" title="Upload images" aria-label="Upload images">${icon("image")}+</button><button type="button" data-action="markdown-help" title="Markdown help" aria-label="Markdown help">?</button></div>`;
-    return `<header class="page-top editor-top"><a class="text-button" href="#drafts">${icon("back")} Your writing</a><div>${draftSaveControls(d)}${state.preview ? '<button class="zen-preview-edit text-button" data-action="preview">Edit</button>' : ""}<button class="button subtle small-button zen-toggle" data-action="focus" aria-label="${state.focus ? "Exit" : "Enter"} Zen mode" aria-pressed="${state.focus}" title="Zen mode (⌘/Ctrl+Shift+F)">${icon("expand")}<span data-zen-label>${state.focus ? "Exit Zen" : "Zen mode"}</span></button></div></header>
-      <div class="editor-controls"><span class="editor-kind">Article</span><div><button class="button subtle" data-action="preview">${icon(state.preview ? "edit" : "eye")} ${state.preview ? "Edit" : "Preview"}</button>${scheduleButton(d)}<button class="button primary" data-action="publish">${d.editingId ? "Update article" : state.session ? "Publish" : "Publish in demo"} ${icon("arrow")}</button></div></div>
+    const toolbar = `<div class="editor-tools"><button type="button" class="editor-done text-button" data-action="finish-editing">Done</button><div class="editor-toolbar" role="toolbar" aria-label="Markdown formatting">${tools.map(([name, label, title]) => `<button type="button" data-action="format" data-id="${name}" title="${title}" aria-label="${title}">${label}</button>`).join("")}<button type="button" data-action="upload-media" title="Upload images" aria-label="Upload images">${icon("image")}+</button><button type="button" data-action="markdown-help" title="Markdown help" aria-label="Markdown help">?</button></div></div>`;
+    return `<header class="page-top editor-top"><a class="text-button editor-back" href="#drafts" aria-label="Your writing">${icon("back")}<span>Your writing</span></a>${draftSaveControls(d)}<div class="editor-actions"><button class="button subtle editor-preview" data-action="preview" aria-label="${state.preview ? "Edit article" : "Preview article"}" title="${state.preview ? "Edit" : "Preview"}">${icon(state.preview ? "edit" : "eye")}<span>${state.preview ? "Edit" : "Preview"}</span></button><button class="button primary" data-action="publish">${d.editingId ? "Update" : "Publish"}</button>${editorOptions(d)}</div></header>
       <div class="editor-paper">${
         state.preview
           ? `<div class="article-preview-heading"><span class="eyebrow">READING PREVIEW</span><h1>${escapeHTML(d.title || "Untitled article")}</h1>${d.subtitle ? `<p class="reader-subtitle">${escapeHTML(d.subtitle)}</p>` : ""}<div class="post-byline">${avatar(state.session?.account || demoMe)}<div><strong>${escapeHTML(state.session?.account.name || "You")}</strong><div class="byline-sub">${readingTime(d.body)} min read</div></div></div></div><div class="prose reading-prose">${markdown(d.body) || '<p class="muted">Your story will take shape here.</p>'}</div>`
-          : `<div class="article-heading"><label class="sr-only" for="draft-title">Article title</label><input id="draft-title" class="title-input" placeholder="Give your story a title…" value="${escapeHTML(d.title)}" maxlength="250"><label class="sr-only" for="draft-subtitle">Subtitle</label><input id="draft-subtitle" class="subtitle-input" placeholder="Add a subtitle, if you like." value="${escapeHTML(d.subtitle)}" maxlength="500"></div>${toolbar}<label class="sr-only" for="draft-body">Article body in Markdown</label><textarea id="draft-body" class="writing-area" placeholder="It starts with a thought.\n\nTell your story…" spellcheck="true">${escapeHTML(d.body)}</textarea>`
+          : `<div class="article-heading"><label class="sr-only" for="draft-title">Article title</label><input id="draft-title" class="title-input" placeholder="Give your story a title…" value="${escapeHTML(d.title)}" maxlength="250"><label class="sr-only" for="draft-subtitle">Subtitle</label><input id="draft-subtitle" class="subtitle-input" placeholder="Add a subtitle, if you like." value="${escapeHTML(d.subtitle)}" maxlength="500"></div>${toolbar}<label class="sr-only" for="draft-body">Article body in Markdown</label><textarea id="draft-body" class="writing-area" placeholder="It starts with a thought.\n\nTell your story…" spellcheck="${editorSmartPunctuation}" autocorrect="${editorSmartPunctuation ? "on" : "off"}" autocapitalize="${editorSmartPunctuation ? "sentences" : "off"}" writingsuggestions="${editorSmartPunctuation}">${escapeHTML(d.body)}</textarea>`
       }${state.preview ? attachmentGallery(d.media, d.body) : ""}</div>
       ${draftMediaView(d)}
       <div class="editor-bottom"><span id="word-count"></span><span id="character-count"></span>${action("export-current", `${icon("download")} Export .md`, "", "text-button")}</div>
@@ -123,13 +125,17 @@ namespace Fedi {
   ): void {
     const element = document.getElementById("save-status");
     if (!element) return;
+    if (status === "error" && element.dataset.state !== "error") toast(value);
     element.textContent = value;
     element.dataset.state = status;
+    const button = document.querySelector<HTMLButtonElement>('[data-action="save-draft"]');
+    if (button) button.textContent = status === "error" ? "Retry save" : "Save draft";
   }
 
   export function updateEditorMeta(): void {
     const d = state.draft;
     if (!d) return;
+    updateEditorTyping();
     const note = document.querySelector(".editor-note");
     if (note && state.session)
       note.textContent = `${state.session.maxChars.toLocaleString()} characters per publication · ${state.session.format === "text/markdown" ? "Native Markdown" : state.session.format === "text/html" ? "Rich text" : "Plain text only"}`;
@@ -236,6 +242,13 @@ namespace Fedi {
     captureDraft();
   }
   let linkSelection: { draft: Draft; start: number; end: number; image: boolean } | undefined;
+  let toolbarSelection: { textarea: HTMLTextAreaElement; start: number; end: number } | undefined;
+  export function rememberEditorSelection(event: PointerEvent): void {
+    toolbarSelection = undefined;
+    if (!(event.target as Element).closest('.editor-toolbar [data-action="format"]')) return;
+    const textarea = document.getElementById("draft-body") as HTMLTextAreaElement | null;
+    if (textarea) toolbarSelection = { textarea, start: textarea.selectionStart, end: textarea.selectionEnd };
+  }
   export function insertEditorLink(url: string, label: string): void {
     const selection = linkSelection;
     if (!selection || state.draft !== selection.draft) return;
@@ -256,12 +269,19 @@ namespace Fedi {
       "draft-body",
     ) as HTMLTextAreaElement | null;
     if (!textarea) return;
+    if (toolbarSelection?.textarea === textarea)
+      textarea.setSelectionRange(toolbarSelection.start, toolbarSelection.end);
+    toolbarSelection = undefined;
     const start = textarea.selectionStart,
       end = textarea.selectionEnd,
       selected = textarea.value.slice(start, end);
     if (kind === "link" || kind === "image") {
       linkSelection = { draft: state.draft, start, end, image: kind === "image" };
-      showModal(kind === "image" ? "Insert an image from a URL" : "Insert a link", `<form id="editor-link-form"><label>${kind === "image" ? "Image URL (HTTPS)" : "URL"}<input type="url" name="url" required placeholder="https://" autofocus></label><label>${kind === "image" ? "Image description (alt text)" : "Link text"}<input name="label" value="${escapeHTML(selected)}"></label><button type="submit" class="button primary">Insert ${kind === "image" ? "image" : "link"}</button></form>`);
+      const text = selected.trim();
+      const existing = /^!?\[([^\]\n]*)\]\((https?:\/\/[^\s]+)\)$/.exec(text);
+      const url = existing ? safeURL(existing[2]) : /^https?:\/\/\S+$/i.test(text) ? safeURL(text) : "";
+      const label = existing && url ? existing[1] : url ? "" : selected;
+      showModal(kind === "image" ? "Insert an image from a URL" : "Insert a link", `<form id="editor-link-form"><label>${kind === "image" ? "Image URL (HTTPS)" : "URL"}<input type="url" name="url" required placeholder="https://" value="${escapeHTML(url)}" autocorrect="off" autocapitalize="off" spellcheck="false" ${url ? "" : "autofocus"}></label><label>${kind === "image" ? "Image description (alt text)" : "Link text (optional)"}<input name="label" value="${escapeHTML(label)}" placeholder="${kind === "image" ? "Describe the image" : "Text to display"}" ${url ? "autofocus" : ""}></label><button type="submit" class="button primary">Insert ${kind === "image" ? "image" : "link"}</button></form>`);
       return;
     }
     const linePrefixes: Record<string, string> = { heading: "## ", subheading: "### ", quote: "> ", list: "- ", ordered: "1. ", task: "- [ ] " };
@@ -305,6 +325,11 @@ namespace Fedi {
   }
   export function toggleFocus(): void {
     if (state.view === "editor" && state.draft?.kind !== "article") return;
+    if (state.view === "editor" && mobileEditorLayout()) {
+      document.getElementById("draft-body")?.focus({ preventScroll: true });
+      updateEditorViewport();
+      return;
+    }
     state.focus = !state.focus;
     const editing = state.view === "editor";
     document.body.classList.toggle("focus-mode", state.focus);

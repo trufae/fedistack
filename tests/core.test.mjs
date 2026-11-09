@@ -67,6 +67,9 @@ function elements(context) {
         innerHTML: "",
         textContent: "",
         dataset: {},
+        attributes: {},
+        setAttribute(name, value) { this.attributes[name] = value; },
+        getAttribute(name) { return this.attributes[name] ?? null; },
         focus() {},
         querySelectorAll: () => [],
         classList: { toggle() {}, add() {}, remove() {} },
@@ -4801,4 +4804,145 @@ test("URL dialogs insert safe links and images at the remembered selection", () 
   assert.throws(() => app.insertEditorLink("http://example.org/photo.png", "image"), /HTTPS/);
   app.insertEditorLink("https://example.org/photo.png", 'Photo "caption"');
   assert.match(app.markdown(textarea.value), /alt="Photo &quot;caption&quot;"/);
+});
+
+test("link dialogs distinguish URLs, labels and existing links, even when a toolbar tap blurs the selection", () => {
+  const url = "https://www.prux.org/posts/goodbye-swift-hello-rust/";
+  const { app, get, textarea } = editingClient(url);
+  get("modal").querySelector = () => null;
+  get("modal").showModal = () => {};
+  app.rememberEditorSelection({ target: { closest: () => true } });
+  textarea.setSelectionRange(0, 0);
+  app.formatSelection("link");
+  assert.match(get("modal").innerHTML, new RegExp(`name="url"[^>]*value="${url}"`));
+  assert.match(get("modal").innerHTML, /name="label" value=""[^>]*autofocus/);
+  app.insertEditorLink(url, "The article");
+  assert.equal(textarea.value, `[The article](${url})`);
+  textarea.setSelectionRange(0, textarea.value.length);
+  app.formatSelection("link");
+  assert.match(get("modal").innerHTML, /name="label" value="The article"/);
+  app.insertEditorLink(url, "Read it");
+  assert.equal(textarea.value, `[Read it](${url})`);
+
+  textarea.value = "Words to link";
+  textarea.setSelectionRange(0, textarea.value.length);
+  app.formatSelection("link");
+  assert.match(get("modal").innerHTML, /name="url"[^>]*value=""[^>]*autofocus/);
+  assert.match(get("modal").innerHTML, /name="label" value="Words to link"/);
+});
+
+test("mobile article focus follows the keyboard, survives link dialogs and restores normal navigation", () => {
+  const { app, context, get, textarea } = editingClient();
+  const classes = new Map(), styles = new Map();
+  context.document.body.classList.toggle = (name, value) => classes.set(name, value);
+  context.document.documentElement.style = { setProperty: (name, value) => styles.set(name, value) };
+  context.window = { innerWidth: 393, innerHeight: 850, visualViewport: { height: 850, offsetTop: 0, scale: 1 } };
+  textarea.matches = () => true;
+  textarea.blur = () => { context.document.activeElement = null; };
+  app.updateEditorViewport();
+  assert.equal(classes.get("mobile-editor-focus"), true);
+  assert.equal(classes.get("editor-keyboard-open"), false);
+  Object.assign(context.window.visualViewport, { height: 480, offsetTop: 35 });
+  // Android can shrink both viewports; retain the height from before the keyboard.
+  context.window.innerHeight = 480;
+  app.updateEditorViewport();
+  assert.equal(classes.get("editor-keyboard-open"), true);
+  assert.equal(styles.get("--editor-height"), "480px");
+  assert.equal(styles.get("--editor-top"), "35px");
+  get("modal").open = true;
+  context.document.activeElement = { id: "url", matches: () => true };
+  app.updateEditorViewport();
+  assert.equal(classes.get("mobile-editor-focus"), true);
+  get("modal").open = false;
+  context.document.activeElement = textarea;
+  context.window.innerHeight = 850;
+  Object.assign(context.window.visualViewport, { height: 850, offsetTop: 0 });
+  app.updateEditorViewport();
+  assert.equal(classes.get("editor-keyboard-open"), false);
+  assert.equal(classes.get("mobile-editor-focus"), false);
+  assert.equal(context.document.activeElement, null);
+
+  context.document.activeElement = textarea;
+  app.updateEditorViewport();
+  app.finishMobileEditing();
+  assert.equal(classes.get("mobile-editor-focus"), false);
+  assert.equal(app.getDrafts()[0].body, textarea.value);
+  context.document.activeElement = textarea;
+  app.state.draft.kind = "post";
+  context.window.visualViewport.height = 480;
+  app.updateEditorViewport();
+  assert.equal(classes.get("editor-keyboard-open"), true);
+  assert.equal(classes.get("mobile-editor-focus"), false);
+  app.state.view = "home";
+  app.updateEditorViewport();
+  assert.equal(classes.get("editor-keyboard-open"), false);
+  context.window.innerWidth = 1100;
+  app.state.view = "editor";
+  app.state.draft.kind = "article";
+  context.document.activeElement = textarea;
+  app.updateEditorViewport();
+  assert.equal(classes.get("mobile-editor-focus"), false);
+  context.window.innerWidth = 850;
+  context.matchMedia = () => ({ matches: true });
+  app.state.focus = true;
+  app.updateEditorViewport();
+  assert.equal(classes.get("mobile-editor-focus"), true);
+  assert.equal(app.state.focus, false);
+  assert.equal(classes.get("zen-mode"), false);
+});
+
+test("smart punctuation is optional and stays off in fenced, indented and inline code", () => {
+  const { app, context, textarea } = editingClient("A sentence");
+  app.updateEditorTyping();
+  assert.equal(textarea.attributes.autocorrect, "off");
+  app.setEditorSmartPunctuation(true);
+  assert.equal(textarea.attributes.spellcheck, "true");
+  const examples = [
+    ["```c\nint foo() {", true], ["```c\nx\n```\nProse", false],
+    ["~~~~js\n```\ncode", true], ["~~~~\ncode\n~~~\nmore code", true],
+    ["~~~~\ncode\n~~~~\nProse", false], ["~~~\n`code\n~~~\nProse", false], ["> ```c\n> code", true],
+    ["Use `printf(", true], ["Use `code` in prose", false],
+    ["Use ``a ` nested tick", true], ["Use \\`literal tick", false],
+    ["    indented code", true], ["\tcode", true],
+  ];
+  for (const [text, code] of examples) {
+    textarea.value = text;
+    textarea.setSelectionRange(text.length, text.length);
+    assert.equal(app.editorCodeAt(text, text.length), code, text);
+    app.updateEditorTyping();
+    assert.equal(textarea.attributes.spellcheck, String(!code), text);
+    assert.equal(textarea.attributes.autocapitalize, code ? "off" : "sentences", text);
+  }
+  const restored = setup(undefined, { localStorage: context.localStorage });
+  assert.equal(restored.app.editorSmartPunctuation, true);
+});
+
+test("keyboard punctuation normalization preserves existing quotes, paste, composition and the cursor", () => {
+  const { app, textarea } = editingClient('Keep “existing quotes”\n');
+  const original = textarea.value;
+  textarea.setSelectionRange(original.length, original.length);
+  let prevented = false;
+  app.editorBeforeInput({ target: textarea, inputType: "insertText", data: "“", cancelable: true,
+    preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.equal(textarea.value, original + '"');
+  const type = (text, inputType, isComposing = false) => {
+    app.editorBeforeInput({ target: textarea, inputType, data: text, isComposing, cancelable: false });
+    textarea.setRangeText(text, textarea.selectionStart, textarea.selectionEnd);
+    app.editorInput({ target: textarea, inputType, isComposing });
+  };
+  type("’—", "insertReplacementText");
+  assert.equal(textarea.value, original + '"\'--');
+  assert.equal(textarea.selectionStart, textarea.value.length);
+  type("“pasted”", "insertFromPaste");
+  assert.ok(textarea.value.endsWith("“pasted”"));
+  type("“composition”", "insertCompositionText", true);
+  assert.ok(textarea.value.endsWith("“composition”"));
+  app.setEditorSmartPunctuation(true);
+  type("’", "insertText");
+  assert.ok(textarea.value.endsWith("’"));
+  textarea.value = "```c\n";
+  textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+  type("“code”", "insertText");
+  assert.equal(textarea.value, '```c\n"code"');
 });

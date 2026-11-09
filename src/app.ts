@@ -225,6 +225,7 @@ namespace Fedi {
       else target?.focus({ preventScroll: true });
     }
     if (state.view === "editor") updateEditorMeta();
+    updateEditorViewport();
     document.title = `${state.view === "reader" && state.reading ? state.reading.title || (state.reading.kind === "article" ? "Article" : "Note") : state.view === "editor" ? (state.draft?.kind === "post" ? "New note" : state.draft?.title) || "New draft" : state.view === "profile" ? state.profile?.account?.name || "Profile" : "Your reading room"} — Fedistack`;
   }
 

@@ -2789,6 +2789,49 @@ test("article classification uses the 900-character boundary or explicit markers
   assert.equal(app.mapStatus({ ...linked, content: "x".repeat(901) }).kind, "article");
 });
 
+test("untitled long posts show the opening only as prose and keep their linked article", () => {
+  const { app, context } = setup();
+  const { get } = elements(context);
+  app.htmlToMarkdown = (text) => text;
+  const opening = "Let me elaborate. Alien tokens are words in the source.";
+  const post = app.mapStatus(sharedStatus({
+    content: `${opening}\n\n${"More details. ".repeat(80)}\n\n# A later section`,
+    card: { type: "link", title: "Linked headline", description: opening, url: "https://example.org/article" },
+  }));
+  assert.equal(post.kind, "article");
+  const card = app.postCard(post);
+  assert.doesNotMatch(card, /<h2>|Linked headline/);
+  assert.match(card, /class="article-link"><p class="excerpt">Let me elaborate/);
+  app.state.view = "reader";
+  app.state.reading = post;
+  app.render();
+  const html = get("app").innerHTML;
+  assert.doesNotMatch(html, /reader-subtitle|Linked headline/);
+  assert.equal(html.split(opening).length, 2);
+  assert.match(html, /<div class="prose reading-prose"><p>Let me elaborate/);
+  assert.match(html, /<h1>A later section<\/h1>/);
+  assert.match(html, /href="https:\/\/example.org\/article"[^>]*>Read the linked article/);
+});
+
+test("the reader and card show an authored headline once and preserve distinct headings", () => {
+  const { app, context } = setup();
+  const { get } = elements(context);
+  app.htmlToMarkdown = (text) => text;
+  const post = app.mapStatus(sharedStatus({ content: "# **Headline**\n\n## Section\n\nArticle body." }));
+  app.state.view = "reader";
+  app.state.reading = post;
+  app.render();
+  assert.match(get("app").innerHTML, /<h1>Headline<\/h1>/);
+  assert.equal(get("app").innerHTML.split("Headline").length, 2);
+  assert.match(app.postCard(post), /<h2>Headline<\/h2><p class="excerpt">Section/);
+  assert.match(get("app").innerHTML, /<div class="prose reading-prose"><h2>Section<\/h2>/);
+
+  app.state.reading = { ...post, title: "Remote title", subtitle: "An authored subtitle" };
+  app.render();
+  assert.match(get("app").innerHTML, /<h1>Remote title<\/h1><p class="reader-subtitle">An authored subtitle<\/p>/);
+  assert.match(get("app").innerHTML, /<div class="prose reading-prose"><h1><strong>Headline<\/strong><\/h1>/);
+});
+
 function feedFixture() {
   const { app, context } = setup();
   const { get } = elements(context);

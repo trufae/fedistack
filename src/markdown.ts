@@ -184,6 +184,17 @@ namespace Fedi {
       .trim();
   }
 
+  export function leadingHeading(source: string): RegExpExecArray | null {
+    return /^(?:[ \t]*\r?\n)*#[ \t]+([^\r\n]+)(?:\r?\n|$)/.exec(source);
+  }
+
+  export function articleBody(post: Post): string {
+    const heading = post.title && leadingHeading(post.markdown);
+    return heading && plainText(heading[1]) === post.title
+      ? post.markdown.slice(heading[0].length)
+      : post.markdown;
+  }
+
   export function plainText(source: string): string {
     return source
       .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, "$1 ($2)")

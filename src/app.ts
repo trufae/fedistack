@@ -24,6 +24,7 @@ namespace Fedi {
     revealed: new Set<string>(),
     lists: [] as UserList[],
     reading: null as Post | null,
+    readerBack: "home",
     readerServer: "",
     comments: [] as Post[],
     replyDrafts: new Map<string, string>(),
@@ -200,6 +201,7 @@ namespace Fedi {
     if (discovery) {
       renderHTML(discovery, discoverContent());
       setupSuggestionCarousels(suggestionScrolls);
+      setupDiscoveryScroll();
       return;
     }
     const languagePicker = document.activeElement?.closest(".language-picker");
@@ -238,6 +240,7 @@ namespace Fedi {
       `<div class="layout">${sidebar()}${!state.session ? action("connect", "Sign in", "", "button primary desktop-sign-in") : ""}<main id="main" tabindex="-1">${content}</main>${rightRail()}</div>${mobileNav()}`,
     );
     setupSuggestionCarousels(suggestionScrolls);
+    setupDiscoveryScroll();
     if (languageFocus) {
       const target = document.getElementById(languageFocus) ||
         document.getElementById(languageSelect || "");
@@ -349,13 +352,6 @@ namespace Fedi {
     const articles = discoveryArticles(posts);
     rememberDiscoveryArticles(articles);
     return `${topics.size ? `<section class="discover-section"><h2>Topics</h2><div class="discover-links">${Array.from(topics.values(), (tag) => hashtagLink(tag, "topic")).join("")}</div></section>` : ""}
-      <section class="discover-section"><div class="section-heading"><h2>Articles to explore</h2><button class="text-button" data-action="refresh" ${state.loading ? "disabled" : ""}>Find more ${icon("arrow")}</button></div>
-        ${articles.map((post) => `<a class="discover-article" href="${escapeHTML(postReadLink(post.id))}"><span class="eyebrow">${post.tags[0] ? escapeHTML(post.tags[0]) : "Article"} · ${readingTime(post.markdown)} min read</span>
-          <h3>${escapeHTML(post.title || plainText(articleBody(post)).slice(0, 110) || "Read article")}</h3><small>${escapeHTML(post.author.name)} · @${escapeHTML(post.author.acct)}</small></a>`).join("")}
-        ${state.loading && !articles.length ? '<p class="muted" role="status">Finding articles…</p>' : ""}
-        ${!articles.length && !state.loading && !state.error ? `<p class="muted">No new articles match your discovery preferences${state.discoveryLanguages.length ? ' and <a href="#settings">language settings</a>' : ""} yet.</p>` : ""}${feedError()}
-      </section>
-      ${suggestionsView(true)}
       ${discoveryTimelineView()}`;
   }
 
@@ -412,7 +408,7 @@ namespace Fedi {
     const current = () => version === loadVersion && state.api === api && !controller.signal.aborted;
     if (state.view === "discover" && state.exploring && !state.query) {
       feedSource = undefined;
-      await loadDiscovery(api, controller.signal, current);
+      await loadDiscovery(api, controller.signal, current, append);
       return;
     }
     const existing = new Set(append ? state.posts.map((p) => p.id) : []);
@@ -578,6 +574,7 @@ namespace Fedi {
   export async function refreshReading(now = Date.now()): Promise<void> {
     const api = state.api, p = state.profile;
     if (!api || refreshingReading || state.loading || p?.loading || profileImageUpdating() || state.query ||
+        (state.view === "discover" && state.exploring && state.posts.length > 0) ||
         (state.view !== "profile" && state.timeline === "lists") ||
         !["home", "discover", "profile"].includes(state.view) ||
         (typeof document !== "undefined" && (document.hidden || document.activeElement?.matches("input,textarea,[contenteditable=true]"))) ||
@@ -602,6 +599,7 @@ namespace Fedi {
   }
 
   export async function route(force = false): Promise<void> {
+    const fromReader = state.view === "reader";
     if (state.view === "editor") {
       if (!flushDraft()) {
         history.replaceState(
@@ -674,6 +672,9 @@ namespace Fedi {
       // The username is descriptive; the server and ID locate the publication.
       const source = new URLSearchParams(query).get("server") ||
         (sharedPublication ? location.origin : "");
+      if (!fromReader) state.readerBack = state.view === "discover"
+        ? state.query ? searchPath(state.query) : state.exploring ? "discover" : `discover?timeline=${state.timeline}`
+        : "home";
       state.view = "reader";
       state.reading = source ? null : findPost(id) || null;
       if (source) state.revealed.delete(id);
@@ -784,6 +785,7 @@ namespace Fedi {
       state.timeline = state.homeTimeline;
     }
     state.filter = state.view === "home" ? homeFilter : "all";
+    if (!force && fromReader && state.view === "discover" && state.exploring && restoreDiscovery()) return;
     await loadFeed(false, feedTarget, false);
   }
 
@@ -798,7 +800,7 @@ namespace Fedi {
     const replyForm = publicReading
       ? `<p class="muted">${state.session ? "Open the original post to join the conversation." : `Sign in to join the conversation. ${action("connect", "Sign in", "", "text-button")}`}</p>`
       : `<form id="reply-form"><label class="sr-only" for="reply-body">Write a comment</label><textarea id="reply-body" name="body" rows="3" required placeholder="Add a little perspective…">${escapeHTML(state.replyDrafts.get(p.id) || "")}</textarea><div class="reply-footer"><span>${p.visibility === "private" ? "Followers only" : p.visibility === "unlisted" ? "Unlisted reply" : "Public reply"}${!state.session || state.session.format !== "text/plain" ? " · Markdown supported" : ""}</span><button class="button primary" type="submit">Reply ${icon("arrow")}</button></div></form>`;
-    return `<header class="page-top"><a class="text-button" href="#home">${icon("back")} Back to reading</a><button class="icon-button" data-action="focus" aria-label="${state.focus ? "Leave" : "Enter"} focus mode" title="Focus mode">${icon("book")}</button></header><article class="reader">
+    return `<header class="page-top"><a class="text-button" href="#${escapeHTML(state.readerBack)}">${icon("back")} Back to reading</a><button class="icon-button" data-action="focus" aria-label="${state.focus ? "Leave" : "Enter"} focus mode" title="Focus mode">${icon("book")}</button></header><article class="reader">
       ${hidden ? `<div class="content-warning"><h2>${escapeHTML(p.warning)}</h2>${action("reveal", "Show publication", p.id, "button subtle")}</div>` : `${title ? `<span class="eyebrow">${escapeHTML(p.author.publication || "INDEPENDENT WRITING")}</span>` : ""}${!publicReading && p.author.id === (state.session?.account.id || "you") ? `<span class="published-badge">${state.session ? "Published" : "Published in demo"}</span>` : ""}${title ? `<h1>${escapeHTML(title)}</h1>` : ""}${p.subtitle ? `<p class="reader-subtitle">${escapeHTML(p.subtitle)}</p>` : ""}`}
       <div class="post-byline">${profileAvatar(p.author, false, `post:${p.id}`)}<div>${author}<div class="byline-sub">${new Date(p.created).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })} · ${readingTime(p.markdown)} min read</div></div>${publicReading ? "" : followButton(p.author)}</div>
       ${postActions(p)}${hidden ? "" : `${!p.media?.length && p.image ? `<img class="reader-cover" data-image-key="cover:${escapeHTML(p.id)}" src="${escapeHTML(p.image)}" alt="${escapeHTML(p.imageAlt || "")}">` : ""}<div class="prose reading-prose">${markdown(articleBody(p), true)}</div>${attachmentGallery(p.media, p.markdown)}${p.source ? `<a class="button subtle" href="${escapeHTML(p.source)}" target="_blank" rel="noopener noreferrer">Read the linked article ${icon("external")}</a>` : ""}<div class="reader-end">${icon("leaf")}<span>Thanks for reading. Keep the conversation going.</span></div>`}</article>

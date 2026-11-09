@@ -217,12 +217,34 @@ namespace Fedi {
       </div><div class="post-owner-actions">${owned ? `${action("edit-publication", `${icon("edit")} Edit`, post.id, "text-button")}${action("unpublish-publication", "Unpublish", post.id, "text-button")}${action("delete-publication", post.replyTo ? "Delete comment" : "Delete", post.id, "text-button delete-link")}` : ""}${original}<button class="icon-button ${post.saved ? "saved" : ""}" data-action="save" data-id="${escapeHTML(post.id)}" aria-label="${post.saved ? "Remove bookmark" : "Save for later"}" aria-pressed="${post.saved}">${icon("bookmark")}</button></div></div>`;
   }
 
+  function previewExcerpt(text: string, limit: number): string {
+    text = text.replace(/\s+/g, " ").trim();
+    const characters = Array.from(text);
+    if (characters.length <= limit) return text;
+    let excerpt = characters.slice(0, limit).join("");
+    const space = excerpt.lastIndexOf(" ");
+    if (space > excerpt.length / 2) excerpt = excerpt.slice(0, space);
+    return `${excerpt.trimEnd()}…`;
+  }
+
+  function postPreview(post: Post): { title: string; excerpt: string } {
+    // Preview headings are display-only; the reader keeps the original post.
+    const body = plainText(articleBody(post).replace(/!?\[([^\]]*)\]\([^)]+\)/g, "$1"))
+      .replace(/^[ \t]*(?:>\s*|[-+*]\s+|\d+[.)]\s+)/gm, "")
+      .replace(/[^\S\r\n]+/g, " ").trim();
+    const opening = body.split(/\r?\n/, 1)[0].match(/^.*?(?:[.!?](?=\s|$)|[。！？]|$)/)?.[0] || "";
+    const headline = previewExcerpt(opening, 100);
+    const consumed = Array.from(opening).length > 100 ? headline.slice(0, -1) : headline;
+    const title = post.title.trim() || headline || (post.kind === "article" ? "Untitled article" : "Note");
+    const excerpt = post.subtitle.trim() || (post.title.trim()
+      ? body : body.slice(consumed.length));
+    return { title, excerpt: previewExcerpt(excerpt, 180) };
+  }
+
   export function postCard(post: Post, featured = false): string {
     const hidden = post.warning && !state.revealed.has(post.id);
     const href = escapeHTML(postReadLink(post.id));
-    const excerpt = !hidden && post.kind === "article"
-      ? (post.subtitle || plainText(articleBody(post))).slice(0, featured ? 210 : 160)
-      : "";
+    const preview = hidden ? { title: "", excerpt: "" } : postPreview(post);
     return `<article class="post-card ${featured ? "featured" : ""} ${post.kind}">
       ${post.boostedBy ? `<p class="boost-label">${icon("refresh")} Shared by ${escapeHTML(post.boostedBy)}</p>` : ""}
       ${post.replyTo ? `<p class="reply-context"><a href="${escapeHTML(postReadLink(post.replyTo))}">${icon("comment")} View conversation ${icon("arrow")}</a></p>` : ""}
@@ -233,7 +255,8 @@ namespace Fedi {
           : `
       ${featured && post.image ? `<a href="${href}" class="cover-link"><img class="feature-cover" data-image-key="cover:${escapeHTML(post.id)}" src="${escapeHTML(post.image)}" alt="${escapeHTML(post.imageAlt || "")}"></a>` : ""}
       <div class="post-content ${!featured && post.image ? "with-thumbnail" : ""}"><div>
-      ${post.kind === "article" ? `<a href="${href}" class="article-link">${post.title ? `<h2>${escapeHTML(post.title)}</h2>` : ""}${excerpt || !post.title ? `<p class="excerpt">${escapeHTML(excerpt || "Read article")}</p>` : ""}</a><div class="article-meta"><span>${post.tags[0] ? hashtagLink(post.tags[0]) : "Article"}</span><span>·</span><span>${readingTime(post.markdown)} min read</span></div>` : `<div class="prose note-body">${markdown(post.markdown, true)}</div>`}
+      <a href="${href}" class="article-link"><h2>${escapeHTML(preview.title)}</h2>${preview.excerpt ? `<p class="excerpt">${escapeHTML(preview.excerpt)}</p>` : ""}<span class="continue-reading">Continue reading ${icon("arrow")}</span></a>
+      <div class="article-meta"><span>${post.kind === "article" ? "Article" : "Note"}</span>${post.tags[0] ? `<span>·</span><span>${hashtagLink(post.tags[0])}</span>` : ""}${post.kind === "article" ? `<span>·</span><span>${readingTime(post.markdown)} min read</span>` : ""}</div>
       </div>${!featured && post.image ? `<a href="${href}"><img class="thumbnail" data-image-key="cover:${escapeHTML(post.id)}" src="${escapeHTML(post.image)}" alt="${escapeHTML(post.imageAlt || "")}" loading="lazy"></a>` : ""}</div>`
       }
       ${postActions(post)}</article>`;

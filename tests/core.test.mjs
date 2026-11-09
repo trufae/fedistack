@@ -3038,7 +3038,7 @@ test("article classification uses the 900-character boundary or explicit markers
   assert.equal(app.mapStatus({ ...linked, content: "x".repeat(901) }).kind, "article");
 });
 
-test("untitled long posts show the opening only as prose and keep their linked article", () => {
+test("untitled long posts get a preview headline and retain their original reader content", () => {
   const { app, context } = setup();
   const { get } = elements(context);
   app.htmlToMarkdown = (text) => text;
@@ -3049,8 +3049,10 @@ test("untitled long posts show the opening only as prose and keep their linked a
   }));
   assert.equal(post.kind, "article");
   const card = app.postCard(post);
-  assert.doesNotMatch(card, /<h2>|Linked headline/);
-  assert.match(card, /class="article-link"><p class="excerpt">Let me elaborate/);
+  assert.doesNotMatch(card, /Linked headline/);
+  assert.match(card, /class="article-link"><h2>Let me elaborate\.<\/h2><p class="excerpt">Alien tokens/);
+  assert.match(card, /class="continue-reading">Continue reading/);
+  assert.equal(post.title, "");
   app.state.view = "reader";
   app.state.reading = post;
   app.render();
@@ -3081,6 +3083,54 @@ test("the reader and card show an authored headline once and preserve distinct h
   assert.match(get("app").innerHTML, /<div class="prose reading-prose"><h1><strong>Headline<\/strong><\/h1>/);
 });
 
+test("article previews use the authored subtitle and link to the complete post", () => {
+  const { app } = setup();
+  const post = { ...app.demoPosts[0], title: "A <clear> headline", subtitle: "A short & useful subtitle",
+    markdown: "The full article is reserved for the reader." };
+  const card = app.postCard(post);
+  assert.match(card, /<h2>A &lt;clear&gt; headline<\/h2><p class="excerpt">A short &amp; useful subtitle<\/p>/);
+  assert.match(card, /href="#read\/slow-web" class="article-link">[^]*class="continue-reading">Continue reading/);
+  assert.doesNotMatch(card, /The full article is reserved/);
+});
+
+test("notes have bounded previews without duplicating the opening or embedding the full body", () => {
+  const { app, context } = setup();
+  const { get } = elements(context);
+  const markdown = "**A small discovery.** A [quiet corner](https://example.org/quiet) of the web. " +
+    "There is more to this story. ".repeat(30) + "\n\nThe ending is only in the reader.";
+  const post = { ...app.demoPosts[0], id: "compact-note", kind: "post", title: "", subtitle: "", markdown, image: "" };
+  const card = app.postCard(post);
+  assert.match(card, /<h2>A small discovery\.<\/h2><p class="excerpt">A quiet corner of the web\./);
+  assert.equal(card.split("A small discovery.").length, 2);
+  assert.match(card, /…<\/p><span class="continue-reading">Continue reading/);
+  assert.match(card, /href="#read\/compact-note" class="article-link"/);
+  assert.match(card, /class="article-meta"><span>Note<\/span>/);
+  assert.doesNotMatch(card, /note-body|https:\/\/example.org\/quiet|The ending is only/);
+  app.state.view = "reader";
+  app.state.reading = post;
+  app.render();
+  assert.match(get("app").innerHTML, /<strong>A small discovery\.<\/strong>/);
+  assert.match(get("app").innerHTML, /href="https:\/\/example.org\/quiet"/);
+  assert.match(get("app").innerHTML, /The ending is only in the reader\./);
+  assert.equal(post.markdown, markdown);
+  assert.equal(post.title, "");
+});
+
+test("short, multiline, and media-only notes keep usable preview headings", () => {
+  const { app } = setup();
+  const note = { ...app.demoPosts[0], kind: "post", title: "", subtitle: "", image: "" };
+  const short = app.postCard({ ...note, markdown: "A passing thought…" });
+  assert.match(short, /<h2>A passing thought…<\/h2><span class="continue-reading">Continue reading/);
+  assert.doesNotMatch(short, /class="excerpt"/);
+  const multiline = app.postCard({ ...note, markdown: "Today's discovery\n\nA little more context." });
+  assert.match(multiline, /<h2>Today&#39;s discovery<\/h2><p class="excerpt">A little more context\.<\/p>/);
+  const media = app.postCard({ ...note, markdown: "", image: "https://example.org/photo.jpg" });
+  assert.match(media, /<h2>Note<\/h2><span class="continue-reading">Continue reading/);
+  assert.match(media, /class="thumbnail"/);
+  const long = app.postCard({ ...note, markdown: "🦊".repeat(120) + "\n\nThe rest of the note." });
+  assert.match(long, new RegExp(`<h2>${"🦊".repeat(100)}…</h2><p class="excerpt">${"🦊".repeat(20)} The rest of the note\\.</p>`));
+});
+
 function feedFixture() {
   const { app, context } = setup();
   const { get } = elements(context);
@@ -3099,7 +3149,7 @@ function feedFixture() {
 test("Discover browses public articles and topics while Home keeps its own feed and filter", async () => {
   const { app, context, get, post, requests } = feedFixture();
   const article = post("guide", { title: "A public guide", tags: ["Café", "café"] });
-  const note = post("note", { kind: "post", markdown: "A short public note", tags: ["Notes"] });
+  const note = post("note", { kind: "post", title: "", subtitle: "", markdown: "A short public note", tags: ["Notes"] });
   const hidden = [
     post("private", { visibility: "private", title: "Private draft", tags: ["Private"] }),
     post("warning", { warning: "CW", title: "Hidden article", tags: ["Hidden"] }),
@@ -3126,15 +3176,11 @@ test("Discover browses public articles and topics while Home keeps its own feed 
   assert.match(discover, /<h1>Discover<\/h1>/);
   assert.ok(discover.indexOf('id="discover-search"') < discover.indexOf("<h2>Topics"));
   assert.match(discover, /href="#discover\?q=%23Caf%C3%A9" class="topic">#Café/);
-  assert.match(discover, /class="discover-article" href="#read\/guide"/);
-  assert.match(discover, /data-action="discovery-timeline" data-id="local"/);
-  assert.match(discover, /href="#discover\?timeline=federated"/);
+  assert.match(discover, /href="#read\/guide" class="article-link"/);
+  assert.match(discover, /aria-label="Local and federated posts"/);
   assert.match(discover, /A short public note/);
-  assert.doesNotMatch(discover, /Private draft|Hidden article|Reply article|Personal timelines/);
-  assert.ok(discover.indexOf('aria-label="People to follow"') < discover.indexOf('<h2>Public timelines'));
-  app.discovery.timeline = "local";
-  app.render();
-  assert.match(get("app").innerHTML, /href="#discover\?timeline=local"/);
+  assert.doesNotMatch(discover, /Private draft|Hidden article|Reply article|Personal timelines|discovery-timeline|More from Federated|More from Local/);
+  assert.equal((discover.match(/class="post-card/g) || []).length, 2);
 
   const local = await renderRoute("#discover?timeline=local");
   assert.match(local, /<h2>Local timeline<\/h2>/);
@@ -3215,8 +3261,6 @@ test("Discover excludes liked, private, warned, own, muted and reply posts, dedu
   const history = app.undiscoveredPosts([{ ...liked, liked: false }]);
   assert.equal(history.length, 0);
   assert.match(app.discoveryTimelineView(), /Fresh reading/);
-  app.discovery.timeline = "local";
-  assert.match(app.discoveryTimelineView(), /Fresh reading/);
 });
 
 test("Discover refreshes on return and rotates unseen articles before repeating older selections", async () => {
@@ -3245,7 +3289,7 @@ test("Discover refreshes on return and rotates unseen articles before repeating 
   assert.deepEqual(Array.from(reloaded.app.discoveryArticles(), (p) => p.id), second);
 });
 
-test("Discover bounds page scans and continues older public pages on the next visit", async () => {
+test("Discover bounds page scans and appends older public pages without replacing earlier posts", async () => {
   const { app, post, requests } = discoveryFixture();
   app.state.api.timeline = async (timeline, next) => {
     requests.push({ timeline, next });
@@ -3255,9 +3299,10 @@ test("Discover bounds page scans and continues older public pages on the next vi
   };
   await app.route();
   assert.deepEqual(requests.filter((r) => r.timeline === "federated").map((r) => r.next), [undefined, "1", "2"]);
-  await app.loadFeed();
-  assert.deepEqual(requests.filter((r) => r.timeline === "federated").map((r) => r.next), [undefined, "1", "2", undefined, "3", "4"]);
-  assert.deepEqual(new Set(app.discoveryArticles().map((p) => p.id)), new Set(["page-3", "page-4"]));
+  await app.loadFeed(true);
+  assert.deepEqual(requests.filter((r) => r.timeline === "federated").map((r) => r.next), [undefined, "1", "2", "3", "4", "5"]);
+  assert.deepEqual(Array.from(app.state.posts, (p) => p.id), ["page-0", "page-1", "page-2", "page-3", "page-4", "page-5"]);
+  assert.deepEqual(new Set(app.discoveryArticles().map((p) => p.id)), new Set(["page-3", "page-4", "page-5"]));
 });
 
 test("duplicate boosted articles do not stop discovery before scanning the next page", async () => {
@@ -3273,6 +3318,133 @@ test("duplicate boosted articles do not stop discovery before scanning the next 
   assert.equal(requests.filter((r) => r.timeline === "federated").length, 2);
 });
 
+test("Discover mixes twenty previews per batch, drains buffered posts and paginates both sources without duplicates", async () => {
+  const { app, get, post, requests } = discoveryFixture();
+  const shared = post("shared", { url: "https://writer.example/shared" });
+  app.state.api.timeline = async (timeline, next) => {
+    requests.push({ timeline, next });
+    return next
+      ? { posts: [shared, ...Array.from({ length: 10 }, (_, i) => post(`${timeline}-older-${i}`))] }
+      : { posts: [shared, ...Array.from({ length: 20 }, (_, i) => post(`${timeline}-${i}`))], next: `${timeline}-older` };
+  };
+  const cards = () => (get("app").innerHTML.match(/class="post-card/g) || []).length;
+  await app.route();
+  assert.equal(cards(), 20);
+  assert.match(get("app").innerHTML, /href="#read\/local-0"/);
+  assert.match(get("app").innerHTML, /href="#read\/federated-0"/);
+  assert.equal(app.state.posts.length, 41);
+  const first = Array.from(app.state.posts, (p) => p.id);
+  await app.loadFeed(true);
+  assert.equal(cards(), 40);
+  assert.equal(requests.length, 2, "use already fetched posts before requesting another page");
+  await app.loadFeed(true);
+  assert.equal(cards(), 60);
+  assert.deepEqual(requests.slice(2).map(({ timeline, next }) => [timeline, next]),
+    [["federated", "federated-older"], ["local", "local-older"]]);
+  assert.deepEqual(Array.from(app.state.posts.slice(0, first.length), (p) => p.id), first);
+  assert.equal(app.state.posts.filter((p) => p.id === "shared").length, 1);
+  await app.loadFeed(true);
+  assert.equal(cards(), 61);
+  assert.equal(requests.length, 4);
+  assert.equal(app.state.next, undefined);
+  assert.doesNotMatch(get("app").innerHTML, /id="discovery-more"|discovery-timeline/);
+});
+
+test("Discover automatically loads near the bottom and ignores stale observers after navigation", async () => {
+  const { app, context, get, post, sources } = discoveryFixture();
+  sources.federated = Array.from({ length: 45 }, (_, i) => post(`scroll-${i}`));
+  const observers = [];
+  context.IntersectionObserver = class {
+    constructor(callback, options) { this.callback = callback; this.options = options; observers.push(this); }
+    observe(target) { this.target = target; }
+    disconnect() { this.disconnected = true; }
+  };
+  const sentinel = get("discovery-more");
+  await app.route();
+  const observer = observers.at(-1);
+  assert.equal(observer.target, sentinel);
+  assert.equal(observer.options.rootMargin, "600px 0px");
+  const loadFeed = app.loadFeed;
+  const calls = [];
+  let pending;
+  app.loadFeed = (...args) => { calls.push(args); return pending = loadFeed(...args); };
+  observer.callback([{ isIntersecting: true }]);
+  observer.callback([{ isIntersecting: true }]);
+  await pending;
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], true);
+  assert.equal((get("app").innerHTML.match(/class="post-card/g) || []).length, 40);
+  const stale = observers.at(-1);
+  context.location.hash = "#home";
+  await app.route();
+  assert.equal(stale.disconnected, true);
+  const before = calls.length;
+  stale.callback([{ isIntersecting: true }]);
+  assert.equal(calls.length, before);
+  assert.equal(app.state.view, "home");
+});
+
+test("Discover preserves the feed on failed pagination and permits a manual retry", async () => {
+  const { app, get, post } = discoveryFixture();
+  let fail = true;
+  app.state.api.timeline = async (timeline, next) => {
+    if (next && fail) throw new Error("Temporarily unavailable");
+    return { posts: Array.from({ length: 20 }, (_, i) => post(`${timeline}-${next ? "older-" : ""}${i}`)),
+      next: next ? undefined : "older" };
+  };
+  await app.route();
+  await app.loadFeed(true);
+  const earlier = Array.from(app.state.posts, (p) => p.id);
+  await app.loadFeed(true);
+  assert.deepEqual(Array.from(app.state.posts, (p) => p.id), earlier);
+  assert.equal(app.discovery.autoLoad, false);
+  assert.match(get("app").innerHTML, /Temporarily unavailable/);
+  assert.match(get("app").innerHTML, /Load more posts/);
+  fail = false;
+  await app.loadFeed(true);
+  assert.equal(app.state.posts.length, 80);
+  assert.deepEqual(Array.from(app.state.posts.slice(0, earlier.length), (p) => p.id), earlier);
+  assert.equal(app.discovery.autoLoad, true);
+  assert.doesNotMatch(get("app").innerHTML, /Temporarily unavailable/);
+});
+
+test("Discover stops automatic scanning when older pages contain no eligible posts", async () => {
+  const { app, post, requests } = discoveryFixture();
+  app.state.api.timeline = async (timeline, next) => {
+    requests.push({ timeline, next });
+    if (timeline === "local") return { posts: [] };
+    return { posts: Array.from({ length: 20 }, (_, i) => post(`${next || "first"}-${i}`, { visibility: next ? "private" : "public" })),
+      next: String(Number(next || 0) + 1) };
+  };
+  await app.route();
+  await app.loadFeed(true);
+  assert.equal(requests.filter((r) => r.timeline === "federated").length, 4);
+  assert.equal(app.state.posts.length, 20);
+  assert.equal(app.discovery.autoLoad, false);
+  assert.ok(app.state.next, "manual loading is still available");
+});
+
+test("returning from a Discover post restores every loaded batch without refreshing the feed", async () => {
+  const { app, context, get, post, sources, requests } = discoveryFixture();
+  sources.federated = Array.from({ length: 45 }, (_, i) => post(`reading-${i}`));
+  app.state.api.context = async () => [];
+  await app.route();
+  await app.loadFeed(true);
+  const earlier = Array.from(app.state.posts, (p) => p.id);
+  const count = requests.length;
+  context.location.hash = "#read/reading-30";
+  await app.route();
+  assert.equal(app.state.reading.id, "reading-30");
+  assert.match(get("app").innerHTML, /class="text-button" href="#discover">[^]*?Back to reading/);
+  context.location.hash = "#discover";
+  await app.route();
+  assert.equal(requests.length, count);
+  assert.deepEqual(Array.from(app.state.posts, (p) => p.id), earlier);
+  assert.equal((get("app").innerHTML.match(/class="post-card/g) || []).length, 40);
+  await app.refreshReading(Date.now() + 60000);
+  assert.equal(requests.length, count, "background polling must not reorder the stream");
+});
+
 test("Discover tolerates unavailable interests and a failed timeline, retaining its own reading on refresh failure", async () => {
   const { app, context, get, post } = discoveryFixture();
   const unavailable = async () => { throw new Error("Unavailable"); };
@@ -3286,7 +3458,6 @@ test("Discover tolerates unavailable interests and a failed timeline, retaining 
   await app.route();
   assert.equal(app.state.error, "");
   assert.match(get("app").innerHTML, /Readable discovery/);
-  app.discovery.timeline = "local";
   assert.match(app.discoveryTimelineView(), /Local timeline unavailable/);
   context.location.hash = "#home";
   app.state.api.timeline = async () => ({ posts: [post("home-only", { title: "Home only", visibility: "private" })] });
@@ -3325,7 +3496,6 @@ test("discovery likes survive reload, stay account scoped, and a successful like
   app.state.posts = [post];
   app.state.view = "discover";
   app.state.exploring = true;
-  app.discovery.federated = ["id:new-article"];
   click("new-article", "like");
   await new Promise(setImmediate);
   assert.doesNotMatch(get("app").innerHTML, /Like this article/);
@@ -3334,9 +3504,6 @@ test("discovery likes survive reload, stay account scoped, and a successful like
   assert.equal(reloaded.undiscoveredPosts([{ ...post, liked: false }]).length, 0);
   reloaded.state.session = { ...app.state.session, account: { ...app.demoMe, id: "other" } };
   assert.equal(reloaded.undiscoveredPosts([{ ...post, liked: false }]).length, 1);
-  click("local", "discovery-timeline");
-  await new Promise(setImmediate);
-  assert.match(get("app").innerHTML, /href="#discover\?timeline=local"/);
 });
 
 test("federated browsing and new searches show remote notes before optional filtering", async () => {
@@ -5561,12 +5728,15 @@ test("anonymous search omits authenticated resolution and pagination parameters"
   assert.equal(result.next, undefined);
 });
 
-test("post hashtags open a prefilled search and paginate the exact tag timeline", async () => {
+test("reader hashtags open a prefilled search and paginate the exact tag timeline", async () => {
   const { app, context, post, get, requests } = feedFixture();
   app.state.session = { account: app.demoMe, server: "https://example.org", token: "token" };
   const markdown = "[#Café](https://remote.example/tags/caf%C3%A9) #cafe_tools `#code` [#docs](https://example.org/docs)";
   const note = post("note", { kind: "post", markdown });
-  const card = app.postCard(note);
+  app.state.view = "reader";
+  app.state.reading = note;
+  app.render();
+  const card = get("app").innerHTML;
   const [, href] = /href="([^"]+)">#Café<\/a>/.exec(card);
   assert.equal(href, "#discover?q=%23Caf%C3%A9");
   assert.match(card, /href="#discover\?q=%23cafe_tools">#cafe_tools<\/a>/);

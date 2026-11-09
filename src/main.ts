@@ -1,6 +1,7 @@
 namespace Fedi {
   const mutations = new Set<string>();
   let homeScroll = 0;
+  let discoveryScroll = 0;
   async function togglePost(id: string, kind: "like" | "save" | "repost"): Promise<void> {
     const post = findPost(id);
     if (!post) return;
@@ -228,12 +229,6 @@ namespace Fedi {
         break;
       case "refresh":
         await loadFeed();
-        break;
-      case "discovery-timeline":
-        if (id === "local" || id === "federated") {
-          discovery.timeline = id;
-          render();
-        }
         break;
       case "load-more":
         await loadFeed(true);
@@ -624,9 +619,12 @@ namespace Fedi {
     history.scrollRestoration = "manual";
     window.addEventListener("hashchange", () => {
       if (state.view === "home" && state.timeline === "home") homeScroll = window.scrollY;
+      if (state.view === "discover" && state.exploring && !state.query) discoveryScroll = window.scrollY;
+      const fromReader = state.view === "reader";
       const hash = location.hash;
       const loading = route();
-      const restore = state.view === "home" && state.timeline === "home" ? homeScroll : 0;
+      const restore = state.view === "home" && state.timeline === "home" ? homeScroll
+        : fromReader && state.view === "discover" && state.exploring ? discoveryScroll : 0;
       window.scrollTo(0, restore);
       const restored = window.scrollY;
       if (restored < restore) {

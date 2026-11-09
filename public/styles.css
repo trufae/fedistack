@@ -632,26 +632,54 @@ main {
   margin-bottom: 20px;
 }
 .post-content h2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
   overflow-wrap: anywhere;
   font-size: 25px;
   line-height: 1.22;
-  font-weight: 600;
+  font-weight: 700;
 }
 .featured h2 {
   font-size: 31px;
   letter-spacing: -0.04em;
   max-width: 540px;
 }
+.article-link {
+  display: block;
+}
 .article-link:hover h2 {
   color: var(--accent);
 }
 .excerpt {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
   overflow-wrap: anywhere;
   font-family: Georgia, serif;
   color: var(--muted);
   font-size: 15px;
   line-height: 1.55;
   margin-top: 9px;
+}
+.continue-reading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 650;
+}
+.continue-reading .icon {
+  width: 15px;
+  height: 15px;
+}
+.article-link:hover .continue-reading {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .article-meta {
   display: flex;
@@ -720,9 +748,6 @@ main {
 .boost-label .icon {
   width: 13px;
   height: 13px;
-}
-.note-body {
-  font-size: 16px !important;
 }
 .end-note {
   text-align: center;
@@ -876,15 +901,11 @@ main {
 .discover-section .error-panel {
   margin-inline: 0;
 }
-.discover-timelines .timeline-tabs {
-  padding: 0;
-}
-.discover-timelines .timeline-tabs button,
-.discover-section > .section-heading button,
-.discover-more {
+.discover-section > .section-heading button {
   min-height: 44px;
 }
-.discover-timelines .post-card {
+.discover-timelines .post-card,
+.discover-timelines .feed-suggestions {
   margin-inline: 0;
 }
 .discover-timelines > .muted {
@@ -905,25 +926,6 @@ main {
 .discover-links .topic {
   color: var(--accent);
   background: var(--wash);
-}
-.discover-article {
-  display: block;
-  margin-top: 6px;
-  padding: 12px;
-  border-radius: 8px;
-  background: var(--wash);
-}
-.discover-article:hover h3 {
-  color: var(--accent);
-}
-.discover-article h3 {
-  margin: 4px 0;
-  font-size: 22px;
-  line-height: 1.2;
-}
-.discover-article small {
-  color: var(--muted);
-  font-size: 12px;
 }
 .text-button {
   display: inline-flex;
@@ -2698,7 +2700,7 @@ summary {
   .sidebar {
     position: relative;
     height: auto;
-    padding: 6px 20px;
+    padding: 2px 20px;
     flex-direction: row;
     align-items: center;
     justify-content: space-between;
@@ -2707,7 +2709,11 @@ summary {
     border-bottom: 1px solid var(--line);
   }
   .brand {
-    font-size: clamp(22px, 7vw, 28px);
+    font-size: 24px;
+  }
+  .brand img {
+    width: 25px;
+    height: 25px;
   }
   .brand-date {
     display: none;
@@ -2739,21 +2745,27 @@ summary {
   .page-intro {
     padding: 8px 22px 25px;
   }
-  .feed-intro {
-    padding-block: 12px 6px;
-  }
-  .feed-intro h1 {
-    font-size: 31px;
-  }
   .feed-lists {
     padding: 16px 22px;
   }
   .page-intro h1 {
     font-size: 36px;
   }
+  .feed-intro {
+    padding-block: 4px 0;
+  }
+  .feed-intro h1 {
+    font-size: 26px;
+  }
+  .home-intro {
+    gap: 4px 8px;
+  }
   .timeline-tabs {
     padding: 0 22px;
     gap: 26px;
+  }
+  .timeline-tabs > button {
+    padding-block: 8px;
   }
   .timeline-tabs button,
   .feed-controls button {

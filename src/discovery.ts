@@ -1,9 +1,9 @@
 namespace Fedi {
   type PublicTimeline = "local" | "federated";
+  const discoveryBatch = 20;
   export const discovery = {
-    timeline: "federated" as PublicTimeline,
-    local: [] as string[],
-    federated: [] as string[],
+    limit: discoveryBatch,
+    autoLoad: true,
     errors: { local: "", federated: "" },
     owner: "",
     posts: [] as Post[],
@@ -85,7 +85,12 @@ namespace Fedi {
   function rankDiscoveryPosts(posts: Post[], tags: Map<string, number>, authors: Set<string>): Post[] {
     const history = historyForDiscovery();
     const seenOrder = new Map([...history.seen].map((key, index) => [key, index + 1]));
-    const candidates = [...new Map(eligibleDiscoveryPosts(posts).map((post) => [discoveryIdentity(post), post])).values()];
+    const unique = new Map<string, Post>();
+    for (const post of eligibleDiscoveryPosts(posts)) {
+      const key = discoveryIdentity(post);
+      if (!unique.has(key)) unique.set(key, post);
+    }
+    const candidates = [...unique.values()];
     const ranked = candidates.map((post) => {
       const affinity = post.tags.reduce((sum, tag) => sum + Math.min(4, tags.get(tag.toLowerCase()) || 0), 0) + (authors.has(post.author.id) ? 2 : 0);
       return { post, seen: seenOrder.get(discoveryIdentity(post)) || 0, score: -Math.log(Math.max(Number.EPSILON, Math.random())) / (1 + Math.min(10, affinity)) };
@@ -118,29 +123,63 @@ namespace Fedi {
     saveDiscoveryHistory();
   }
   export function discoveryTimelineView(): string {
-    const timeline = discovery.timeline;
-    const label = timeline === "local" ? "Local" : "Federated";
-    const ids = new Set(discovery[timeline]);
-    const posts = eligibleDiscoveryPosts(state.posts).filter((post) => ids.has(discoveryIdentity(post)))
-      .sort((a, b) => b.created.localeCompare(a.created)).slice(0, 3);
-    return `<section class="discover-section discover-timelines" aria-label="Public timelines"><h2>Public timelines</h2>
-      <div class="timeline-tabs" aria-label="Public timeline preview">${(["federated", "local"] as const).map((name) => `<button data-action="discovery-timeline" data-id="${name}" class="${name === timeline ? "active" : ""}" aria-pressed="${name === timeline}">${name === "local" ? "Local" : "Federated"}</button>`).join("")}</div>
-      <div class="feed" aria-label="${label} preview">${posts.map((post) => postCard(post)).join("")}</div>
-      ${state.loading && !posts.length ? '<p class="muted" role="status">Finding public posts…</p>' : ""}
-      ${!state.loading && discovery.errors[timeline] ? `<p class="muted" role="status">${escapeHTML(discovery.errors[timeline])} ${action("refresh", "Try again", "", "text-button")}</p>` : ""}
-      ${!state.loading && !posts.length && !discovery.errors[timeline] ? '<p class="muted">No new public posts match your discovery preferences yet.</p>' : ""}
-      <a class="text-button discover-more" href="#discover?timeline=${timeline}">More from ${label} ${icon("arrow")}</a></section>`;
+    const posts = eligibleDiscoveryPosts(state.posts).slice(0, discovery.limit);
+    const errors = Object.entries(discovery.errors).filter(([, error]) => error);
+    return `<section class="discover-section discover-timelines" aria-label="Mixed public feed"><div class="section-heading"><h2>For you</h2><button class="text-button" data-action="refresh" ${state.loading ? "disabled" : ""}>Refresh ${icon("refresh")}</button></div>
+      <div class="feed" aria-label="Local and federated posts">${posts.slice(0, discoveryBatch).map((post) => postCard(post)).join("")}${suggestionsView(true)}${posts.slice(discoveryBatch).map((post) => postCard(post)).join("")}</div>
+      ${!state.loading ? errors.map(([timeline, error]) => `<p class="muted" role="status">${timeline === "local" ? "Local" : "Federated"}: ${escapeHTML(error)} ${action("refresh", "Try again", "", "text-button")}</p>`).join("") : ""}
+      ${state.error ? `<p class="error-panel" role="alert">${escapeHTML(state.error)}</p>` : ""}
+      ${state.loading ? '<div class="loading" role="status">Finding more posts…</div>' : state.next
+        ? `<div id="discovery-more" class="load-more">${action("load-more", "Load more posts", "", "button subtle")}</div>`
+        : `<p class="end-note">${posts.length ? "You’ve reached the end. Refresh for new posts." : "No new public posts match your discovery preferences yet."}</p>`}</section>`;
   }
-  export async function loadDiscovery(api: API | null, signal: AbortSignal, current: () => boolean): Promise<void> {
+  let discoveryObserver: IntersectionObserver | undefined;
+  export function setupDiscoveryScroll(): void {
+    discoveryObserver?.disconnect();
+    discoveryObserver = undefined;
+    if (state.view !== "discover" || !state.exploring || state.query || state.loading ||
+        !state.next || !discovery.autoLoad || typeof IntersectionObserver === "undefined") return;
+    const more = document.getElementById("discovery-more");
+    if (!more) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (discoveryObserver !== observer || !entries.some((entry) => entry.isIntersecting)) return;
+      observer.disconnect();
+      discoveryObserver = undefined;
+      if (!state.loading && state.view === "discover" && state.exploring && !state.query && state.next)
+        void loadFeed(true);
+    }, { rootMargin: "600px 0px" });
+    discoveryObserver = observer;
+    observer.observe(more);
+  }
+  function discoveryNext(): string | undefined {
+    return eligibleDiscoveryPosts(state.posts).length > discovery.limit || Object.values(discovery.cursors).some(Boolean)
+      ? "discovery" : undefined;
+  }
+  export function restoreDiscovery(): boolean {
+    if (discovery.owner !== discoveryOwner() || !discovery.posts.length) return false;
+    state.posts = discovery.posts;
+    state.accounts = [];
+    state.searchTags = [];
+    state.next = discoveryNext();
+    render();
+    return true;
+  }
+  export async function loadDiscovery(api: API | null, signal: AbortSignal, current: () => boolean, append = false): Promise<void> {
     const owner = discoveryOwner();
     const previous = discovery.owner === owner ? discovery.posts : [];
+    const previousVisible = Math.min(discovery.limit, eligibleDiscoveryPosts(previous).length);
     if (discovery.owner !== owner) {
-      discovery.local = [];
-      discovery.federated = [];
       discovery.cursors = {};
-      discovery.timeline = "federated";
+      append = false;
     }
     discovery.owner = owner;
+    discovery.limit = append ? discovery.limit + discoveryBatch : discoveryBatch;
+    if (append && eligibleDiscoveryPosts(previous).length >= discovery.limit) {
+      state.posts = previous;
+      state.next = discoveryNext();
+      render();
+      return;
+    }
     discovery.errors = { local: "", federated: "" };
     state.posts = previous;
     state.accounts = [];
@@ -149,12 +188,13 @@ namespace Fedi {
     state.error = "";
     state.loading = true;
     render();
-    void loadSuggestions();
-    const history = historyForDiscovery();
+    if (!append) void loadSuggestions();
+    const existing = new Set(append ? previous.map(discoveryIdentity) : []);
     const publicPosts: Record<PublicTimeline, Post[]> = { local: [], federated: [] };
     const errors: Record<PublicTimeline, string> = { local: "", federated: "" };
     const cursors = { ...discovery.cursors };
     async function publicTimeline(timeline: PublicTimeline): Promise<void> {
+      if (append && !cursors[timeline]) return;
       if (!api) {
         demoState.posts.forEach((post) => {
           if (!post.language && demoAuthors.some((author) => author.id === post.author.id)) post.language = "en";
@@ -162,21 +202,21 @@ namespace Fedi {
         publicPosts[timeline] = demoState.posts.filter((post) => timeline === "federated" || post.local);
         return;
       }
-      let cursor: string | undefined;
+      let cursor = append ? cursors[timeline] : undefined;
       const visited = new Set<string>();
       try {
         for (let page = 0; page < 3 && current(); page++) {
+          if (cursor) visited.add(cursor);
           const result = await api.timeline(timeline, cursor, signal);
           if (!current()) return;
           rememberDiscoveryLikes(result.posts);
           publicPosts[timeline].push(...result.posts);
           const fresh = new Set(eligibleDiscoveryPosts(publicPosts[timeline])
-            .filter((post) => post.kind === "article" && !history.seen.has(discoveryIdentity(post))).map(discoveryIdentity));
-          const next = page === 0 && fresh.size < 3 ? discovery.cursors[timeline] || result.next : result.next;
+            .map(discoveryIdentity).filter((id) => !existing.has(id)));
+          const next = result.next && !visited.has(result.next) ? result.next : undefined;
           cursors[timeline] = next;
-          if (!next || visited.has(next) || fresh.size >= 3) break;
+          if (!next || fresh.size >= discoveryBatch) break;
           cursor = next;
-          visited.add(cursor);
         }
       } catch (error) { errors[timeline] = (error as Error).message; }
     }
@@ -195,7 +235,7 @@ namespace Fedi {
       learn(interests.likes);
       interests.tags.forEach((tag) => { if (tag.following !== false) tags.set(tag.name.toLowerCase(), 4); });
       const extras: Post[] = [];
-      if (api) {
+      if (api && !append) {
         const lists = await Promise.allSettled(shuffled(interests.lists).slice(0, 2).map((list) => api.timeline(`list:${list.id}`, undefined, signal)));
         if (!current()) return;
         for (const result of lists) if (result.status === "fulfilled") { learn(result.value.posts); extras.push(...result.value.posts); }
@@ -205,16 +245,20 @@ namespace Fedi {
         for (const result of results) if (result.status === "fulfilled") extras.push(...result.value.posts);
       }
       if (!current()) return;
-      const candidates = [...publicPosts.federated, ...publicPosts.local, ...extras];
+      const candidates: Post[] = [];
+      for (let i = 0; i < Math.max(publicPosts.local.length, publicPosts.federated.length); i++) {
+        if (publicPosts.federated[i]) candidates.push(publicPosts.federated[i]);
+        if (publicPosts.local[i]) candidates.push(publicPosts.local[i]);
+      }
+      candidates.push(...extras);
       rememberDiscoveryLikes(candidates);
-      state.posts = rankDiscoveryPosts(candidates, tags, authors);
+      const ranked = rankDiscoveryPosts(candidates, tags, authors);
+      state.posts = append ? [...previous, ...ranked.filter((post) => !existing.has(discoveryIdentity(post)))] : ranked;
       discovery.errors = errors;
       if (errors.local && errors.federated && !state.posts.length) {
         state.posts = previous;
         state.error = "Could not refresh Discover. Please try again.";
       } else {
-        discovery.local = publicPosts.local.map(discoveryIdentity);
-        discovery.federated = publicPosts.federated.map(discoveryIdentity);
         discovery.cursors = cursors;
       }
       discovery.posts = state.posts;
@@ -228,7 +272,13 @@ namespace Fedi {
     } catch (error) {
       if (current()) { state.error = (error as Error).message; state.posts = previous; }
     } finally {
-      if (current()) { state.loading = false; render(); }
+      if (current()) {
+        state.next = discoveryNext();
+        discovery.autoLoad = !state.error && !discovery.errors.local && !discovery.errors.federated &&
+          (!append || Math.min(discovery.limit, eligibleDiscoveryPosts(state.posts).length) > previousVisible);
+        state.loading = false;
+        render();
+      }
     }
   }
 }

@@ -202,6 +202,8 @@ namespace Fedi {
       case "timeline":
         if (id !== "bookmarks" && (id !== "lists" || !state.timeline.startsWith("list:"))) state.timeline = id as Timeline;
         if (id === "federated") state.filter = "all";
+        if (id !== "bookmarks" && state.view === "discover" && state.query)
+          history.replaceState(null, "", "#discover");
         state.query = "";
         if (id === "bookmarks" && state.view !== "bookmarks") navigate("bookmarks");
         else if (id !== "bookmarks" && state.view === "bookmarks") navigate("home");
@@ -224,14 +226,10 @@ namespace Fedi {
         navigate("discover");
         break;
       case "topic":
-        state.query = state.session ? "#" + id : id;
-        state.timeline = "federated";
-        state.filter = "all";
-        navigate("discover");
+        navigate(searchPath(state.session ? `#${id}` : id));
         break;
       case "clear-search":
-        state.query = "";
-        await loadFeed();
+        navigate("discover");
         break;
       case "remove-language":
         setDiscoveryLanguages(state.discoveryLanguages.filter((language) => language !== id));
@@ -428,10 +426,12 @@ namespace Fedi {
       return;
     }
     if (form.id === "search-form" || form.id === "discover-search") {
-      state.query = value("query");
-      state.timeline = "federated";
-      state.filter = "all";
-      navigate("discover");
+      const query = value("query");
+      if (!query) {
+        state.timeline = "federated";
+        state.filter = "all";
+      }
+      navigate(searchPath(query));
       return;
     }
     if (form.id === "connect-form")

@@ -233,7 +233,7 @@ namespace Fedi {
           : `
       ${featured && post.image ? `<a href="${href}" class="cover-link"><img class="feature-cover" data-image-key="cover:${escapeHTML(post.id)}" src="${escapeHTML(post.image)}" alt="${escapeHTML(post.imageAlt || "")}"></a>` : ""}
       <div class="post-content ${!featured && post.image ? "with-thumbnail" : ""}"><div>
-      ${post.kind === "article" ? `<a href="${href}" class="article-link">${post.title ? `<h2>${escapeHTML(post.title)}</h2>` : ""}${excerpt || !post.title ? `<p class="excerpt">${escapeHTML(excerpt || "Read article")}</p>` : ""}</a><div class="article-meta"><span>${escapeHTML(post.tags[0] || "Article")}</span><span>·</span><span>${readingTime(post.markdown)} min read</span></div>` : `<div class="prose note-body">${markdown(post.markdown)}</div>`}
+      ${post.kind === "article" ? `<a href="${href}" class="article-link">${post.title ? `<h2>${escapeHTML(post.title)}</h2>` : ""}${excerpt || !post.title ? `<p class="excerpt">${escapeHTML(excerpt || "Read article")}</p>` : ""}</a><div class="article-meta"><span>${post.tags[0] ? hashtagLink(post.tags[0]) : "Article"}</span><span>·</span><span>${readingTime(post.markdown)} min read</span></div>` : `<div class="prose note-body">${markdown(post.markdown, true)}</div>`}
       </div>${!featured && post.image ? `<a href="${href}"><img class="thumbnail" data-image-key="cover:${escapeHTML(post.id)}" src="${escapeHTML(post.image)}" alt="${escapeHTML(post.imageAlt || "")}" loading="lazy"></a>` : ""}</div>`
       }
       ${postActions(post)}</article>`;
@@ -244,7 +244,7 @@ namespace Fedi {
       !state.readerServer &&
       post.author.id === (state.session?.account.id || "you") &&
       post.visibility !== "direct";
-    return `<div class="comment">${profileAvatar(post.author, true, `post:${post.id}`)}<div><div class="comment-header"><div><a class="author-link" href="#${escapeHTML(profilePath(post.author.id))}">${escapeHTML(post.author.name)}</a><span class="byline-sub"> · ${relativeDate(post.created)}</span></div>${owned ? action("delete-publication", "Delete comment", post.id, "text-button delete-link") : ""}</div>${post.warning ? `<details><summary>${escapeHTML(post.warning)}</summary><div class="prose">${markdown(post.markdown)}</div></details>` : `<div class="prose">${markdown(post.markdown)}</div>`}</div></div>`;
+    return `<div class="comment">${profileAvatar(post.author, true, `post:${post.id}`)}<div><div class="comment-header"><div><a class="author-link" href="#${escapeHTML(profilePath(post.author.id))}">${escapeHTML(post.author.name)}</a><span class="byline-sub"> · ${relativeDate(post.created)}</span></div>${owned ? action("delete-publication", "Delete comment", post.id, "text-button delete-link") : ""}</div>${post.warning ? `<details><summary>${escapeHTML(post.warning)}</summary><div class="prose">${markdown(post.markdown, true)}</div></details>` : `<div class="prose">${markdown(post.markdown, true)}</div>`}</div></div>`;
   }
 
   export function emptyState(

@@ -160,10 +160,9 @@ namespace Fedi {
     }
     if (!m.loaded) return;
     if (name === "read-tag" || name === "read-list") {
-      state.query = "";
-      state.timeline = name === "read-tag" ? `tag:${id}` : `list:${id}`;
       closeModal();
-      navigate("discover");
+      if (name === "read-list") state.timeline = `list:${id}`;
+      navigate(name === "read-tag" ? searchPath(`#${id}`) : "discover");
       return;
     }
     await runInterestTask(m, async () => {

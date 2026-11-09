@@ -25,29 +25,49 @@ namespace Fedi {
     return image && /^assets\/[a-z-]+\.svg$/.test(value) ? value : "";
   }
 
-  function inline(source: string, depth = 0): string {
+  const hashtag = /#([\p{L}\p{M}\p{N}_-]+)/u;
+  const exactHashtag = new RegExp(`^${hashtag.source}$`, "u");
+
+  export function hashtagName(query: string): string | undefined {
+    return exactHashtag.exec(query)?.[1];
+  }
+
+  export function hashtagLink(tag: string, classes = ""): string {
+    return `<a href="#${searchPath(`#${tag}`)}"${classes ? ` class="${classes}"` : ""}>#${escapeHTML(tag)}</a>`;
+  }
+
+  const inlineToken =
+    /`([^`\n]+)`|(!?)\[((?:\\.|[^\]\\\n])*)\]\(([^\s)]+)\)|\*\*([^*\n]+)\*\*|__([^_\n]+)__|~~([^~\n]+)~~|\*([^*\n]+)\*|_([^_\n]+)_|(https?:\/\/[^\s<>]+)|\\([\\\[\]*_`~])/g;
+  const publicationToken = new RegExp(
+    String.raw`${inlineToken.source}|(^|[^\p{L}\p{M}\p{N}_#/@\\])${hashtag.source}`, "gu",
+  );
+
+  function inline(source: string, linkHashtags: boolean, depth = 0): string {
     if (depth > 8) return escapeHTML(source);
     // Parse from source, then escape each text node. Generated HTML is never parsed again.
-    const token =
-      /`([^`\n]+)`|(!?)\[((?:\\.|[^\]\\\n])*)\]\(([^\s)]+)\)|\*\*([^*\n]+)\*\*|__([^_\n]+)__|~~([^~\n]+)~~|\*([^*\n]+)\*|_([^_\n]+)_|(https?:\/\/[^\s<>]+)|\\([\\\[\]*_`~])/g;
     let result = "",
       cursor = 0;
-    for (const match of source.matchAll(token)) {
+    for (const match of source.matchAll(linkHashtags ? publicationToken : inlineToken)) {
       result += escapeHTML(source.slice(cursor, match.index));
       if (match[1]) result += `<code>${escapeHTML(match[1])}</code>`;
       else if (match[3] !== undefined) {
         const url = safeURL(match[4], !!match[2]);
-        result += !url
-          ? escapeHTML(match[3])
-          : match[2]
-            ? `<img src="${escapeHTML(url)}" alt="${escapeHTML(match[3].replace(/\\([\\\[\]])/g, "$1"))}" loading="lazy" referrerpolicy="no-referrer">`
-            : `<a href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer">${inline(match[3], depth + 1)}</a>`;
+        const tag = linkHashtags && url && !match[2] && hashtagName(match[3]);
+        if (tag && /\/(?:tags?|hashtags)\/[^/]+\/?$/.test(new URL(url).pathname))
+          result += hashtagLink(tag);
+        else
+          result += !url
+            ? escapeHTML(match[3])
+            : match[2]
+              ? `<img src="${escapeHTML(url)}" alt="${escapeHTML(match[3].replace(/\\([\\\[\]])/g, "$1"))}" loading="lazy" referrerpolicy="no-referrer">`
+              : `<a href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer">${inline(match[3], false, depth + 1)}</a>`;
       } else if (match[5] || match[6])
-        result += `<strong>${inline(match[5] || match[6], depth + 1)}</strong>`;
-      else if (match[7]) result += `<del>${inline(match[7], depth + 1)}</del>`;
+        result += `<strong>${inline(match[5] || match[6], linkHashtags, depth + 1)}</strong>`;
+      else if (match[7]) result += `<del>${inline(match[7], linkHashtags, depth + 1)}</del>`;
       else if (match[8] || match[9])
-        result += `<em>${inline(match[8] || match[9], depth + 1)}</em>`;
+        result += `<em>${inline(match[8] || match[9], linkHashtags, depth + 1)}</em>`;
       else if (match[11]) result += escapeHTML(match[11]);
+      else if (match[13]) result += escapeHTML(match[12]) + hashtagLink(match[13]);
       else {
         const url = safeURL(match[10]);
         result += `<a href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer">${escapeHTML(match[10])}</a>`;
@@ -57,7 +77,7 @@ namespace Fedi {
     return result + escapeHTML(source.slice(cursor));
   }
 
-  export function markdown(source: string, depth = 0): string {
+  export function markdown(source: string, linkHashtags = false, depth = 0): string {
     if (depth > 32) return escapeHTML(source);
     const lines = source.replace(/\r\n?/g, "\n").split("\n");
     const output: string[] = [];
@@ -82,7 +102,7 @@ namespace Fedi {
       const heading = /^(#{1,6})\s+(.+)$/.exec(line);
       if (heading) {
         const n = heading[1].length;
-        output.push(`<h${n}>${inline(heading[2])}</h${n}>`);
+        output.push(`<h${n}>${inline(heading[2], linkHashtags)}</h${n}>`);
         i++;
         continue;
       }
@@ -96,7 +116,7 @@ namespace Fedi {
         while (i < lines.length && /^>/.test(lines[i]))
           quote.push(lines[i++].replace(/^>\s?/, ""));
         output.push(
-          `<blockquote>${inline(quote.join("\n")).replace(/\n/g, "<br>")}</blockquote>`,
+          `<blockquote>${inline(quote.join("\n"), linkHashtags).replace(/\n/g, "<br>")}</blockquote>`,
         );
         continue;
       }
@@ -111,7 +131,7 @@ namespace Fedi {
           const nested: string[] = [];
           while (i < lines.length && /^( {2,}|\t)/.test(lines[i]))
             nested.push(lines[i++].replace(/^( {2}|\t)/, ""));
-          items.push(`<li${task ? ' class="task-item"' : ""}>${task ? `<input type="checkbox" disabled${task[1] !== " " ? " checked" : ""} aria-label="${task[1] !== " " ? "Completed task" : "Incomplete task"}"> ${inline(task[2])}` : inline(text)}${nested.length ? markdown(nested.join("\n"), depth + 1) : ""}</li>`);
+          items.push(`<li${task ? ' class="task-item"' : ""}>${task ? `<input type="checkbox" disabled${task[1] !== " " ? " checked" : ""} aria-label="${task[1] !== " " ? "Completed task" : "Incomplete task"}"> ` : ""}${inline(task ? task[2] : text, linkHashtags)}${nested.length ? markdown(nested.join("\n"), linkHashtags, depth + 1) : ""}</li>`);
         }
         const first = ordered ? parseInt(line, 10) : 1;
         output.push(`<${tag}${ordered && first !== 1 ? ` start="${first}"` : ""}>${items.join("")}</${tag}>`);
@@ -122,7 +142,7 @@ namespace Fedi {
       while (i < lines.length && lines[i].trim() && !boundary(lines[i]))
         paragraph.push(lines[i++]);
       output.push(
-        `<p>${inline(paragraph.join("\n")).replace(/\n/g, "<br>")}</p>`,
+        `<p>${inline(paragraph.join("\n"), linkHashtags).replace(/\n/g, "<br>")}</p>`,
       );
     }
     return output.join("\n");

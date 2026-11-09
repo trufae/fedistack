@@ -137,6 +137,9 @@ namespace Fedi {
     if (location.hash === `#${path}`) void route();
     else location.hash = path;
   }
+  export function searchPath(query: string): string {
+    return query ? `discover?${new URLSearchParams({ q: query })}` : "discover";
+  }
 
   export function applyTheme(): void {
     const dark =
@@ -303,7 +306,7 @@ namespace Fedi {
       ${state.view === "discover" ? `<form id="discover-search" class="search-box discover-search">${icon("search")}<input name="query" aria-label="Search people and writing" placeholder="Search people, writing, or #topics" value="${escapeHTML(state.query)}"><button class="button subtle">Search</button></form>` : ""}
       ${state.query ? `<div class="search-summary">Results for “${escapeHTML(state.query)}” ${action("clear-search", "Clear", "", "text-button")}</div><p class="muted">Search covers content known to your server. Try #topic, a full @user@server address, or a post URL.</p>` : ""}
       ${state.timeline.startsWith("tag:") && !state.query && state.view !== "bookmarks" ? `<div class="search-summary">Posts tagged #${escapeHTML(state.timeline.slice(4))}</div>` : ""}
-      ${state.query && state.searchTags.length ? `<div class="filter-pills" aria-label="Matching hashtags">${state.searchTags.map((tag) => action("read-tag", `#${tag}`, tag, "button subtle")).join("")}</div>` : ""}
+      ${state.query && state.searchTags.length ? `<div class="filter-pills search-tags" aria-label="Matching hashtags">${state.searchTags.map((tag) => hashtagLink(tag, "button subtle")).join("")}</div>` : ""}
       ${state.accounts.length ? `<div class="account-results">${state.accounts.map((a) => accountRow(a, "search")).join("")}</div>` : ""}
       ${state.error ? `<div class="error-panel" role="alert">${escapeHTML(state.error)}${action("refresh", "Try again", "", "button subtle")}</div>` : ""}
       <div class="feed">${posts.map((p, i) => postCard(p, i === 0 && p.kind === "article") + (i === Math.min(2, posts.length - 1) ? recommendations : "")).join("")}${!posts.length ? recommendations : ""}${!posts.length && !state.loading && !state.error ? emptyState("A little quiet here", hasLanguages ? "No posts in the selected languages match the loaded results. Load older posts or change your languages in Settings." : state.filter !== "all" ? "No matching writing in the loaded posts. Try another filter or load older posts." : state.query || state.timeline.startsWith("tag:") ? "No matching posts are available here. Your server may not have received them yet, or may limit full-text search. Try a hashtag or a specific post URL." : "Follow a writer, explore another timeline, or start a conversation.", hasLanguages ? '<a href="#settings" class="button subtle">Change language settings</a>' : action("discover", "Explore the fediverse", "", "button subtle")) : ""}</div>
@@ -340,7 +343,7 @@ namespace Fedi {
     const controller = feedController = new AbortController();
     const existing = new Set(append ? state.posts.map((p) => p.id) : []);
     const visited = new Set<string>();
-    const tagQuery = /^#([\p{L}\p{M}\p{N}_-]+)$/u.exec(state.query.trim())?.[1];
+    const tagQuery = hashtagName(state.query.trim());
     const searching = !!state.query && !tagQuery;
     const timeline = tagQuery ? `tag:${tagQuery}` as Timeline : state.view === "bookmarks" ? "bookmarks" : state.timeline;
     if (timeline === "lists") {
@@ -381,7 +384,7 @@ namespace Fedi {
         state.next = undefined;
       }
       state.accounts = [];
-      state.searchTags = tagQuery ? [tagQuery] : [];
+      state.searchTags = [];
       feedSource = key;
       if (cached && !force && Date.now() - cached.updated < (cached.posts.length ? 60000 : 5000)) {
         state.loading = false;
@@ -688,11 +691,11 @@ namespace Fedi {
       render();
       return;
     }
-    if (state.view === "discover" && state.timeline === "home") {
+    state.query = state.view === "discover" ? new URLSearchParams(query).get("q")?.trim() || "" : "";
+    if (state.view === "discover" && (state.query || state.timeline === "home")) {
       state.timeline = "federated";
       state.filter = "all";
     }
-    if (state.view !== "discover") state.query = "";
     await loadFeed(false, feedTarget, false);
   }
 
@@ -710,7 +713,7 @@ namespace Fedi {
     return `<header class="page-top"><a class="text-button" href="#home">${icon("back")} Back to reading</a><button class="icon-button" data-action="focus" aria-label="${state.focus ? "Leave" : "Enter"} focus mode" title="Focus mode">${icon("book")}</button></header><article class="reader">
       ${hidden ? `<div class="content-warning"><h2>${escapeHTML(p.warning)}</h2>${action("reveal", "Show publication", p.id, "button subtle")}</div>` : `${title ? `<span class="eyebrow">${escapeHTML(p.author.publication || "INDEPENDENT WRITING")}</span>` : ""}${!publicReading && p.author.id === (state.session?.account.id || "you") ? `<span class="published-badge">${state.session ? "Published" : "Published in demo"}</span>` : ""}${title ? `<h1>${escapeHTML(title)}</h1>` : ""}${p.subtitle ? `<p class="reader-subtitle">${escapeHTML(p.subtitle)}</p>` : ""}`}
       <div class="post-byline">${profileAvatar(p.author, false, `post:${p.id}`)}<div>${author}<div class="byline-sub">${new Date(p.created).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })} · ${readingTime(p.markdown)} min read</div></div>${publicReading ? "" : followButton(p.author)}</div>
-      ${postActions(p)}${hidden ? "" : `${!p.media?.length && p.image ? `<img class="reader-cover" data-image-key="cover:${escapeHTML(p.id)}" src="${escapeHTML(p.image)}" alt="${escapeHTML(p.imageAlt || "")}">` : ""}<div class="prose reading-prose">${markdown(articleBody(p))}</div>${attachmentGallery(p.media, p.markdown)}${p.source ? `<a class="button subtle" href="${escapeHTML(p.source)}" target="_blank" rel="noopener noreferrer">Read the linked article ${icon("external")}</a>` : ""}<div class="reader-end">${icon("leaf")}<span>Thanks for reading. Keep the conversation going.</span></div>`}</article>
+      ${postActions(p)}${hidden ? "" : `${!p.media?.length && p.image ? `<img class="reader-cover" data-image-key="cover:${escapeHTML(p.id)}" src="${escapeHTML(p.image)}" alt="${escapeHTML(p.imageAlt || "")}">` : ""}<div class="prose reading-prose">${markdown(articleBody(p), true)}</div>${attachmentGallery(p.media, p.markdown)}${p.source ? `<a class="button subtle" href="${escapeHTML(p.source)}" target="_blank" rel="noopener noreferrer">Read the linked article ${icon("external")}</a>` : ""}<div class="reader-end">${icon("leaf")}<span>Thanks for reading. Keep the conversation going.</span></div>`}</article>
       <section class="comments"><div class="section-heading"><h2>Conversation <span>${p.replies}</span></h2>${action("share", "Share publication", p.id, "text-button")}</div>${replyForm}
       ${state.error ? `<p class="form-error" role="alert">${escapeHTML(state.error)}</p>` : ""}${state.loading ? '<p class="loading">Loading the conversation…</p>' : state.comments.map(commentCard).join("") || '<p class="muted">Be the first to start the conversation.</p>'}</section>`;
   }

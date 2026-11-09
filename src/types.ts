@@ -1,13 +1,12 @@
 namespace Fedi {
   export type Visibility = "public" | "unlisted" | "private" | "direct";
   export type ProfileImage = "avatar" | "header";
+  export type HomeTimeline = "home" | "lists" | `list:${string}`;
   export type Timeline =
-    | "home"
+    | HomeTimeline
     | "local"
     | "federated"
     | "bookmarks"
-    | "lists"
-    | `list:${string}`
     | `tag:${string}`;
   export type View =
     | "home"

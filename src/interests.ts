@@ -161,8 +161,8 @@ namespace Fedi {
     if (!m.loaded) return;
     if (name === "read-tag" || name === "read-list") {
       closeModal();
-      if (name === "read-list") state.timeline = `list:${id}`;
-      navigate(name === "read-tag" ? searchPath(`#${id}`) : "discover");
+      if (name === "read-list") state.homeTimeline = `list:${id}`;
+      navigate(name === "read-tag" ? searchPath(`#${id}`) : "home");
       return;
     }
     await runInterestTask(m, async () => {
@@ -181,11 +181,14 @@ namespace Fedi {
         await m.api.deleteList(m.list.id);
         if (state.api !== m.api) return;
         state.lists = state.lists.filter((list) => list.id !== m.list!.id);
+        if (state.homeTimeline === `list:${m.list.id}`) state.homeTimeline = "home";
         if (state.timeline === `list:${m.list.id}`) {
           state.timeline = "home";
-          state.posts = [];
-          state.next = undefined;
-          if (["home", "discover", "bookmarks"].includes(state.view)) void loadFeed();
+          if (state.view === "home") {
+            state.posts = [];
+            state.next = undefined;
+            void loadFeed();
+          }
         }
         m.list = undefined;
         m.kind = "lists";

@@ -1,5 +1,6 @@
 namespace Fedi {
   const mutations = new Set<string>();
+  let homeScroll = 0;
   async function togglePost(id: string, kind: "like" | "save" | "repost"): Promise<void> {
     const post = findPost(id);
     if (!post) return;
@@ -127,7 +128,12 @@ namespace Fedi {
         connectTokenDialog();
         break;
       case "account":
-        navigate("profile");
+        showModal("Account", `<div class="account-menu">${action("account-profile", "Your profile", "", "button subtle")}${action("account-settings", "Settings", "", "button subtle")}${action("disconnect", "Sign out", "", "button subtle")}</div>`);
+        break;
+      case "account-profile":
+      case "account-settings":
+        closeModal();
+        navigate(name === "account-profile" ? "profile" : "settings");
         break;
       case "manage-hashtags":
         await showInterests("tags");
@@ -182,7 +188,8 @@ namespace Fedi {
         state.revealed.clear();
         clearMessageDrafts();
         state.query = "";
-        state.timeline = "home";
+        state.homeTimeline = state.timeline = "home";
+        homeScroll = 0;
         closeModal();
         navigate("home");
         break;
@@ -200,18 +207,22 @@ namespace Fedi {
         render();
         break;
       case "timeline":
-        if (id !== "bookmarks" && (id !== "lists" || !state.timeline.startsWith("list:"))) state.timeline = id as Timeline;
-        if (id === "federated") state.filter = "all";
-        if (id !== "bookmarks" && state.view === "discover" && state.query)
-          history.replaceState(null, "", "#discover");
-        state.query = "";
-        if (id === "bookmarks" && state.view !== "bookmarks") navigate("bookmarks");
-        else if (id !== "bookmarks" && state.view === "bookmarks") navigate("home");
-        else await loadFeed(false, undefined, false);
+        if (id === "bookmarks") {
+          if (state.view !== "bookmarks") navigate("bookmarks");
+          break;
+        }
+        if (id === "home" || id === "lists") {
+          if (id === "home" || !state.homeTimeline.startsWith("list:")) state.homeTimeline = id;
+          if (state.view !== "home") navigate("home");
+          else {
+            homeScroll = 0;
+            state.timeline = state.homeTimeline;
+            await loadFeed(false, undefined, false);
+          }
+        }
         break;
       case "filter":
-        state.filter = id as typeof state.filter;
-        updateFeedFilters();
+        if (id === "all" || id === "article" || id === "post") setFeedFilter(id);
         break;
       case "refresh":
         await loadFeed();
@@ -219,17 +230,8 @@ namespace Fedi {
       case "load-more":
         await loadFeed(true);
         break;
-      case "discover":
-        state.query = "";
-        state.timeline = "federated";
-        state.filter = "all";
-        navigate("discover");
-        break;
       case "topic":
         navigate(searchPath(state.session ? `#${id}` : id));
-        break;
-      case "clear-search":
-        navigate("discover");
         break;
       case "remove-language":
         setDiscoveryLanguages(state.discoveryLanguages.filter((language) => language !== id));
@@ -426,12 +428,7 @@ namespace Fedi {
       return;
     }
     if (form.id === "search-form" || form.id === "discover-search") {
-      const query = value("query");
-      if (!query) {
-        state.timeline = "federated";
-        state.filter = "all";
-      }
-      navigate(searchPath(query));
+      navigate(searchPath(value("query")));
       return;
     }
     if (form.id === "connect-form")
@@ -592,14 +589,10 @@ namespace Fedi {
     document.addEventListener("change", (event) => {
       const el = event.target as HTMLInputElement;
       if (el.id === "editor-smart-punctuation") setEditorSmartPunctuation(el.checked);
-      if (el.id === "following-only") {
-        state.followingOnly = el.checked;
-        updateFeedFilters();
-      }
       if (el.id === "list-select") {
-        state.timeline = el.value ? el.value as Timeline : "lists";
+        state.homeTimeline = state.timeline = el.value.startsWith("list:") ? el.value as HomeTimeline : "lists";
         state.query = "";
-        if (state.view === "bookmarks") navigate("home");
+        if (state.view !== "home") navigate("home");
         else void loadFeed(false, undefined, false);
       }
       if (el.id === "draft-visibility") captureDraft();
@@ -620,9 +613,19 @@ namespace Fedi {
     document.getElementById("modal")!.addEventListener("click", (event) => {
       if (event.target === event.currentTarget) closeModal();
     });
+    history.scrollRestoration = "manual";
     window.addEventListener("hashchange", () => {
-      void route();
-      window.scrollTo(0, 0);
+      if (state.view === "home" && state.timeline === "home") homeScroll = window.scrollY;
+      const hash = location.hash;
+      const loading = route();
+      const restore = state.view === "home" && state.timeline === "home" ? homeScroll : 0;
+      window.scrollTo(0, restore);
+      const restored = window.scrollY;
+      if (restored < restore) {
+        void loading.then(() => {
+          if (location.hash === hash && window.scrollY === restored) window.scrollTo(0, restore);
+        });
+      }
     });
     window.addEventListener("pagehide", flushDraft);
     window.addEventListener("online", () => {

@@ -543,7 +543,7 @@ namespace Fedi {
       state.draft = null;
     }
     const [path, query = ""] = location.hash.slice(1).split("?");
-    const [page, rawId] = path.split("/");
+    let [page, rawId] = path.split("/");
     const sharedPublication = page === "p" || page.startsWith("@");
     let id = "";
     try {
@@ -563,6 +563,14 @@ namespace Fedi {
     }
     state.readerServer = "";
     state.profile = null;
+    // Demo reader URLs can survive sign-in or be restored with a saved session.
+    // Only bare, uncached demo links should leave the reader; shared IDs are real.
+    if (state.session && page === "read" && !new URLSearchParams(query).get("server") &&
+        !findPost(id) && [...demoPosts, ...demoState.posts, ...Object.values(demoState.comments).flat()]
+          .some((post) => post.id === id)) {
+      page = "home";
+      history.replaceState(null, "", "#home");
+    }
     if (page === "profile") {
       await openProfile(id || state.session?.account.id || demoMe.id, query, force);
       return;

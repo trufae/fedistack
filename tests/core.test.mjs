@@ -1738,6 +1738,85 @@ test("demo share links continue to open offline with legacy reader routes", asyn
   assert.equal(app.state.readerServer, "");
 });
 
+test("signing in from a demo publication opens Home without requesting its fictional ID", async () => {
+  const requests = [];
+  const { app, context, get } = await postActionFixture(async (url) => {
+    const path = new URL(url).pathname;
+    requests.push(path);
+    if (path.startsWith("/api/v1/statuses/")) return new Response("status not found", { status: 404 });
+    return Response.json([]);
+  });
+  context.location.hash = "#read/slow-web";
+  await app.route();
+  assert.equal(app.state.reading.id, "slow-web");
+  get("modal").close = () => {};
+  context.history.replaceState = (_, __, url) => { context.location.hash = new URL(url, context.location.href).hash; };
+
+  await app.setSession({ ...longServer, account: app.demoMe, server: "https://nyap.example", token: "account-token" });
+
+  assert.equal(context.location.hash, "#home");
+  assert.equal(app.state.view, "home");
+  assert.equal(app.state.reading, null);
+  assert.equal(app.state.error, "");
+  assert.ok(requests.includes("/api/v1/timelines/home"));
+  assert.ok(requests.every((path) => !path.startsWith("/api/v1/statuses/")));
+  assert.doesNotMatch(get("app").innerHTML, /Publication unavailable/);
+});
+
+test("startup with a saved session recovers a stale demo reader URL", async () => {
+  const requests = [], localStorage = storage();
+  const session = { ...longServer, account: { id: "me", name: "Reader", acct: "reader", avatar: "", bio: "" }, server: "https://nyap.example", token: "account-token", remember: true };
+  localStorage.setItem("fedistack:session", JSON.stringify(session));
+  const { app, context } = setup(async (url) => {
+    const path = new URL(url).pathname;
+    requests.push(path);
+    if (path.startsWith("/api/v1/statuses/")) return new Response("status not found", { status: 404 });
+    if (path.endsWith("/instance")) return Response.json({ version: "nyap", configuration: { statuses: {
+      max_characters: 32768, supported_mime_types: ["text/plain", "text/markdown"],
+    } } });
+    return Response.json([]);
+  }, { localStorage });
+  const { get } = elements(context);
+  context.document.addEventListener = () => {};
+  context.window = { addEventListener() {} };
+  context.matchMedia = () => ({ matches: false, addEventListener() {} });
+  get("modal").addEventListener = () => {};
+  context.location.hash = "#read/slow-web";
+  context.history.replaceState = (_, __, url) => { context.location.hash = new URL(url, context.location.href).hash; };
+
+  await app.boot();
+
+  assert.equal(context.location.hash, "#home");
+  assert.equal(app.state.view, "home");
+  assert.equal(app.state.error, "");
+  assert.ok(requests.includes("/api/v1/timelines/home"));
+  assert.ok(requests.every((path) => !path.startsWith("/api/v1/statuses/")));
+  assert.doesNotMatch(get("app").innerHTML, /Publication unavailable/);
+});
+
+test("bare reader links still open uncached real posts and cached posts with demo IDs", async () => {
+  const requests = [];
+  const { app, context } = await postActionFixture(async (url) => {
+    const path = new URL(url).pathname;
+    requests.push(path);
+    return Response.json(path.endsWith("/context")
+      ? { ancestors: [], descendants: [] }
+      : sharedStatus({ id: "real-post" }));
+  });
+  app.state.session = { ...longServer, account: app.demoMe, server: "https://nyap.example", token: "account-token" };
+  app.state.api = new app.API(app.state.session.server, app.state.session.token);
+  for (const id of ["real-post", "slow-web"]) {
+    if (id === "slow-web") app.state.posts = [app.mapStatus(sharedStatus())];
+    context.location.hash = `#read/${id}`;
+    await app.route();
+    assert.equal(app.state.view, "reader");
+    assert.equal(app.state.reading.id, id);
+    assert.equal(app.state.reading.title, "Shared article");
+    assert.equal(app.state.error, "");
+  }
+  assert.deepEqual(requests, ["/api/v1/statuses/real-post", "/api/v1/statuses/real-post/context", "/api/v1/statuses/slow-web/context"]);
+});
+
 test("a shared link opens Markdown and public comments without a session or cached post", async () => {
   const requests = [];
   const { app, context, get } = await postActionFixture(async (url, options) => {

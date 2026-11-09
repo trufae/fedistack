@@ -326,7 +326,11 @@ namespace Fedi {
               s.visibility !== "direct" &&
               !s.filtered?.some((f) => f.filter.filter_action === "hide"),
           )
-          .map(mapStatus),
+          .map((status) => {
+            const post = mapStatus(status);
+            if (timeline === "bookmarks") post.saved = true;
+            return post;
+          }),
         next: result.next,
       };
     }

@@ -2806,6 +2806,68 @@ test("interest buttons, forms, and list selection are wired through application 
   assert.deepEqual(timelines, ["list:1", "local"]);
 });
 
+test("Saved is a Home tab that loads bookmarks and returns to the selected list or another timeline", async () => {
+  const { app, context, get, click } = await postActionFixture();
+  app.state.session = { ...longServer, server: "https://example.org", token: "test", account: app.demoMe };
+  app.state.api = new app.API("https://example.org", "test");
+  app.state.filter = "all";
+  app.state.timeline = "list:friends";
+  app.state.lists = [{ id: "friends", title: "Friends" }];
+  app.loadSuggestions = async () => {};
+  app.state.api.relationships = async () => [];
+  const timelines = [];
+  app.state.api.timeline = async (timeline) => {
+    timelines.push(timeline);
+    return { posts: [{ ...app.demoPosts[0], id: timeline, saved: timeline === "bookmarks" }] };
+  };
+  const select = async (id) => {
+    click(id, "timeline");
+    await new Promise(setImmediate);
+    // The location mock does not dispatch hashchange or add the browser's #.
+    if (!context.location.hash.startsWith("#")) {
+      context.location.hash = `#${context.location.hash}`;
+      await app.route();
+    }
+  };
+  app.render();
+  assert.match(get("app").innerHTML, /data-id="bookmarks"[^>]*>Saved<\/button>/);
+  app.state.query = "stale search";
+  await select("bookmarks");
+  assert.equal(app.state.view, "bookmarks");
+  assert.equal(app.state.query, "");
+  assert.equal(app.state.timeline, "list:friends");
+  assert.equal(app.state.posts[0].id, "bookmarks");
+  assert.match(get("app").innerHTML, /data-id="bookmarks" class="active" aria-pressed="true"/);
+  assert.match(get("app").innerHTML, /href="#home" class="nav-item active" aria-current="page"/);
+  assert.match(get("app").innerHTML, /href="#home" aria-label="Home" aria-current="page"/);
+  assert.doesNotMatch(get("app").innerHTML, /id="list-select"|href="#bookmarks"/);
+  await select("bookmarks");
+  assert.equal(app.state.view, "bookmarks", "tapping the active tab keeps Saved open");
+  await select("lists");
+  assert.equal(app.state.view, "home");
+  assert.equal(app.state.timeline, "list:friends");
+  assert.match(get("app").innerHTML, /value="list:friends" selected>Friends/);
+  await select("bookmarks");
+  await select("local");
+  assert.equal(app.state.view, "home");
+  assert.equal(app.state.timeline, "local");
+  assert.deepEqual(timelines, ["bookmarks", "list:friends", "local"]);
+});
+
+test("the Saved tab also opens bookmarked posts in the offline demo", async () => {
+  const { app, context, get, click } = await postActionFixture();
+  app.state.filter = "all";
+  app.demoState.posts.forEach((post, i) => { post.saved = i === 0; });
+  app.render();
+  assert.match(get("app").innerHTML, /data-id="bookmarks"[^>]*>Saved<\/button>/);
+  click("bookmarks", "timeline");
+  assert.equal(context.location.hash, "bookmarks");
+  context.location.hash = "#bookmarks";
+  await app.route();
+  assert.deepEqual(Array.from(app.state.posts, (post) => post.id), [app.demoState.posts[0].id]);
+  assert.match(get("app").innerHTML, /data-id="bookmarks" class="active" aria-pressed="true"/);
+});
+
 test("opening Lists cancels a pending timeline and does not fetch or refresh an unselected list", async () => {
   const { app, context, get } = interestsFixture();
   app.state.view = "home";
@@ -3880,21 +3942,29 @@ test("own profile refreshes header and counts, shows loaded engagement and setti
   assert.equal(app.state.session.account.followers, 124);
   assert.deepEqual(Array.from(app.state.profile.posts, (p) => p.id), ["newer"]);
   assert.match(get("app").innerHTML, /fresh-header.png/);
-  assert.match(get("app").innerHTML, /On these 1 loaded posts/);
+  const profileHTML = app.profileView();
+  assert.match(profileHTML, /Totals for the 1 post shown below/);
+  assert.ok(profileHTML.indexOf('class="profile-engagement"') < profileHTML.indexOf('class="profile-counts"'));
+  assert.match(profileHTML, /data-metric="likes"[^]*?<strong>6<\/strong>[^]*?width:100%/);
+  assert.match(profileHTML, /data-metric="reposts"[^]*?<strong>3<\/strong>[^]*?width:50%/);
+  assert.doesNotMatch(profileHTML, /On these|loaded posts|received/);
   assert.match(get("app").innerHTML, /aria-current="page">Posts<\/a>/);
   assert.match(get("app").innerHTML, /<strong>77<\/strong><span>posts & replies<\/span>/);
-  assert.match(get("app").innerHTML, /Likes received/);
-  assert.match(get("app").innerHTML, /href="#settings" class="button subtle small-button"/);
+  assert.match(app.profileView(), /class="profile-buttons">[^]*href="#drafts"[^]*href="#settings" class="button subtle"/);
+  assert.doesNotMatch(app.profileView(), /class="page-top"|href="#home"|href="#bookmarks"|data-action="profile-refresh"/);
   assert.match(get("app").innerHTML, /aria-label="Your profile" aria-current="page"/);
   await app.loadProfilePage(true);
   assert.deepEqual(Array.from(app.state.profile.posts, (p) => p.id), ["newer", "older"]);
+  assert.match(app.profileView(), /Totals for the 2 posts shown below/);
+  app.state.profile.posts.forEach((post) => { post.likes = post.reposts = post.replies = 0; });
+  assert.equal((app.profileView().match(/width:0%/g) || []).length, 3);
   assert.equal(app.state.profile.next, undefined);
   const pages = calls.filter((u) => u.pathname.endsWith("/statuses"));
   assert.equal(pages.length, 2);
   assert.equal(pages[0].searchParams.get("exclude_replies"), "true");
 });
 
-test("another account uses the same profile without requesting private likes or showing owner controls", async () => {
+for (const tab of ["likes", "saved"]) test(`another account cannot expose the private ${tab} tab or owner controls`, async () => {
   const paths = [];
   const { app, context, get } = await profileFixture(async (url) => {
     const path = new URL(url).pathname; paths.push(path);
@@ -3902,15 +3972,17 @@ test("another account uses the same profile without requesting private likes or 
     if (path.endsWith("/statuses")) return Response.json([]);
     return Response.json(profileAccount("other"));
   });
-  context.location.hash = "#profile/other?tab=likes";
+  context.location.hash = `#profile/other?tab=${tab}`;
   await app.route();
   assert.equal(app.state.profile.owner, false);
   assert.equal(app.state.profile.tab, "posts");
   assert.equal(paths.includes("/api/v1/favourites"), false);
+  assert.equal(paths.includes("/api/v1/bookmarks"), false);
   await new Promise(setImmediate); // Optional metadata resolves after readable activity.
   assert.match(get("app").innerHTML, /Follows you/);
   assert.match(get("app").innerHTML, /data-action="message-account" data-id="other"/);
-  assert.doesNotMatch(get("app").innerHTML, /tab=likes|Likes received|On these|data-action="profile-image"/);
+  assert.doesNotMatch(get("app").innerHTML, /tab=likes|tab=saved|profile-engagement|data-action="profile-image"/);
+  assert.doesNotMatch(app.profileView(), /href="#settings"|href="#bookmarks"|class="page-top"|data-action="profile-refresh"/);
   assert.equal(app.state.session.account.id, "me");
 });
 
@@ -3989,6 +4061,66 @@ test("private likes come from favourites and unlike updates every cached copy af
   assert.equal(app.state.posts[0].liked, false);
 });
 
+test("private Saved paginates bookmarks and removes unsaved posts only after server confirmation", async () => {
+  let fail = true, removed = false;
+  const { app, context, click } = await profileFixture(async (url) => {
+    const u = new URL(url);
+    if (u.pathname.endsWith("/relationships")) return Response.json([]);
+    if (u.pathname.endsWith("/unbookmark")) {
+      if (fail) return Response.json({ error: "Try later" }, { status: 503 });
+      removed = true;
+      return Response.json(sharedStatus({ bookmarked: false }));
+    }
+    if (u.pathname === "/api/v1/bookmarks") {
+      const older = u.searchParams.has("max_id");
+      return Response.json(removed ? [] : [sharedStatus({ id: older ? "older" : "slow-web", bookmarked: undefined, account: profileAccount("other") })],
+        { headers: older || removed ? {} : { Link: '<https://example.org/api/v1/bookmarks?max_id=40>; rel="next"' } });
+    }
+    assert.equal(u.pathname, "/api/v1/accounts/me");
+    return Response.json(profileAccount());
+  });
+  context.location.hash = "#profile?tab=saved";
+  await app.route();
+  assert.equal(app.state.profile.tab, "saved");
+  assert.equal(app.state.profile.posts[0].saved, true, "bookmark membership is authoritative without a status flag");
+  const html = app.profileView();
+  assert.match(html, /Saved for later · Only visible to you/);
+  assert.match(html, /tab=likes[^]*?>Likes[^]*?tab=saved[^]*?>Saved/);
+  assert.equal((html.match(/data-private="true"/g) || []).length, 2);
+  assert.doesNotMatch(html, /profile-engagement/);
+  await app.loadProfilePage(true);
+  assert.deepEqual(Array.from(app.state.profile.posts, (post) => post.id), ["slow-web", "older"]);
+  assert.equal(app.state.profile.next, undefined);
+  app.state.posts = [{ ...app.state.profile.posts[0], saved: false }];
+  click("slow-web", "save");
+  await new Promise(setImmediate);
+  assert.equal(app.state.profile.posts.length, 2);
+  assert.equal(app.state.profile.posts[0].saved, true);
+  fail = false;
+  click("slow-web", "save");
+  await new Promise(setImmediate);
+  assert.deepEqual(Array.from(app.state.profile.posts, (post) => post.id), ["older"]);
+  assert.equal(app.state.posts[0].saved, false);
+  await app.route();
+  assert.equal(app.state.profile.posts.length, 0, "reopening must not restore a stale bookmark cache");
+  assert.match(app.profileView(), /Tap the bookmark on a post to keep it here for later/);
+});
+
+test("demo Saved includes other authors and unsaving persists without affecting Likes", async () => {
+  const { app, context, click } = await postActionFixture();
+  const saved = app.demoState.posts[0];
+  saved.saved = saved.liked = true;
+  app.demoState.posts.slice(1).forEach((post) => { post.saved = false; });
+  context.location.hash = "#profile?tab=saved";
+  await app.route();
+  assert.deepEqual(Array.from(app.state.profile.posts, (post) => post.id), [saved.id]);
+  click(saved.id, "save");
+  await new Promise(setImmediate);
+  assert.equal(app.state.profile.posts.length, 0);
+  assert.equal(saved.liked, true);
+  assert.equal(app.readStore("demo", {}).posts.find((post) => post.id === saved.id).saved, false);
+});
+
 test("profile responses cannot overwrite a newer route or a different account session", async () => {
   let finish;
   const { app, context } = await profileFixture(async () => new Promise((resolve) => { finish = resolve; }));
@@ -4009,7 +4141,7 @@ test("profile responses cannot overwrite a newer route or a different account se
   assert.equal(app.state.session.account.followers, 123);
 });
 
-test("public profiles preserve source-server IDs without exposing account tokens or owner actions", async () => {
+for (const tab of ["likes", "saved"]) test(`public profiles reject private ${tab} even when their account ID matches the signed-in user`, async () => {
   const calls = [];
   const { app, context, get } = await profileFixture(async (url, options) => {
     calls.push({ url, options });
@@ -4018,7 +4150,7 @@ test("public profiles preserve source-server IDs without exposing account tokens
       sharedStatus({ id: "private-post", visibility: "private" }),
     ] : profileAccount());
   });
-  context.location.hash = "#profile/me?server=https%3A%2F%2Fremote.example&tab=likes";
+  context.location.hash = `#profile/me?server=https%3A%2F%2Fremote.example&tab=${tab}`;
   await app.route();
   assert.equal(app.state.profile.owner, false);
   assert.equal(app.state.profile.tab, "posts");
@@ -4026,7 +4158,8 @@ test("public profiles preserve source-server IDs without exposing account tokens
   assert.equal(app.state.profile.posts.length, 1);
   assert.ok(calls.every(({ url, options }) => url.startsWith("https://remote.example/") && !options.headers.Authorization));
   assert.match(get("app").innerHTML, /href="#profile\/me\?server=https%3A%2F%2Fremote.example"/);
-  assert.doesNotMatch(get("app").innerHTML, /data-action="(?:follow|like|save|repost|delete-publication)"|tab=likes/);
+  assert.doesNotMatch(get("app").innerHTML, /data-action="(?:follow|like|save|repost|delete-publication)"|tab=likes|tab=saved/);
+  assert.ok(calls.every(({ url }) => !/bookmarks|favourites/.test(url)));
   assert.match(app.postReadLink("public-post"), /server=https%3A%2F%2Fremote.example/);
 });
 

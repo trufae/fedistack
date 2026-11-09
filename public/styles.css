@@ -480,15 +480,6 @@ main {
 .feed-intro {
   padding-top: 28px;
 }
-.feed-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-.feed-title .refresh-button {
-  flex-shrink: 0;
-}
 .timeline-tabs {
   display: flex;
   gap: 26px;
@@ -2073,30 +2064,64 @@ summary {
   font-size: 12px;
   color: var(--muted);
 }
-.profile-insights {
-  margin: 0 34px 24px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 15px 18px;
-  background: var(--paper);
+.profile-engagement {
+  margin-top: 22px;
 }
-.profile-insights p,
+.engagement-heading {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 11px;
+  margin-bottom: 10px;
+}
+.engagement-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+.engagement-metric {
+  --metric-color: var(--accent);
+  min-width: 0;
+}
+.engagement-metric[data-metric="reposts"] {
+  --metric-color: var(--saved);
+}
+.engagement-metric[data-metric="replies"] {
+  --metric-color: #699ba9;
+}
+.engagement-value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.engagement-value strong {
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.engagement-value .icon {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  color: var(--metric-color);
+}
+.engagement-metric > span,
 .profile-notice {
   color: var(--muted);
   font-size: 11px;
 }
-.profile-insights > div {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px 20px;
-  margin-top: 9px;
-  font-size: 11px;
+.engagement-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--wash);
+  margin-top: 8px;
+  overflow: hidden;
 }
-.profile-insights .icon {
-  width: 16px;
-  height: 16px;
-  color: var(--accent);
-  margin-right: 4px;
+.engagement-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--metric-color);
 }
 .profile-tabs {
   gap: 22px;
@@ -2203,7 +2228,6 @@ summary {
   .profile-counts {
     gap: 4px 16px;
   }
-  .profile-insights,
   .feed-suggestions {
     margin-left: 20px;
     margin-right: 20px;

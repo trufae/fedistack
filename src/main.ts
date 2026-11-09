@@ -29,8 +29,8 @@ namespace Fedi {
       saveDemo();
     }
     const profile = state.profile;
-    if (profile?.owner && ((profile.tab === "likes" && kind === "like") || (profile.tab === "boosts" && kind === "repost")))
-      profile.posts = profile.posts.filter((p) => kind === "like" ? p.liked : p.reposted);
+    if (profile?.owner && ((profile.tab === "likes" && kind === "like") || (profile.tab === "saved" && kind === "save") || (profile.tab === "boosts" && kind === "repost")))
+      profile.posts = profile.posts.filter((p) => kind === "like" ? p.liked : kind === "save" ? p.saved : p.reposted);
     render();
   }
   async function toggleFollow(id: string): Promise<void> {
@@ -200,10 +200,11 @@ namespace Fedi {
         render();
         break;
       case "timeline":
-        if (id !== "lists" || !state.timeline.startsWith("list:")) state.timeline = id as Timeline;
+        if (id !== "bookmarks" && (id !== "lists" || !state.timeline.startsWith("list:"))) state.timeline = id as Timeline;
         if (id === "federated") state.filter = "all";
         state.query = "";
-        if (state.view === "bookmarks") navigate("home");
+        if (id === "bookmarks" && state.view !== "bookmarks") navigate("bookmarks");
+        else if (id !== "bookmarks" && state.view === "bookmarks") navigate("home");
         else await loadFeed(false, undefined, false);
         break;
       case "filter":
@@ -375,10 +376,6 @@ namespace Fedi {
         break;
       case "reschedule":
         await scheduleDialog(id);
-        break;
-      case "refresh-server-drafts":
-        await loadServerDrafts();
-        render();
         break;
       case "cancel-schedule":
         showModal("Cancel scheduled publication?", `<p>This removes the scheduled post and its content from the server. It will no longer publish automatically.</p>${action("confirm-cancel-schedule", "Cancel publication", id, "button danger")} ${action("close-modal", "Keep scheduled", "", "button subtle")}`);

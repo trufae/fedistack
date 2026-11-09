@@ -1,5 +1,5 @@
 namespace Fedi {
-  export type ProfileTab = "posts" | "replies" | "likes" | "boosts" | "followers" | "following";
+  export type ProfileTab = "posts" | "replies" | "likes" | "saved" | "boosts" | "followers" | "following";
   export interface ProfileState {
     id: string;
     account: Account | null;
@@ -18,7 +18,10 @@ namespace Fedi {
     cacheKey: string;
     controller?: AbortController;
   }
-  const profileTabs: ProfileTab[] = ["posts", "replies", "likes", "boosts", "followers", "following"];
+  const profileTabs: ProfileTab[] = ["posts", "replies", "boosts", "likes", "saved", "followers", "following"];
+  function privateProfileTab(tab: ProfileTab): boolean {
+    return tab === "likes" || tab === "saved";
+  }
 
   type ProfileCache = Pick<ProfileState, "account" | "posts" | "people" | "next" | "updated" | "generation">;
   const profileCache = new Map<string, ProfileCache>();
@@ -156,7 +159,7 @@ namespace Fedi {
     };
     const p: ProfileState = {
       id, account: cached, owner,
-      tab: profileTabs.includes(tab) && (tab !== "likes" || owner) ? tab : "posts",
+      tab: profileTabs.includes(tab) && (!privateProfileTab(tab) || owner) ? tab : "posts",
       api: server ? new API(server) : api, server,
       posts: [], people: [], visited: new Set(), loading: true, error: "",
       updated: 0, generation: feedCacheGeneration(), cacheKey: "", controller: new AbortController(),
@@ -213,7 +216,9 @@ namespace Fedi {
         ? await p.api!.accountConnections(p.id, p.tab, cursor, p.controller?.signal)
         : p.tab === "likes"
           ? await p.api!.favourites(cursor, p.controller?.signal)
-          : await p.api!.accountPosts(p.id, p.tab, cursor, p.controller?.signal);
+          : p.tab === "saved"
+            ? await p.api!.timeline("bookmarks", cursor, p.controller?.signal)
+            : await p.api!.accountPosts(p.id, p.tab, cursor, p.controller?.signal);
       next = result.next && !p.visited.has(result.next) ? result.next : undefined;
       if (page === 0 && !append) p.updated = Date.now();
       if ("accounts" in result) {
@@ -277,6 +282,7 @@ namespace Fedi {
       if (!p.api) {
         const posts = demoProfilePosts();
         p.posts = posts.filter((post) => p.tab === "likes" ? post.liked :
+          p.tab === "saved" ? post.saved :
           p.tab === "boosts" ? p.owner && post.reposted :
           (p.tab === "posts" || p.tab === "replies") && post.author.id === p.id &&
           (p.tab === "replies") === !!(post.replyTo || post.isReply));
@@ -308,10 +314,19 @@ namespace Fedi {
       if (currentProfile(p, api)) { p.loading = false; render(); }
     }
   }
+  function profileEngagement(p: ProfileState): string {
+    if (!p.owner || p.tab !== "posts" || !p.posts.length) return "";
+    const metrics = ([["likes", "Likes", "heart"], ["reposts", "Boosts", "repost"], ["replies", "Replies", "comment"]] as const)
+      .map(([key, label, symbol]) => ({ key, label, symbol, count: p.posts.reduce((total, post) => total + Math.max(0, post[key] || 0), 0) }));
+    const max = Math.max(1, ...metrics.map((metric) => metric.count));
+    const scope = `${p.posts.length} ${p.posts.length === 1 ? "post" : "posts"}`;
+    return `<section class="profile-engagement" aria-label="Engagement on your posts"><div class="engagement-heading"><span>On your posts</span><span title="Totals for the ${scope} shown below">${scope}</span></div><div class="engagement-metrics">${metrics.map(({ key, label, symbol, count }) => `<div class="engagement-metric" data-metric="${key}"><div class="engagement-value">${icon(symbol)}<strong>${count.toLocaleString()}</strong></div><span>${label}</span><div class="engagement-bar" aria-hidden="true"><span style="width:${count / max * 100}%"></span></div></div>`).join("")}</div></section>`;
+  }
+
   export function profileView(): string {
     const p = state.profile, a = p?.account;
-    if (!p || !a) return `<header class="page-top"><a href="#home" class="text-button">${icon("back")} Home</a></header>${emptyState(p?.loading ? "Opening profile…" : "Profile unavailable", p?.error || "", p && !p.loading ? action("profile-refresh", "Try again", "", "button subtle") : "")}`;
-    const tabs = profileTabs.filter((tab) => tab !== "followers" && tab !== "following" && (tab !== "likes" || p.owner));
+    if (!p || !a) return emptyState(p?.loading ? "Opening profile…" : "Profile unavailable", p?.error || "", p && !p.loading ? action("profile-refresh", "Try again", "", "button subtle") : "");
+    const tabs = profileTabs.filter((tab) => tab !== "followers" && tab !== "following" && (!privateProfileTab(tab) || p.owner));
     const editable = p.owner && !!state.api && !!state.session;
     const imageError = editable && profileImageError?.api === state.api ? profileImageError.message : "";
     const uploading = editable && profileImageUpload?.api === state.api ? profileImageUpload.kind : undefined;
@@ -329,11 +344,11 @@ namespace Fedi {
       ? a.hideCollections && !p.owner ? "This account keeps its followers and following lists private."
         : "No accounts to show. Some servers keep these lists private or only know part of a remote account’s network."
       : p.tab === "likes" ? "Posts you like will appear here. Only you can see this tab."
+        : p.tab === "saved" ? "Tap the bookmark on a post to keep it here for later. Only you can see this tab."
         : p.tab === "boosts" ? "Posts shared by this account will appear here."
           : "There are no posts to show here yet.";
-    return `<header class="page-top"><a href="#home" class="text-button">${icon("back")} Home</a><div>${action("profile-refresh", icon("refresh"), "", "icon-button")}${p.owner ? '<a href="#settings" class="button subtle small-button">' + icon("settings") + ' Settings</a>' : ""}</div></header>
-      <section class="profile-header"><div class="profile-cover">${a.header ? `<img src="${escapeHTML(safeURL(a.header, true))}" data-image-key="header:${escapeHTML(a.id)}" alt="${escapeHTML(a.name)}’s profile header" referrerpolicy="no-referrer">` : ""}${imageButton("header")}</div>
-      <div class="profile-details"><div class="profile-identity"><div class="profile-avatar">${avatar(a, false, `profile:${a.id}`)}${imageButton("avatar")}</div><div class="profile-buttons">${p.owner ? '<a href="#drafts" class="button subtle">' + icon("edit") + ' Your writing</a><a href="#bookmarks" class="button subtle">' + icon("bookmark") + ' Saved</a>' : p.server ? "" : `${followButton(a, false)}${action("message-account", `${icon("mail")} Message`, a.id, "button subtle")}`}</div></div>
+    return `<section class="profile-header"><div class="profile-cover">${a.header ? `<img src="${escapeHTML(safeURL(a.header, true))}" data-image-key="header:${escapeHTML(a.id)}" alt="${escapeHTML(a.name)}’s profile header" referrerpolicy="no-referrer">` : ""}${imageButton("header")}</div>
+      <div class="profile-details"><div class="profile-identity"><div class="profile-avatar">${avatar(a, false, `profile:${a.id}`)}${imageButton("avatar")}</div><div class="profile-buttons">${p.owner ? '<a href="#drafts" class="button subtle">' + icon("edit") + ' Your writing</a><a href="#settings" class="button subtle">' + icon("settings") + ' Settings</a>' : p.server ? "" : `${followButton(a, false)}${action("message-account", `${icon("mail")} Message`, a.id, "button subtle")}`}</div></div>
       ${uploading ? `<p class="profile-image-status" role="status">Updating ${uploading === "avatar" ? "profile picture" : "background image"}…</p>` : ""}
       ${imageError ? `<p class="error-panel" role="alert">${escapeHTML(imageError)}</p>` : ""}
       <h1>${escapeHTML(a.name)}</h1><p class="profile-handle">@${escapeHTML(a.acct)} ${a.locked ? `<span title="Approves follow requests">${icon("lock")}</span>` : ""}</p>
@@ -341,11 +356,10 @@ namespace Fedi {
       ${a.bio ? `<p class="profile-bio">${escapeHTML(a.bio)}</p>` : ""}
       ${a.fields?.length ? `<dl class="profile-fields">${a.fields.map((f) => `<div><dt>${escapeHTML(f.name)}</dt><dd>${escapeHTML(f.value)}</dd></div>`).join("")}</dl>` : ""}
       <div class="profile-meta">${joined ? `<span>${joined}</span>` : ""}${a.url ? `<a href="${escapeHTML(safeURL(a.url))}" target="_blank" rel="noopener noreferrer">Original profile ${icon("external")}</a>` : ""}${!state.session && !p.server ? '<span>Fictional offline demo</span>' : ""}</div>
-      <div class="profile-counts">${stats}</div></div></section>
-      ${p.owner && p.tab === "posts" && p.posts.length ? `<section class="profile-insights" aria-label="Your post activity"><p>On these ${p.posts.length} loaded posts</p><div>${[["heart", "Likes received", "likes"], ["repost", "Boosts received", "reposts"], ["comment", "Replies received", "replies"]].map(([symbol, label, key]) => `<span>${icon(symbol)}<strong>${p.posts.reduce((n, post) => n + (post[key as "likes" | "reposts" | "replies"] || 0), 0).toLocaleString()}</strong> ${label}</span>`).join("")}</div></section>` : ""}
-      <nav class="timeline-tabs profile-tabs" aria-label="Profile activity">${tabs.map((tab) => `<a href="${link(tab)}"${p.tab === tab ? ' class="active" aria-current="page"' : ""}>${tab[0].toUpperCase() + tab.slice(1)}${tab === "likes" ? ` ${icon("lock")}` : ""}</a>`).join("")}</nav>
+      ${profileEngagement(p)}<div class="profile-counts">${stats}</div></div></section>
+      <nav class="timeline-tabs profile-tabs" aria-label="Profile activity">${tabs.map((tab) => `<a href="${link(tab)}"${p.tab === tab ? ' class="active" aria-current="page"' : ""}${privateProfileTab(tab) ? ' data-private="true"' : ""}>${tab[0].toUpperCase() + tab.slice(1)}${privateProfileTab(tab) ? ` ${icon("lock")}<span class="sr-only"> (Only you)</span>` : ""}</a>`).join("")}</nav>
       ${people ? `<p class="profile-notice">${p.tab === "followers" ? (p.owner ? "People who follow you" : "People who follow this account") : (p.owner ? "People you follow" : "People this account follows")}</p>` : ""}
-      ${p.tab === "likes" ? '<p class="profile-notice">Your likes · Only visible to you</p>' : ""}
+      ${privateProfileTab(p.tab) ? `<p class="profile-notice">${p.tab === "likes" ? "Your likes" : "Saved for later"} · Only visible to you</p>` : ""}
       <div class="${people ? "profile-people" : "feed"}">${people ? p.people.map((a) => accountRow(a, "profile-person")).join("") : p.posts.map((post) => postCard(post)).join("")}</div>
       ${p.error ? `<div class="error-panel" role="alert">${escapeHTML(p.error)}${action(p.next ? "profile-more" : "profile-refresh", "Try again", "", "button subtle")}</div>` : ""}
       ${p.loading ? '<div class="loading" role="status">Loading profile activity…</div>' : !p.error && !(people ? p.people.length : p.posts.length) ? emptyState(`No ${p.tab} to show`, empty) : ""}

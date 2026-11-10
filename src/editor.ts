@@ -90,6 +90,7 @@ namespace Fedi {
   export function editorView(): string {
     const d = state.draft!;
     if (d.kind === "post") return noteComposerView(d);
+    const content = articleContent({ title: d.title, subtitle: d.subtitle, markdown: d.body });
     const tools = [
       ["bold", "<b>B</b>", "Bold (⌘/Ctrl+B)"],
       ["italic", "<i>I</i>", "Italic (⌘/Ctrl+I)"],
@@ -110,7 +111,7 @@ namespace Fedi {
     return `<header class="page-top editor-top"><a class="text-button editor-back" href="#drafts" aria-label="Your writing">${icon("back")}<span>Your writing</span></a>${draftSaveControls(d)}<div class="editor-actions"><button class="button subtle editor-preview" data-action="preview" aria-label="${state.preview ? "Edit article" : "Preview article"}" title="${state.preview ? "Edit" : "Preview"}">${icon(state.preview ? "edit" : "eye")}<span>${state.preview ? "Edit" : "Preview"}</span></button><button class="button primary" data-action="publish">${d.editingId ? "Update" : "Publish"}</button>${editorOptions(d)}</div></header>
       <div class="editor-paper">${
         state.preview
-          ? `<div class="article-preview-heading"><span class="eyebrow">READING PREVIEW</span><h1>${escapeHTML(d.title || "Untitled article")}</h1>${d.subtitle ? `<p class="reader-subtitle">${escapeHTML(d.subtitle)}</p>` : ""}<div class="post-byline">${avatar(state.session?.account || demoMe)}<div><strong>${escapeHTML(state.session?.account.name || "You")}</strong><div class="byline-sub">${readingTime(d.body)} min read</div></div></div></div><div class="prose reading-prose">${markdown(d.body) || '<p class="muted">Your story will take shape here.</p>'}</div>`
+          ? `<div class="article-preview-heading"><span class="eyebrow">READING PREVIEW</span><h1>${escapeHTML(d.title || "Untitled article")}</h1>${content.subtitle ? `<p class="reader-subtitle">${escapeHTML(content.subtitle)}</p>` : ""}<div class="post-byline">${avatar(state.session?.account || demoMe)}<div><strong>${escapeHTML(state.session?.account.name || "You")}</strong><div class="byline-sub">${readingTime(d.body)} min read</div></div></div></div><div class="prose reading-prose">${markdown(content.body) || '<p class="muted">Your story will take shape here.</p>'}</div>`
           : `<div class="article-heading"><label class="sr-only" for="draft-title">Article title</label><input id="draft-title" class="title-input" placeholder="Give your story a title…" value="${escapeHTML(d.title)}" maxlength="250"><label class="sr-only" for="draft-subtitle">Subtitle</label><input id="draft-subtitle" class="subtitle-input" placeholder="Add a subtitle, if you like." value="${escapeHTML(d.subtitle)}" maxlength="500"></div>${toolbar}<label class="sr-only" for="draft-body">Article body in Markdown</label><textarea id="draft-body" class="writing-area" placeholder="It starts with a thought.\n\nTell your story…" spellcheck="${editorSmartPunctuation}" autocorrect="${editorSmartPunctuation ? "on" : "off"}" autocapitalize="${editorSmartPunctuation ? "sentences" : "off"}" writingsuggestions="${editorSmartPunctuation}">${escapeHTML(d.body)}</textarea>`
       }${state.preview ? attachmentGallery(d.media, d.body) : ""}</div>
       ${draftMediaView(d)}

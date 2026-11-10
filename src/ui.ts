@@ -229,14 +229,15 @@ namespace Fedi {
 
   function postPreview(post: Post): { title: string; excerpt: string } {
     // Preview headings are display-only; the reader keeps the original post.
-    const body = plainText(articleBody(post).replace(/!?\[([^\]]*)\]\([^)]+\)/g, "$1"))
+    const content = articleContent(post);
+    const body = plainText(content.body.replace(/!?\[([^\]]*)\]\([^)]+\)/g, "$1"))
       .replace(/^[ \t]*(?:>\s*|[-+*]\s+|\d+[.)]\s+)/gm, "")
       .replace(/[^\S\r\n]+/g, " ").trim();
     const opening = body.split(/\r?\n/, 1)[0].match(/^.*?(?:[.!?](?=\s|$)|[。！？]|$)/)?.[0] || "";
     const headline = previewExcerpt(opening, 100);
     const consumed = Array.from(opening).length > 100 ? headline.slice(0, -1) : headline;
     const title = post.title.trim() || headline || (post.kind === "article" ? "Untitled article" : "Note");
-    const excerpt = post.subtitle.trim() || (post.title.trim()
+    const excerpt = content.subtitle.trim() || (post.title.trim()
       ? body : body.slice(consumed.length));
     return { title, excerpt: previewExcerpt(excerpt, 180) };
   }

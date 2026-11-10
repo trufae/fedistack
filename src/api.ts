@@ -726,7 +726,7 @@ namespace Fedi {
       id: s.id,
       author: mapAccount(s.account),
       title,
-      subtitle: "",
+      subtitle: articleContent({ title, subtitle: "", markdown: content }).subtitle,
       markdown: content,
       kind: article ? "article" : "post",
       created: s.created_at,

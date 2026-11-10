@@ -208,11 +208,28 @@ namespace Fedi {
     return /^(?:[ \t]*\r?\n)*#[ \t]+([^\r\n]+)(?:\r?\n|$)/.exec(source);
   }
 
-  export function articleBody(post: Post): string {
-    const heading = post.title && leadingHeading(post.markdown);
-    return heading && plainText(heading[1]) === post.title
-      ? post.markdown.slice(heading[0].length)
-      : post.markdown;
+  export function articleContent(post: Pick<Post, "title" | "subtitle" | "markdown">): { subtitle: string; body: string } {
+    let body = post.markdown, subtitle = post.subtitle;
+    const removeTitle = (): boolean => {
+      const heading = post.title && leadingHeading(body);
+      if (!heading || plainText(heading[1]) !== plainText(post.title)) return false;
+      body = body.slice(heading[0].length).trimStart();
+      return true;
+    };
+    const hadTitle = removeTitle();
+    while (removeTitle()) { /* Pasted articles can repeat their title. */ }
+    const opening = /^([^\r\n]+)\r?\n[ \t]*\r?\n/.exec(body);
+    // Published articles serialize the subtitle as a short paragraph after H1.
+    // Only infer it when there is more body text, never from a list or heading.
+    if (opening && (subtitle
+      ? plainText(opening[1]) === subtitle
+      : hadTitle && opening[1].length <= 500 && body.slice(opening[0].length).trim() &&
+        markdown(opening[1]) === `<p>${escapeHTML(opening[1])}</p>`)) {
+      subtitle ||= opening[1];
+      body = body.slice(opening[0].length).trimStart();
+      while (removeTitle()) { /* Remove a body title repeated after the subtitle. */ }
+    }
+    return { subtitle, body };
   }
 
   export function plainText(source: string): string {

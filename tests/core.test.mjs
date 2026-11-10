@@ -3093,6 +3093,69 @@ test("article previews use the authored subtitle and link to the complete post",
   assert.doesNotMatch(card, /The full article is reserved/);
 });
 
+test("published articles put the subtitle below a single title, before the byline and actions", () => {
+  const { app, context } = setup();
+  const { get } = elements(context);
+  app.htmlToMarkdown = (text) => text;
+  const title = "Myths in R2Land";
+  const subtitle = "How to turn 372 critical advisories into safer software.";
+  const body = "## The findings\n\nThe full article starts here.\n\n# A distinct heading";
+  for (const duplicate of ["", `# **${title}**\n\n`]) {
+    const source = `# ${title}\n\n${subtitle}\n\n${duplicate}${body}`;
+    const post = app.mapStatus(sharedStatus({ content: source }));
+    assert.equal(post.subtitle, subtitle);
+    assert.equal(post.markdown, source);
+    // Old feed caches did not retain subtitle metadata.
+    for (const cached of [post, { ...post, subtitle: "" }]) {
+      app.state.view = "reader";
+      app.state.reading = cached;
+      app.render();
+      const html = get("app").innerHTML;
+      assert.equal(html.split(title).length, 2);
+      assert.equal(html.split(subtitle).length, 2);
+      assert.match(html, /<h1>Myths in R2Land<\/h1><p class="reader-subtitle">How to turn 372 critical advisories into safer software\.<\/p>\s*<div class="post-byline">/);
+      assert.ok(html.indexOf("reader-subtitle") < html.indexOf('class="post-actions"'));
+      assert.match(html, /<div class="prose reading-prose"><h2>The findings<\/h2>/);
+      assert.match(html, /<h1>A distinct heading<\/h1>/);
+      assert.match(app.postCard(cached), /<p class="excerpt">How to turn 372 critical advisories into safer software\.<\/p>/);
+    }
+  }
+});
+
+test("subtitle extraction preserves articles without an introductory subtitle", () => {
+  const { app } = setup();
+  for (const body of [
+    "The only paragraph.",
+    "## Section\n\nA paragraph.",
+    "- First item\n\nA paragraph.",
+    "> A quote\n\nA paragraph.",
+    "```\n\ncode\n```",
+    "![A cover](https://example.org/cover.png)\n\nA paragraph.",
+    "A long opening paragraph. ".repeat(25) + "\n\nMore text.",
+    "Two lines\nin the first paragraph.\n\nMore text.",
+  ]) {
+    const content = app.articleContent({ title: "Title", subtitle: "", markdown: `# Title\n\n${body}` });
+    assert.equal(content.subtitle, "");
+    assert.equal(content.body, body);
+  }
+  const markdown = "Opening paragraph.\n\n# A later title";
+  const content = app.articleContent({ title: "", subtitle: "", markdown });
+  assert.equal(content.subtitle, "");
+  assert.equal(content.body, markdown);
+});
+
+test("the editing preview removes a pasted title without changing the draft", () => {
+  const { app } = setup();
+  const body = `# ${article.title}\n\n## Section\n\nOriginal body.`;
+  app.state.draft = { ...article, body };
+  app.state.preview = true;
+  const html = app.editorView();
+  assert.equal(html.split(article.title).length, 2);
+  assert.match(html, /<h1>An independent publication<\/h1><p class="reader-subtitle">A place for ideas<\/p>/);
+  assert.match(html, /<div class="prose reading-prose"><h2>Section<\/h2>/);
+  assert.equal(app.state.draft.body, body);
+});
+
 test("notes have bounded previews without duplicating the opening or embedding the full body", () => {
   const { app, context } = setup();
   const { get } = elements(context);

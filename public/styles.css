@@ -1196,6 +1196,12 @@ footer p {
   font-size: 18px;
   line-height: 1.95;
 }
+.reading-prose p,
+.reading-prose li,
+.reading-prose blockquote {
+  text-align: justify;
+  text-align-last: start;
+}
 .reader-end {
   margin: 40px 0 24px;
   padding-top: 23px;

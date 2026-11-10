@@ -859,6 +859,82 @@ test("DM sending cannot add a recipient through an unexpected mention", async ()
   assert.equal(calls, 0);
 });
 
+test("DM bubbles and previews hide participant mentions without changing stored messages", () => {
+  const { app } = setup();
+  const me = { ...app.demoMe, id: "me", acct: "me", url: "https://home.example/@me" };
+  const alice = { ...app.demoAuthors[0], id: "alice", acct: "a@b.com", url: "https://b.com/@a" };
+  const bob = { ...app.demoAuthors[1], id: "bob", acct: "bob@other.example", url: "https://other.example/users/bob" };
+  app.state.session = { account: me, server: "https://home.example" };
+  app.state.conversation = "chat";
+  const cases = [
+    ["@a@b.com hello", "hello"],
+    ["hello @a@b.com", "hello"],
+    ["hello @a@b.com how are you?", "hello how are you?"],
+    ["@a@b.com @bob@other.example hello", "hello"],
+    ["@a@b.com\n\n**Hello**\nsecond line", "**Hello**\nsecond line"],
+    ["hello @A@B.COM!", "hello!"],
+    ["@me @me@home.example hello", "hello"],
+    ["[@a](https://b.com/@a) hello", "hello"],
+    ["hello [@a@b.com](https://b.com/@a/)", "hello"],
+    ["[@me](https://home.example/@me) [@bob](https://other.example/users/bob) hello", "hello"],
+    ["@a@b.com", ""],
+    ["@outsider@elsewhere.example hello", "@outsider@elsewhere.example hello"],
+    ["@a@b.com.evil hello", "@a@b.com.evil hello"],
+    ["@a hello", "@a hello"],
+    ["Email user@b.com or literal user@a@b.com", "Email user@b.com or literal user@a@b.com"],
+    ["@a@b.com See https://b.com/@a@b.com", "See https://b.com/@a@b.com"],
+    ["@a@b.com Use `@a@b.com` in the example", "Use `@a@b.com` in the example"],
+    ["@a@b.com\n\n```\n  @a@b.com  example\n```", "```\n  @a@b.com  example\n```"],
+    ["```\n@a@b.com", "```\n@a@b.com"],
+    ["\\@a@b.com", "\\@a@b.com"],
+    ["[@a](https://unrelated.example)", "[@a](https://unrelated.example)"],
+    ["[Alice's profile](https://b.com/@a)", "[Alice's profile](https://b.com/@a)"],
+    ["![@a](https://b.com/@a)", "![@a](https://b.com/@a)"],
+  ];
+  for (const [source, expected] of cases) {
+    for (const author of [me, alice]) {
+      const post = { ...app.demoPosts[0], id: "dm", author, markdown: source, visibility: "direct", warning: "" };
+      app.state.conversations = [{ id: "chat", accounts: [alice, bob], unread: false, messages: [post] }];
+      const html = app.messagesView();
+      const bubble = html.match(/<div class="message-bubble prose">([\s\S]*?)<\/div><small>/)?.[1];
+      const preview = html.match(/class="conversation-item [^"]*"[\s\S]*?<p>([\s\S]*?)<\/p>/)?.[1];
+      assert.equal(bubble, app.markdown(expected), source);
+      assert.equal(preview, app.escapeHTML(app.plainText(expected).slice(0, 65)), source);
+      assert.equal(post.markdown, source);
+      post.warning = "Content warning";
+      assert.ok(app.messagesView().includes(`<details><summary>Content warning</summary>${app.markdown(expected)}</details>`), source);
+    }
+  }
+});
+
+test("DMs automatically address every participant while displaying only the message", async () => {
+  const { app } = setup();
+  const me = { ...app.demoMe, id: "me", acct: "me", url: "https://home.example/@me" };
+  const alice = { ...app.demoAuthors[0], id: "alice", acct: "a@b.com", url: "https://b.com/@a" };
+  const bob = { ...app.demoAuthors[1], id: "bob", acct: "bob@other.example", url: "https://other.example/@bob" };
+  const previous = { ...app.demoPosts[0], id: "previous", author: alice, markdown: "Hi", visibility: "direct", warning: "" };
+  const conversation = { id: "chat", accounts: [alice, bob, me], unread: false, messages: [previous] };
+  const requests = [];
+  app.state.session = { account: me, server: "https://home.example", maxChars: 500 };
+  app.state.conversations = [conversation];
+  app.state.conversation = "chat";
+  app.state.api = {
+    createStatus: async (...args) => {
+      requests.push(args);
+      return { ...previous, id: "sent", author: me, markdown: args[0] };
+    },
+  };
+  await app.sendMessage("chat", "hello");
+  assert.deepEqual(requests, [["@a@b.com @bob@other.example hello", "direct", "previous"]]);
+  assert.equal(conversation.messages[1].markdown, requests[0][0]);
+  const html = app.messagesView();
+  assert.match(html, /<div class="message outgoing"><div class="message-bubble prose"><p>hello<\/p>/);
+  assert.match(html, /class="conversation-item [^"]*"[\s\S]*?<p>hello<\/p>/);
+  app.state.session.maxChars = 10;
+  await assert.rejects(app.sendMessage("chat", "hello"), /including recipient mentions/);
+  assert.equal(requests.length, 1);
+});
+
 test("all major views render using only bundled data", () => {
   const { app, context } = setup();
   const { get } = elements(context);

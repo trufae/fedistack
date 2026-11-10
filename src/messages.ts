@@ -45,6 +45,45 @@ namespace Fedi {
       [...actual].every((id) => expected.has(id))
     );
   }
+  function messageText(post: Post, accounts: Account[]): string {
+    const handles = new Set<string>(), profiles = new Set<string>();
+    for (const account of [...accounts, post.author, state.session?.account || demoMe]) {
+      const handle = (account.acct || "").toLowerCase();
+      if (!handle) continue;
+      handles.add(handle);
+      const profile = safeURL(account.url || "");
+      if (profile) profiles.add(profile.replace(/\/$/, ""));
+      const origin = profile || safeURL(state.session?.server || "");
+      if (!handle.includes("@") && origin)
+        handles.add(`${handle}@${new URL(origin).hostname}`);
+    }
+    // Hide routing mentions only in the chat presentation. Protect code, URLs,
+    // images, and unrelated links from being rewritten as ordinary mention text.
+    const tokens = /```[\s\S]*?(?:```|$)|`[^`\n]*`|(!?)\[((?:\\.|[^\]\\\n])*)\]\(([^\s)]+)\)|https?:\/\/[^\s<>]+|(^|[^\p{L}\p{M}\p{N}_/@\\])@([a-z\d_.-]+(?:@[a-z\d.-]+)?)/giu;
+    const hidden: [number, number][] = [];
+    for (const match of post.markdown.matchAll(tokens)) {
+      const [, image, label, url, prefix, rawHandle] = match;
+      if (label !== undefined) {
+        if (!image && /^@[a-z\d_.-]+(?:@[a-z\d.-]+)?$/i.test(label) &&
+            profiles.has(safeURL(url).replace(/\/$/, "")))
+          hidden.push([match.index!, match.index! + match[0].length]);
+      } else if (rawHandle) {
+        const handle = rawHandle.replace(/\.+$/, "");
+        if (handles.has(handle.toLowerCase())) {
+          const start = match.index! + prefix.length;
+          hidden.push([start, start + handle.length + 1]);
+        }
+      }
+    }
+    let text = post.markdown;
+    for (const [start, end] of hidden.reverse()) {
+      let before = text.slice(0, start), after = text.slice(end);
+      if (/^[.,!?;:)]/.test(after)) before = before.replace(/[ \t]+$/, "");
+      else if (!before || /\s$/.test(before)) after = after.replace(/^[ \t]+/, "");
+      text = before + after;
+    }
+    return hidden.length ? text.trim() : text;
+  }
   export function messagesView(): string {
     const current = state.conversations.find(
       (c) => c.id === state.conversation,
@@ -56,12 +95,12 @@ namespace Fedi {
           .map((c) => {
             const a = c.accounts[0],
               last = c.messages[c.messages.length - 1];
-            return `<a href="#messages/${encodeURIComponent(c.id)}" class="conversation-item ${current?.id === c.id ? "selected" : ""}">${a ? avatar(a, false, `conversation:${c.id}`) : icon("mail")}<div><strong>${escapeHTML(c.accounts.map((a) => a.name).join(", ") || "Conversation")}</strong><p>${escapeHTML(last ? plainText(last.markdown).slice(0, 65) : "Start a conversation")}</p><small>${last ? relativeDate(last.created) : "New"}</small></div>${c.unread ? '<span class="unread-dot"></span>' : ""}</a>`;
+            return `<a href="#messages/${encodeURIComponent(c.id)}" class="conversation-item ${current?.id === c.id ? "selected" : ""}">${a ? avatar(a, false, `conversation:${c.id}`) : icon("mail")}<div><strong>${escapeHTML(c.accounts.map((a) => a.name).join(", ") || "Conversation")}</strong><p>${escapeHTML(last ? plainText(messageText(last, c.accounts)).slice(0, 65) : "Start a conversation")}</p><small>${last ? relativeDate(last.created) : "New"}</small></div>${c.unread ? '<span class="unread-dot"></span>' : ""}</a>`;
           })
           .join("") ||
         '<p class="muted conversation-empty">Your conversations will appear here.</p>'
-      }${state.conversationNext ? action("more-conversations", "Load older conversations", "", "button subtle") : ""}</div>
-      <section class="conversation-detail">${current ? `<div class="conversation-header"><a href="#messages" class="icon-button conversation-back" aria-label="All conversations">${icon("back")}</a>${current.accounts[0] ? avatar(current.accounts[0], true) : ""}<div><strong>${escapeHTML(current.accounts.map((a) => a.name).join(", "))}</strong><small>${escapeHTML(current.accounts.map((a) => "@" + a.acct).join(", "))}</small></div></div><div class="message-thread" id="message-thread">${current.messages.map((m) => `<div class="message ${m.author.id === (state.session?.account.id || "you") ? "outgoing" : ""}"><div class="message-bubble prose">${m.warning ? `<details><summary>${escapeHTML(m.warning)}</summary>${markdown(m.markdown)}</details>` : markdown(m.markdown)}</div><small>${escapeHTML(m.author.name)} · ${new Date(m.created).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</small></div>`).join("")}${feedback}</div><div class="message-composer"><form id="message-form" data-id="${escapeHTML(current.id)}"><label class="sr-only" for="message-body">Message</label><textarea id="message-body" name="body" rows="1" required placeholder="Write a message…">${escapeHTML(messageDrafts.get(current.id) || "")}</textarea><button type="submit" class="button primary" aria-label="Send message">${icon("send")}</button></form><p class="dm-note">${icon("lock")} Private mentions, not end-to-end encrypted.</p></div>` : emptyState("A conversation starts with hello", "Choose a conversation or reach out to someone new.", action("new-message", "Write a message", "", "button subtle"))}</section></div>
+      }${state.conversationNext ? action("more-conversations", "Load older conversations", "", "button subtle full-width") : ""}</div>
+      <section class="conversation-detail">${current ? `<div class="conversation-header"><a href="#messages" class="icon-button conversation-back" aria-label="All conversations">${icon("back")}</a>${current.accounts[0] ? avatar(current.accounts[0], true) : ""}<div><strong>${escapeHTML(current.accounts.map((a) => a.name).join(", "))}</strong><small>${escapeHTML(current.accounts.map((a) => "@" + a.acct).join(", "))}</small></div></div><div class="message-thread" id="message-thread">${current.messages.map((m) => `<div class="message ${m.author.id === (state.session?.account.id || "you") ? "outgoing" : ""}"><div class="message-bubble prose">${m.warning ? `<details><summary>${escapeHTML(m.warning)}</summary>${markdown(messageText(m, current.accounts))}</details>` : markdown(messageText(m, current.accounts))}</div><small>${escapeHTML(m.author.name)} · ${new Date(m.created).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</small></div>`).join("")}${feedback}</div><div class="message-composer"><form id="message-form" data-id="${escapeHTML(current.id)}"><label class="sr-only" for="message-body">Message</label><textarea id="message-body" name="body" rows="1" required placeholder="Write a message…">${escapeHTML(messageDrafts.get(current.id) || "")}</textarea><button type="submit" class="button primary" aria-label="Send message">${icon("send")}</button></form><p class="dm-note">${icon("lock")} Private mentions, not end-to-end encrypted.</p></div>` : emptyState("A conversation starts with hello", "Choose a conversation or reach out to someone new.", action("new-message", "Write a message", "", "button subtle"))}</section></div>
       ${current ? "" : feedback}`;
   }
   export async function loadConversations(append = false): Promise<void> {

@@ -3530,6 +3530,7 @@ body.zen-mode {
   }
   .editor-back span,
   .editor-preview span,
+  .page-top [data-action="focus"],
   .editor-menu .zen-toggle {
     display: none;
   }

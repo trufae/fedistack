@@ -249,12 +249,20 @@ namespace Fedi {
     captureDraft();
   }
   let linkSelection: { draft: Draft; start: number; end: number; image: boolean } | undefined;
-  let toolbarSelection: { textarea: HTMLTextAreaElement; start: number; end: number } | undefined;
+  export interface EditorSelection { textarea: HTMLTextAreaElement; start: number; end: number }
+  let toolbarSelection: EditorSelection | undefined;
   export function rememberEditorSelection(event: PointerEvent): void {
     toolbarSelection = undefined;
-    if (!(event.target as Element).closest('.editor-toolbar [data-action="format"]')) return;
+    if (!(event.target as Element).closest('[data-action="format"], [data-action="upload-media"], [data-action="insert-media"]')) return;
     const textarea = document.getElementById("draft-body") as HTMLTextAreaElement | null;
     if (textarea) toolbarSelection = { textarea, start: textarea.selectionStart, end: textarea.selectionEnd };
+  }
+  export function takeEditorSelection(): EditorSelection | undefined {
+    const textarea = document.getElementById("draft-body") as HTMLTextAreaElement | null;
+    const selection = textarea ? toolbarSelection?.textarea === textarea ? toolbarSelection
+      : { textarea, start: textarea.selectionStart, end: textarea.selectionEnd } : undefined;
+    toolbarSelection = undefined;
+    return selection;
   }
   export function insertEditorLink(url: string, label: string): void {
     const selection = linkSelection;
@@ -276,9 +284,8 @@ namespace Fedi {
       "draft-body",
     ) as HTMLTextAreaElement | null;
     if (!textarea) return;
-    if (toolbarSelection?.textarea === textarea)
-      textarea.setSelectionRange(toolbarSelection.start, toolbarSelection.end);
-    toolbarSelection = undefined;
+    const selection = takeEditorSelection();
+    if (selection) textarea.setSelectionRange(selection.start, selection.end);
     const start = textarea.selectionStart,
       end = textarea.selectionEnd,
       selected = textarea.value.slice(start, end);

@@ -5511,6 +5511,80 @@ test("media survive edit drafts and server sync metadata, including alt-text con
   assert.equal(app.decodeServerDraft({ id: "s", scheduled_at: app.serverDraftTime(draft.id), params: { text: app.encodeServerDraft({ ...draft, media: [{ ...attachment, url: "javascript:alert(1)" }] }) }, media_attachments: [] }), null);
 });
 
+test("choosing images inserts them in order at the cursor saved before opening the picker", async () => {
+  const { app, context, textarea } = editingClient("Before.\n\nAfter.");
+  const second = { ...attachment, id: "second", url: "https://files.example/second.png" };
+  const images = [attachment, second];
+  app.state.session = { ...longServer, server: "https://example.org", account: { ...app.demoMe, id: "me" } };
+  app.state.api = {
+    capabilities: async () => longServer,
+    uploadMedia: async () => ({ ...images.shift() }),
+  };
+  const file = new File(["image"], "photo.png", { type: "image/png" });
+  let change;
+  context.document.createElement = () => ({
+    files: [file, file],
+    addEventListener(type, handler) { if (type === "change") change = handler; },
+    click() { textarea.setSelectionRange(0, 0); },
+  });
+  textarea.setSelectionRange(7, 7);
+  app.rememberEditorSelection({ target: { closest: (selector) => selector.includes('[data-action="upload-media"]') } });
+  textarea.setSelectionRange(0, 0); // Mobile toolbar blur can reset the selection.
+  app.chooseDraftImages();
+  change();
+  await new Promise(setImmediate);
+  const expected = `Before.\n\n${app.mediaMarkdown(attachment)}\n\n\n\n${app.mediaMarkdown(second)}\n\n\n\nAfter.`;
+  assert.equal(textarea.value, expected);
+  assert.equal(app.state.draft.body, expected);
+  assert.equal(app.getDrafts()[0].body, expected);
+  assert.equal(app.attachmentGallery(app.state.draft.media, expected), "");
+  app.state.preview = true;
+  const preview = app.editorView();
+  assert.match(preview, /Before\.[\s\S]*<img[^>]+original\.png[\s\S]*<img[^>]+second\.png[\s\S]*After\./);
+  app.updateMediaDescription(attachment.id, "Updated description");
+  assert.match(textarea.value, /!\[Updated description\]/);
+});
+
+test("processing images retain their insertion point while the author types elsewhere", async () => {
+  const { app, textarea } = editingClient("Before.\n\nAfter.");
+  let finish, entered;
+  const started = new Promise((resolve) => { entered = resolve; });
+  const ready = new Promise((resolve) => { finish = resolve; });
+  app.state.session = { ...longServer, server: "https://example.org", account: { id: "me" } };
+  app.state.api = {
+    capabilities: async () => longServer,
+    uploadMedia: async () => ({ ...attachment, url: "" }),
+    readyMedia: async () => { entered(); await ready; return { ...attachment }; },
+  };
+  textarea.setSelectionRange(7, 7);
+  const upload = app.uploadDraftImages([new File(["image"], "photo.png", { type: "image/png" })]);
+  await started;
+  textarea.setRangeText("More text. ", 0, 0);
+  app.captureDraft();
+  app.updateMediaDescription(attachment.id, "Alt while processing");
+  finish();
+  await upload;
+  const expected = `More text. Before.\n\n![Alt while processing](${attachment.url})\n\n\n\nAfter.`;
+  assert.equal(textarea.value, expected);
+  assert.equal(app.getDrafts()[0].body, expected);
+  assert.equal(app.attachmentGallery(app.state.draft.media, expected), "");
+});
+
+test("plain-text notes keep uploaded images as attachments", async () => {
+  const { app, textarea } = editingClient("A note.");
+  app.state.draft.kind = "post";
+  app.state.session = { ...longServer, format: "text/plain", server: "https://example.org", account: { id: "me" } };
+  app.state.api = {
+    capabilities: async () => ({ ...longServer, format: "text/plain" }),
+    uploadMedia: async () => ({ ...attachment }),
+  };
+  textarea.setSelectionRange(2, 2);
+  await app.uploadDraftImages([new File(["image"], "photo.png", { type: "image/png" })]);
+  assert.equal(textarea.value, "A note.");
+  assert.equal(app.getDrafts()[0].body, "A note.");
+  assert.match(app.attachmentGallery(app.state.draft.media, app.state.draft.body), /original\.png/);
+});
+
 test("upload completion preserves typing and alt edits, and never restores deleted or foreign drafts", async () => {
   for (const mode of ["typing", "deleted", "switched"]) {
     const { app, textarea } = editingClient("Before upload");
@@ -5632,7 +5706,8 @@ test("publication retries retain media descriptions and replay the same idempote
 });
 
 test("a failed upload leaves the text and earlier images saved with an actionable error", async () => {
-  const { app } = editingClient("Keep this writing");
+  const { app, textarea } = editingClient("Keep this writing");
+  textarea.setSelectionRange(textarea.value.length, textarea.value.length);
   app.state.session = { ...longServer, server: "https://example.org", account: { id: "me" } };
   let uploads = 0;
   app.state.api = {
@@ -5644,7 +5719,8 @@ test("a failed upload leaves the text and earlier images saved with an actionabl
   };
   const file = new File(["image"], "photo.png", { type: "image/png" });
   await app.uploadDraftImages([file, file]);
-  assert.equal(app.state.draft.body, "Keep this writing");
+  assert.equal(app.state.draft.body, `Keep this writing\n\n${app.mediaMarkdown(attachment)}\n\n`);
+  assert.equal(app.getDrafts()[0].body, app.state.draft.body);
   assert.equal(app.getDrafts()[0].media.length, 1);
   assert.equal(app.mediaBusy(app.state.draft), false);
   assert.match(app.draftMediaView(app.state.draft), /Upload interrupted\. Try again\./);

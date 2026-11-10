@@ -33,7 +33,7 @@ namespace Fedi {
       <div class="media-heading"><strong>Images${media.length ? ` · ${media.length} / ${session?.maxMedia ?? 4}` : ""}</strong>
       <button type="button" class="text-button" data-action="upload-media" ${busy || media.length >= (session?.maxMedia ?? 4) ? "disabled" : ""}>${icon("image")} Add images</button>
       ${d.kind === "article" ? '<button type="button" class="text-button" data-action="format" data-id="image">From URL</button>' : ""}</div>
-      <p class="media-hint">${session ? `Choose, paste, or drop images here.${d.kind === "article" ? " Insert an image into your article to place it between paragraphs." : ""}` : "Sign in to upload images to your server."}</p>
+      <p class="media-hint">${session ? `Choose, paste, or drop images here.${d.kind === "article" ? " Images are inserted at your cursor." : ""}` : "Sign in to upload images to your server."}</p>
       <p class="media-status" role="status" aria-live="polite">${escapeHTML(mediaMessages.size ? mediaMessages.get(mediaJobKey(d)) || "" : "")}</p>
       <div class="media-list">${media.map((m, index) => `<div class="media-item">
         ${m.previewUrl || m.url ? `<img src="${escapeHTML(safeURL(m.previewUrl || m.url, true))}" alt="${escapeHTML(m.description)}">` : '<span class="muted">Processing…</span>'}
@@ -57,22 +57,24 @@ namespace Fedi {
   }
   export function chooseDraftImages(): void {
     if (!state.session) { toast("Sign in to upload images to your server."); return; }
-    const draft = state.draft, api = state.api;
+    const draft = state.draft, api = state.api, selection = takeEditorSelection();
     const input = document.createElement("input");
     input.type = "file";
     input.accept = (state.session.imageTypes || ["image/jpeg", "image/png", "image/gif", "image/webp", "image/avif"]).join(",");
     input.multiple = true;
     input.addEventListener("change", () => {
       if (state.draft === draft && state.api === api)
-        void uploadDraftImages(Array.from(input.files || [])).catch((error) => toast(error.message));
+        void uploadDraftImages(Array.from(input.files || []), selection).catch((error) => toast(error.message));
     });
     input.click();
   }
-  export async function uploadDraftImages(files: File[]): Promise<void> {
+  export async function uploadDraftImages(files: File[], selection = takeEditorSelection()): Promise<void> {
     const d = state.draft, api = state.api, session = state.session, key = draftKey();
     if (!d || !files.length || editorPublishing() || mediaBusy(d)) return;
     if (!api || !session) { toast("Sign in to upload images to your server."); return; }
     captureDraft();
+    let insertion = d.kind === "article" && selection
+      ? { body: d.body, start: selection.start, end: selection.end } : undefined;
     const job = mediaJobKey(d);
     mediaJobs.add(job);
     if (!flushDraft()) { mediaJobs.delete(job); return; }
@@ -82,9 +84,33 @@ namespace Fedi {
       const drafts = readStore<Draft[]>(key, []), stored = drafts.find((x) => x.id === d.id);
       if (!stored) return;
       const active = draftKey() === key && state.draft?.id === d.id ? state.draft : stored;
+      if (active === state.draft && state.view === "editor") captureDraft();
       const previous = active.media?.find((m) => m.id === media.id);
       if (previous) Object.assign(previous, { ...media, description: previous.description });
       else (active.media ||= []).push(media);
+      if (media.url && insertion) {
+        // Rebase the saved selection around typing that happened during upload.
+        // If its text was replaced, keep the attachment without overwriting edits.
+        const before = insertion.body, after = active.body;
+        if (before !== after) {
+          let start = 0, oldEnd = before.length, end = after.length;
+          while (start < oldEnd && start < end && before[start] === after[start]) start++;
+          while (oldEnd > start && end > start && before[oldEnd - 1] === after[end - 1]) { oldEnd--; end--; }
+          if (oldEnd <= insertion.start) {
+            insertion.start += end - oldEnd;
+            insertion.end += end - oldEnd;
+          } else if (start < insertion.end) insertion = undefined;
+        }
+        if (insertion) {
+          const text = `\n\n${mediaMarkdown(previous || media)}\n\n`;
+          if (active === state.draft && state.view === "editor" && document.getElementById("draft-body"))
+            insertEditorText(text, insertion.start, insertion.end);
+          else active.body = after.slice(0, insertion.start) + text + after.slice(insertion.end);
+          insertion.start += text.length;
+          insertion.end = insertion.start;
+          insertion.body = active.body;
+        }
+      }
       active.updated = new Date().toISOString();
       active.publishKey = active.scheduleKey = active.scheduleTime = undefined;
       Object.assign(stored, active);
@@ -159,7 +185,8 @@ namespace Fedi {
     const media = state.draft?.media?.find((m) => m.id === id);
     if (!media?.url) return;
     if (state.preview) { state.preview = false; render(); }
-    insertEditorText(`\n\n${mediaMarkdown(media)}\n\n`);
+    const selection = takeEditorSelection();
+    insertEditorText(`\n\n${mediaMarkdown(media)}\n\n`, selection?.start, selection?.end);
   }
   export function editorFileEvent(event: ClipboardEvent | DragEvent): void {
     if (state.view !== "editor" || !(event.target instanceof Element) ||

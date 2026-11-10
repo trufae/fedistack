@@ -2180,6 +2180,30 @@ test("bare reader links still open uncached real posts and cached posts with dem
   assert.deepEqual(requests, ["/api/v1/statuses/real-post", "/api/v1/statuses/real-post/context", "/api/v1/statuses/slow-web/context"]);
 });
 
+test("the article renders while its comments are still loading", async () => {
+  let releaseComments, contextStarted;
+  const comments = new Promise((resolve) => { releaseComments = resolve; });
+  const started = new Promise((resolve) => { contextStarted = resolve; });
+  const { app, context, get } = await postActionFixture(async (url) => {
+    if (url.endsWith("/context")) {
+      contextStarted();
+      await comments;
+      return Response.json({ ancestors: [], descendants: [] });
+    }
+    return Response.json(sharedStatus());
+  });
+  context.location.hash = "#read/slow-web?server=https%3A%2F%2Fsource.example";
+  const loading = app.route();
+  await started;
+  assert.equal(app.state.loading, true);
+  assert.match(get("app").innerHTML, /Shared article/);
+  assert.doesNotMatch(get("app").innerHTML, /Opening your next read/);
+  releaseComments();
+  await loading;
+  assert.equal(app.state.loading, false);
+  assert.equal(app.state.error, "");
+});
+
 test("a shared link opens Markdown and public comments without a session or cached post", async () => {
   const requests = [];
   const { app, context, get } = await postActionFixture(async (url, options) => {

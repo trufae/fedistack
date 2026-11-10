@@ -751,6 +751,7 @@ namespace Fedi {
         }
         state.readerServer = readerAPI && readerAPI !== api ? readerAPI.server : "";
         state.reading = post;
+        render();
         const comments = readerAPI
           ? await readerAPI.context(post.id)
           : [...demoComments(post), ...(demoState.comments[id] || [])];

@@ -49,6 +49,29 @@ namespace Fedi {
     String.raw`${inlineToken.source}|(^|[^\p{L}\p{M}\p{N}_#/@\\])${hashtag.source}`, "gu",
   );
 
+  export function markdownLinks(source: string, depth = 0): string[] {
+    if (depth > 8) return [];
+    const links = new Set<string>();
+    let fenced = false;
+    const text = source.split("\n").filter((line) => {
+      if (line.startsWith("```")) { fenced = !fenced; return false; }
+      return !fenced;
+    }).join("\n");
+    for (const match of text.matchAll(inlineToken)) {
+      if (match[1] || match[2] || /^@/.test(match[3] || "")) continue;
+      const emphasis = match[5] || match[6] || match[7] || match[8] || match[9];
+      if (emphasis) { markdownLinks(emphasis, depth + 1).forEach((url) => links.add(url)); continue; }
+      let value = match[4] || match[10] || "";
+      if (match[10]) {
+        value = value.replace(/[.,!?:;]+$/, "");
+        while (value.endsWith(")") && value.split(")").length > value.split("(").length) value = value.slice(0, -1);
+      }
+      const url = safeURL(value);
+      if (url && !(hashtagName(match[3] || "") && /\/(?:tags?|hashtags)\/[^/]+\/?$/.test(new URL(url).pathname))) links.add(url);
+    }
+    return [...links];
+  }
+
   function inline(source: string, linkHashtags: boolean, depth = 0): string {
     if (depth > 8) return escapeHTML(source);
     // Parse from source, then escape each text node. Generated HTML is never parsed again.

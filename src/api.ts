@@ -708,7 +708,17 @@ namespace Fedi {
     const s = input.reblog || input;
     const content = htmlToMarkdown(s.content),
       tags = (s.tags || []).map((t) => t.name);
-    const card = s.card?.type === "link" && s.card.title ? s.card : undefined;
+    const card = s.card;
+    const basePreview = card && safeURL(card.url) ? basicLinkPreview(card.url) : undefined;
+    const linkPreview = card && basePreview ? {
+      ...basePreview,
+      title: card.title || basePreview.title,
+      description: card.description || "",
+      image: safeURL(card.image || "", true) || basePreview.image,
+      imageAlt: card.image_description || "",
+      siteName: card.provider_name || basePreview.siteName,
+      type: card.type === "video" ? "video" as const : basePreview.type,
+    } : undefined;
     const heading = leadingHeading(content);
     const title = s.title?.trim() || (heading ? plainText(heading[1]) : "");
     // Link preview metadata belongs to the linked page.
@@ -738,11 +748,12 @@ namespace Fedi {
       saved: !!s.bookmarked,
       visibility: s.visibility,
       warning,
-      image: safeURL(media?.preview_url || card?.image || "", true),
+      image: safeURL(media?.preview_url || media?.url || "", true),
       imageAlt: media?.description || "",
       media: s.media_attachments?.filter((m) => !!m.id).map((m) => mapMedia({ ...m, url: m.url || m.preview_url })),
       url: safeURL(s.url),
-      source: card ? safeURL(card.url) : undefined,
+      source: linkPreview?.url,
+      linkPreview,
       replyTo: s.in_reply_to_id,
       isReply: !!s.in_reply_to_id || !!s.is_reply,
       boostedBy: input.reblog

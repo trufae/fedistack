@@ -43,6 +43,7 @@ namespace Fedi {
     ownPosts: [] as Post[],
     ownNext: undefined as string | undefined,
     theme: readStore<string>("theme", "system"),
+    linkPreviews: readStore<unknown>("link-previews", true) !== false,
   };
   let loadVersion = 0;
   const feedTarget = 10;
@@ -203,6 +204,7 @@ namespace Fedi {
       search.defaultValue === state.query ? document.getElementById("discover-content") : null;
     if (discovery) {
       renderHTML(discovery, discoverContent());
+      setupLinkPreviews(app);
       setupSuggestionCarousels(suggestionScrolls);
       setupDiscoveryScroll();
       return;
@@ -244,6 +246,7 @@ namespace Fedi {
     );
     setupSuggestionCarousels(suggestionScrolls);
     setupDiscoveryScroll();
+    setupLinkPreviews(app);
     if (languageFocus) {
       const target = document.getElementById(languageFocus) ||
         document.getElementById(languageSelect || "");
@@ -835,7 +838,7 @@ namespace Fedi {
     return `<header class="page-top"><a class="text-button" href="#${escapeHTML(state.readerBack)}">${icon("back")} Back to reading</a><div><button class="icon-button" data-action="focus" aria-label="${state.focus ? "Leave" : "Enter"} focus mode" title="Focus mode">${icon("book")}</button>${editPublicationButton(p)}</div></header><article class="reader">
       ${hidden ? `<div class="content-warning"><h2>${escapeHTML(p.warning)}</h2>${action("reveal", "Show publication", p.id, "button subtle")}</div>` : `${title ? `<span class="eyebrow">${escapeHTML(p.author.publication || "INDEPENDENT WRITING")}</span>` : ""}${!publicReading && p.author.id === (state.session?.account.id || "you") ? `<span class="published-badge">${state.session ? "Published" : "Published in demo"}</span>` : ""}${title ? `<h1>${escapeHTML(title)}</h1>` : ""}${content.subtitle ? `<p class="reader-subtitle">${escapeHTML(content.subtitle)}</p>` : ""}`}
       <div class="post-byline">${profileAvatar(p.author, false, `post:${p.id}`)}<div>${author}<div class="byline-sub">${new Date(p.created).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })} · ${readingTime(p.markdown)} min read</div></div>${publicReading ? "" : followButton(p.author)}</div>
-      ${postActions(p)}${hidden ? "" : `${!p.media?.length && p.image ? `<img class="reader-cover" data-image-key="cover:${escapeHTML(p.id)}" src="${escapeHTML(p.image)}" alt="${escapeHTML(p.imageAlt || "")}">` : ""}<div class="prose reading-prose">${markdown(content.body, true)}</div>${attachmentGallery(p.media, p.markdown)}${p.source ? `<a class="button subtle" href="${escapeHTML(p.source)}" target="_blank" rel="noopener noreferrer">Read the linked article ${icon("external")}</a>` : ""}<div class="reader-end">${icon("leaf")}<span>Thanks for reading. Keep the conversation going.</span></div>`}</article>
+      ${postActions(p)}${hidden ? "" : `${!p.media?.length && p.image ? `<img class="reader-cover" data-image-key="cover:${escapeHTML(p.id)}" src="${escapeHTML(p.image)}" alt="${escapeHTML(p.imageAlt || "")}">` : ""}<div class="prose reading-prose">${markdown(content.body, true)}</div>${attachmentGallery(p.media, p.markdown)}${postLinkPreview(p)}<div class="reader-end">${icon("leaf")}<span>Thanks for reading. Keep the conversation going.</span></div>`}</article>
       <section class="comments"><div class="section-heading"><h2>Conversation <span>${p.replies}</span></h2>${action("share", "Share publication", p.id, "text-button")}</div>${replyForm}
       ${state.error ? `<p class="form-error" role="alert">${escapeHTML(state.error)}</p>` : ""}${state.loading ? '<p class="loading">Loading the conversation…</p>' : state.comments.map(commentCard).join("") || '<p class="muted">Be the first to start the conversation.</p>'}</section>`;
   }
@@ -891,6 +894,7 @@ namespace Fedi {
   function settingsView(): string {
     const session = state.session;
     return `<header class="page-top"><span>MAKE YOURSELF AT HOME</span><a href="#profile" class="text-button">Your profile ${icon("arrow")}</a></header><div class="page-intro"><h1>The little details<span class="accent">.</span></h1><p>Your reading room, your way.</p></div><div class="settings-content"><section><h2>Appearance</h2><div class="theme-options">${["light", "dark", "system"].map((t) => `<button class="button ${state.theme === t ? "primary" : "subtle"}" data-action="set-theme" data-id="${t}" aria-pressed="${state.theme === t}">${icon(t === "dark" ? "moon" : t === "light" ? "sun" : "settings")} ${t[0].toUpperCase() + t.slice(1)}</button>`).join("")}</div></section>
+      <section><h2>Link previews</h2><p id="link-previews-description">Show a picture and details for linked pages and videos. Turning this off stops loading previews. Saved on this device.</p><button id="link-previews-toggle" class="button subtle" role="switch" aria-checked="${state.linkPreviews}" aria-describedby="link-previews-description" data-action="toggle-link-previews">Link previews: ${state.linkPreviews ? "On" : "Off"}</button></section>
       <section><h2>Discovery languages</h2><p>Show publications in any of your chosen languages when exploring Discover. Add languages below and tap a language to remove it. Home and Saved keep all languages.</p>${languageSelector("settings-language")}<p class="muted">This uses language labels supplied by your server. Posts without a label are excluded while language filters are selected. An empty list shows all languages. Your preferences are saved on this device.</p></section>
       ${interestsSettings()}
       <section><h2>Your account</h2>${session ? `<p>Signed in as <strong>${escapeHTML(session.account.acct)}</strong></p><div class="capability-card"><strong>${session.maxChars.toLocaleString()} characters per publication</strong><p>${session.format === "text/markdown" ? "Native Markdown publishing" : session.format === "text/html" ? "Rich HTML publishing from Markdown" : "Plain-text publishing only"}</p><span>${supportsArticles(session) ? "Ready for long-form writing" : escapeHTML(articleSupportProblem(session))}</span></div>${action("disconnect", "Sign out", "", "button subtle")}` : `<p>Choose an Akkoma, Pleroma, or compatible instance with long posts and rich text. Fedistack checks the server’s capabilities before you write.</p>${action("connect", "Sign in", "", "button primary")}`}</section>

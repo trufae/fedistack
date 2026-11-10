@@ -210,6 +210,10 @@ namespace Fedi {
         writeStore("theme", id);
         render();
         break;
+      case "toggle-link-previews":
+        setLinkPreviews(!state.linkPreviews);
+        document.getElementById("link-previews-toggle")?.focus();
+        break;
       case "timeline":
         if (id === "bookmarks") {
           if (state.view !== "bookmarks") navigate("bookmarks");

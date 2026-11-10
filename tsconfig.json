@@ -13,6 +13,7 @@
     "dist/version.ts",
     "src/types.ts",
     "src/markdown.ts",
+    "src/link-preview.ts",
     "src/storage.ts",
     "src/api.ts",
     "src/demo.ts",

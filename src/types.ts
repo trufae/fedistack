@@ -58,6 +58,7 @@ namespace Fedi {
     warning: string;
     url?: string;
     source?: string;
+    linkPreview?: LinkPreview;
     replyTo?: string;
     isReply?: boolean;
     boostedBy?: string;
@@ -71,6 +72,15 @@ namespace Fedi {
     accounts: Account[];
     unread: boolean;
     messages: Post[];
+  }
+  export interface LinkPreview {
+    url: string;
+    title: string;
+    description: string;
+    image: string;
+    imageAlt: string;
+    siteName: string;
+    type: "link" | "video";
   }
   export interface Draft {
     id: string;
@@ -203,9 +213,11 @@ namespace Fedi {
       type: string;
       title: string;
       description: string;
-      image: string;
+      image?: string | null;
       url: string;
-    };
+      provider_name?: string;
+      image_description?: string;
+    } | null;
   }
   export interface MastodonConversation {
     id: string;

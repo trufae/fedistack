@@ -29,6 +29,7 @@ function setup(
     Headers,
     Response,
     TextEncoder,
+    TextDecoder,
     AbortController,
     Image: class {
       naturalWidth = 32;
@@ -3410,6 +3411,206 @@ test("remote Article metadata preserves short and untitled articles", () => {
   assert.equal(app.mapStatus({ ...status, reblog: status }).kind, "article");
 });
 
+test("link cards preserve video metadata without replacing publication covers or titles", () => {
+  const { app } = setup();
+  app.htmlToMarkdown = (text) => text;
+  const card = { type: "video", title: "A video", description: "Video description", url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=12", image: "https://images.example/video.jpg", provider_name: "YouTube", image_description: "Video artwork", html: '<iframe src="https://embed.example"></iframe>' };
+  const post = app.mapStatus(sharedStatus({ content: "My own words", card }));
+  assert.equal(post.title, "");
+  assert.equal(post.image, "");
+  assert.equal(post.linkPreview.type, "video");
+  assert.equal(post.linkPreview.imageAlt, "Video artwork");
+  const output = app.postCard(post);
+  assert.match(output, /link-preview-video/);
+  assert.match(output, /href="https:\/\/www.youtube.com\/watch\?v=dQw4w9WgXcQ&amp;t=12"/);
+  assert.match(output, /loading="lazy" decoding="async" referrerpolicy="no-referrer"/);
+  assert.doesNotMatch(output, /iframe|reader-cover|class="thumbnail"/);
+  const attached = app.mapStatus(sharedStatus({ card, media_attachments: [{ id: "photo", type: "image", preview_url: "https://images.example/own.jpg" }] }));
+  assert.equal(attached.image, "https://images.example/own.jpg");
+  assert.equal(attached.linkPreview.image, card.image);
+  for (const site of ["github.com", "www.instagram.com"]) {
+    const linked = app.mapStatus(sharedStatus({ card: { ...card, type: "link", url: `https://${site}/example`, image: null } }));
+    assert.match(app.postCard(linked), /class="link-preview"/);
+  }
+  assert.equal(app.mapStatus(sharedStatus({ card: { ...card, url: "javascript:alert(1)" } })).linkPreview, undefined);
+});
+
+test("YouTube thumbnail fallbacks support public URL forms and reject lookalike hosts", () => {
+  const { app } = setup();
+  for (const url of [
+    "https://youtu.be/dQw4w9WgXcQ?t=12", "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    "https://m.youtube.com/shorts/dQw4w9WgXcQ", "https://youtube.com/live/dQw4w9WgXcQ",
+    "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ",
+  ]) {
+    const preview = app.basicLinkPreview(url);
+    assert.equal(preview.type, "video", url);
+    assert.equal(preview.image, "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg");
+    assert.equal(preview.url, url);
+  }
+  for (const url of ["https://youtube.com.evil.example/watch?v=dQw4w9WgXcQ", "https://youtu.be/invalid", "https://youtube.com/playlist?list=abc"]) {
+    assert.equal(app.basicLinkPreview(url).image, "");
+  }
+});
+
+test("preview candidates skip code, attached images, mentions and tags and deduplicate links", () => {
+  const { app } = setup();
+  const source = [
+    "`https://code.example/` ![picture](https://image.example/a.png)",
+    "```html", "https://fenced.example/", "```",
+    "[@person](https://social.example/@person) [#tag](https://social.example/tags/tag)",
+    "**[Repository](https://github.com/trufae/fedistack)**",
+    "https://github.com/trufae/fedistack", "(https://youtu.be/dQw4w9WgXcQ).",
+    "[#docs](https://docs.example/)", "```", "https://unfinished-code.example/",
+  ].join("\n");
+  assert.deepEqual(Array.from(app.markdownLinks(source)), ["https://github.com/trufae/fedistack", "https://youtu.be/dQw4w9WgXcQ", "https://docs.example/"]);
+});
+
+test("link preview text is escaped and unsafe thumbnail and navigation URLs are rejected", () => {
+  const { app } = setup();
+  const preview = { ...app.basicLinkPreview("https://github.com/example/repo"), title: '<img src=x onerror="alert(1)">', description: "<script>bad()</script>", siteName: "<b>GitHub</b>", image: "javascript:alert(1)" };
+  const html = app.linkPreviewCard(preview);
+  assert.doesNotMatch(html, /<img|<script|<b>|javascript:/);
+  assert.match(html, /&lt;img/);
+  assert.equal(app.linkPreviewCard({ ...preview, url: "data:text/html,bad" }), "");
+});
+
+test("Open Graph metadata takes precedence and resolves relative images safely", () => {
+  const { app, context } = setup();
+  let metadata = [
+    { property: "og:title", content: "A title & more" },
+    { property: "og:title", content: "Second title" },
+    { name: "twitter:title", content: "Twitter title" },
+    { property: "og:image", content: "../image.png" },
+    { property: "og:image:alt", content: "A useful description" },
+    { property: "og:description", content: "Page description" },
+    { property: "og:site_name", content: "Example" },
+    { property: "og:type", content: "video.other" },
+  ];
+  context.document = { createElement(tag) {
+    assert.equal(tag, "template");
+    return { content: {
+      querySelectorAll: () => metadata.map((attributes) => ({ getAttribute: (key) => attributes[key] || null })),
+      querySelector: () => ({ textContent: "Document title" }),
+    } };
+  } };
+  const preview = app.parseLinkPreview("<html>fixture</html>", "https://example.org/posts/article");
+  assert.equal(preview.title, "A title & more");
+  assert.equal(preview.image, "https://example.org/image.png");
+  assert.equal(preview.imageAlt, "A useful description");
+  assert.equal(preview.siteName, "Example");
+  assert.equal(preview.type, "video");
+  metadata = [{ name: "twitter:image", content: "//cdn.example/image.jpg" }];
+  assert.equal(app.parseLinkPreview("", preview.url).image, "https://cdn.example/image.jpg");
+  metadata = [{ property: "og:image", content: "data:image/svg+xml,unsafe" }];
+  assert.equal(app.parseLinkPreview("", preview.url).image, "");
+  assert.equal(app.parseLinkPreview("", preview.url).title, "Document title");
+});
+
+test("preview lookups share requests, bound response size and cache CORS failures", async () => {
+  let calls = 0, options, parsed;
+  const { app, context } = setup(async (_url, init) => {
+    calls++; options = init;
+    return new Response("x".repeat(600 * 1024), { headers: { "Content-Type": "text/html; charset=utf-8" } });
+  });
+  context.document = { createElement: () => ({
+    set innerHTML(html) { parsed = html; },
+    content: { querySelectorAll: () => [], querySelector: () => ({ textContent: "Loaded" }) },
+  }) };
+  const first = app.loadLinkPreview("https://example.org/page");
+  assert.equal(first, app.loadLinkPreview("https://example.org/page"));
+  assert.equal((await first).title, "Loaded");
+  assert.equal(parsed.length, 512 * 1024);
+  assert.equal(options.credentials, "omit");
+  assert.equal(options.referrerPolicy, "no-referrer");
+  assert.equal(options.mode, "cors");
+  assert.equal(options.headers.Authorization, undefined);
+  await app.loadLinkPreview("https://example.org/page");
+  assert.equal(calls, 1);
+  const post = { ...app.demoPosts[0], markdown: "https://example.org/page" };
+  assert.match(app.postLinkPreview(post), /<strong>Loaded<\/strong>/);
+  let blockedCalls = 0;
+  const blocked = setup(async () => { blockedCalls++; throw new TypeError("Blocked by CORS"); }).app;
+  assert.equal(await blocked.loadLinkPreview("https://blocked.example/"), null);
+  assert.equal(await blocked.loadLinkPreview("https://blocked.example/"), null);
+  assert.equal(await blocked.loadLinkPreview("javascript:alert(1)"), null);
+  assert.equal(await blocked.loadLinkPreview("http://example.org/"), null);
+  assert.equal(blockedCalls, 1);
+});
+
+test("turning link previews off persists, hides cards, aborts work and prevents queued requests", async () => {
+  const requests = [];
+  const { app, context } = setup((_url, options) => new Promise((_resolve, reject) => {
+    requests.push(options);
+    options.signal.addEventListener("abort", () => reject(new Error("Aborted")));
+  }));
+  const { get } = elements(context);
+  app.state.view = "settings";
+  app.render();
+  assert.match(get("app").innerHTML, /role="switch" aria-checked="true"/);
+  const pending = Array.from({ length: 5 }, (_, index) => app.loadLinkPreview(`https://example.org/${index}`));
+  assert.equal(requests.length, 3);
+  app.setLinkPreviews(false);
+  assert.ok(requests.every((options) => options.signal.aborted));
+  assert.deepEqual(await Promise.all(pending), [null, null, null, null, null]);
+  assert.equal(requests.length, 3);
+  assert.match(get("app").innerHTML, /role="switch" aria-checked="false"/);
+  assert.equal(context.localStorage.getItem("fedistack:link-previews"), "false");
+  const post = { ...app.demoPosts[0], markdown: "https://youtu.be/dQw4w9WgXcQ", linkPreview: app.basicLinkPreview("https://github.com/example/repo") };
+  assert.doesNotMatch(app.postCard(post), /link-preview|ytimg/);
+  assert.equal(await app.loadLinkPreview("https://example.org/new"), null);
+  assert.equal(requests.length, 3);
+  const reloaded = setup(undefined, { localStorage: context.localStorage }).app;
+  assert.equal(reloaded.state.linkPreviews, false);
+  app.setLinkPreviews(true);
+  assert.match(app.postCard(post), /link-preview/);
+  assert.equal(context.localStorage.getItem("fedistack:link-previews"), "true");
+});
+
+test("preview lookups wait for visibility and ignore observers from earlier renders", async () => {
+  const requests = [], observers = [];
+  const { app, context } = setup(async (url) => { requests.push(url); throw new TypeError("Offline"); });
+  context.IntersectionObserver = class {
+    constructor(callback) { this.callback = callback; observers.push(this); }
+    observe() {}
+    unobserve() {}
+    disconnect() { this.disconnected = true; }
+  };
+  const element = { isConnected: true, dataset: { linkPreview: "https://example.org/lazy" } };
+  const root = { querySelectorAll: () => [element] };
+  app.setupLinkPreviews(root);
+  const old = observers.at(-1);
+  app.setupLinkPreviews(root);
+  const current = observers.at(-1);
+  old.callback([{ isIntersecting: true, target: element }]);
+  current.callback([{ isIntersecting: false, target: element }]);
+  assert.equal(requests.length, 0);
+  current.callback([{ isIntersecting: true, target: element }]);
+  await app.loadLinkPreview(element.dataset.linkPreview);
+  assert.deepEqual(requests, [element.dataset.linkPreview]);
+  element.isConnected = false;
+  element.dataset.linkPreview = "https://example.org/detached";
+  current.callback([{ isIntersecting: true, target: element }]);
+  assert.equal(requests.length, 1);
+  app.state.linkPreviews = false;
+  app.setupLinkPreviews(root);
+  assert.equal(current.disconnected, true);
+  assert.equal(observers.length, 2);
+});
+
+test("content warnings suppress link previews in feeds and the reader until revealed", () => {
+  const { app, context } = setup();
+  const { get } = elements(context);
+  const post = { ...app.demoPosts[0], warning: "Spoilers", markdown: "https://youtu.be/dQw4w9WgXcQ", linkPreview: app.basicLinkPreview("https://youtu.be/dQw4w9WgXcQ") };
+  assert.doesNotMatch(app.postCard(post), /link-preview|ytimg/);
+  app.state.view = "reader";
+  app.state.reading = post;
+  app.render();
+  assert.doesNotMatch(get("app").innerHTML, /link-preview|ytimg/);
+  app.state.revealed.add(post.id);
+  app.render();
+  assert.match(get("app").innerHTML, /link-preview-video/);
+});
+
 test("article classification uses the 900-character boundary or explicit markers, not link previews", () => {
   const { app } = setup();
   app.htmlToMarkdown = (text) => text;
@@ -3450,7 +3651,7 @@ test("untitled long posts get a preview headline and retain their original reade
   }));
   assert.equal(post.kind, "article");
   const card = app.postCard(post);
-  assert.doesNotMatch(card, /Linked headline/);
+  assert.match(card, /class="link-preview"[^]*<strong>Linked headline<\/strong>/);
   assert.match(card, /class="article-link"><h2>Let me elaborate\.<\/h2><p class="excerpt">Alien tokens/);
   assert.match(card, /class="continue-reading">Continue reading/);
   assert.equal(post.title, "");
@@ -3458,11 +3659,11 @@ test("untitled long posts get a preview headline and retain their original reade
   app.state.reading = post;
   app.render();
   const html = get("app").innerHTML;
-  assert.doesNotMatch(html, /reader-subtitle|Linked headline/);
-  assert.equal(html.split(opening).length, 2);
+  assert.doesNotMatch(html, /reader-subtitle/);
+  assert.equal(html.split(opening).length, 3); // Post text and the linked page's description.
   assert.match(html, /<div class="prose reading-prose"><p>Let me elaborate/);
   assert.match(html, /<h1>A later section<\/h1>/);
-  assert.match(html, /href="https:\/\/example.org\/article"[^>]*>Read the linked article/);
+  assert.match(html, /class="link-preview" href="https:\/\/example.org\/article"/);
 });
 
 test("the reader and card show an authored headline once and preserve distinct headings", () => {
@@ -3569,7 +3770,8 @@ test("notes have bounded previews without duplicating the opening or embedding t
   assert.match(card, /…<\/p><span class="continue-reading">Continue reading/);
   assert.match(card, /href="#read\/compact-note" class="article-link"/);
   assert.match(card, /class="article-meta"><span>Note<\/span>/);
-  assert.doesNotMatch(card, /note-body|https:\/\/example.org\/quiet|The ending is only/);
+  assert.doesNotMatch(card, /note-body|The ending is only/);
+  assert.match(card, /class="link-preview" href="https:\/\/example.org\/quiet"/);
   app.state.view = "reader";
   app.state.reading = post;
   app.render();

@@ -103,6 +103,7 @@ namespace Fedi {
   export function imageLoadError(event: Event): void {
     const image = event.target as HTMLImageElement | null;
     if (image?.matches?.("img[data-avatar-key]")) image.hidden = true;
+    if (image?.matches?.(".link-preview-media img")) image.closest(".link-preview-media")?.remove();
   }
   export function renderHTML(element: HTMLElement, html: string): void {
     const images = new Map<string, HTMLImageElement[]>();
@@ -267,7 +268,7 @@ namespace Fedi {
       <div class="post-content ${!featured && post.image ? "with-thumbnail" : ""}"><div>
       <a href="${href}" class="article-link"><h2>${escapeHTML(preview.title)}</h2>${preview.excerpt ? `<p class="excerpt">${escapeHTML(preview.excerpt)}</p>` : ""}<span class="continue-reading">Continue reading ${icon("arrow")}</span></a>
       <div class="article-meta"><span>${post.kind === "article" ? "Article" : "Note"}</span>${post.tags[0] ? `<span>·</span><span>${hashtagLink(post.tags[0])}</span>` : ""}${post.kind === "article" ? `<span>·</span><span>${readingTime(post.markdown)} min read</span>` : ""}</div>
-      </div>${!featured && post.image ? `<a href="${href}"><img class="thumbnail" data-image-key="cover:${escapeHTML(post.id)}" src="${escapeHTML(post.image)}" alt="${escapeHTML(post.imageAlt || "")}" loading="lazy"></a>` : ""}</div>`
+      </div>${!featured && post.image ? `<a href="${href}"><img class="thumbnail" data-image-key="cover:${escapeHTML(post.id)}" src="${escapeHTML(post.image)}" alt="${escapeHTML(post.imageAlt || "")}" loading="lazy"></a>` : ""}</div>${postLinkPreview(post)}`
       }
       ${postActions(post)}</article>`;
   }

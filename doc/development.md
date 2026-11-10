@@ -26,6 +26,7 @@ Fedistack starts at **0.1.0**. `package.json` is the source of truth for the app
 | `src/types.ts`    | Domain and API response types                                 |
 | `src/api.ts`      | Transport, capabilities, OAuth, rate limits, response mapping |
 | `src/markdown.ts` | Escaped Markdown rendering and HTML conversion                |
+| `src/link-preview.ts` | Open Graph metadata, cached client lookups, and framed link previews |
 | `src/storage.ts`  | Defensive browser storage and account-scoped drafts           |
 | `src/server-drafts.ts` | Server draft synchronization and scheduled-post management |
 | `src/app.ts`      | Routes, state, feed, reader, library, settings                |
@@ -64,3 +65,7 @@ Reading requests use per-view abort controllers. The API client shares relations
 Mobile pull-to-refresh and polling share the refresh guard and error backoff. Manual refreshes have a five-second cooldown. Feed refreshes fetch only the head page, preserve overlapping older pages, and skip rendering unchanged responses. Discover refreshes check one page from each public timeline, reuse interests and loaded posts, and preserve their order. The pull indicator sits outside the rendered app so gestures and loading feedback do not rebuild page content.
 
 Search uses the [Mastodon v2 search API](https://docs.joinmastodon.org/methods/search/), including all three result categories. Pagination uses separate `type`/`offset` pairs because combined searches ignore `offset`; raw result counts advance cursors before client filtering. Exact hashtag queries use the [tag timeline API](https://docs.joinmastodon.org/methods/timelines/#tag), independent of full-text indexing. `resolve=true` discovers specific accounts or URLs, not arbitrary remote keywords.
+
+Link previews use the server's [PreviewCard](https://docs.joinmastodon.org/entities/PreviewCard/) metadata, including video cards, separately from publication covers. When metadata is missing, the first eligible link gets a client-side Open Graph lookup as it approaches the viewport. Requests omit credentials and referrers, allow three concurrent fetches, stop after the HTML head or 512 KiB, and time out after six seconds. The latest 128 results (including failures) stay in memory across rerenders. Remote markup is parsed in an inert template and only escaped text and safe image URLs are rendered; embeds are never executed.
+
+Because Fedistack is static, direct lookups depend on the destination allowing browser CORS access. Sites that block it, including many social sites, rely on server-provided metadata. YouTube watch, short, live, embed, and youtu.be links also have a thumbnail fallback. Other unavailable previews remain clickable text cards, and broken thumbnails fall back to the card text. No third-party scraping proxy is used. Content warnings suppress previews until revealed.

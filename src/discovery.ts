@@ -164,7 +164,15 @@ namespace Fedi {
     render();
     return true;
   }
-  export async function loadDiscovery(api: API | null, signal: AbortSignal, current: () => boolean, append = false): Promise<void> {
+  export async function loadDiscovery(api: API | null, signal: AbortSignal, current: () => boolean, append = false, quiet = false): Promise<void> {
+    const visible = () => JSON.stringify([state.posts, state.next, state.error, discovery.errors,
+      discovery.limit, [...state.relationships.values()]]);
+    let shown = quiet ? visible() : "";
+    const update = () => {
+      if (quiet && state.loading) return;
+      const next = quiet ? visible() : "";
+      if (!quiet || shown !== next) { render(); shown = next; }
+    };
     const owner = discoveryOwner();
     const previous = discovery.owner === owner ? discovery.posts : [];
     const previousVisible = Math.min(discovery.limit, eligibleDiscoveryPosts(previous).length);
@@ -173,7 +181,7 @@ namespace Fedi {
       append = false;
     }
     discovery.owner = owner;
-    discovery.limit = append ? discovery.limit + discoveryBatch : discoveryBatch;
+    discovery.limit = append ? discovery.limit + discoveryBatch : quiet ? discovery.limit : discoveryBatch;
     if (append && eligibleDiscoveryPosts(previous).length >= discovery.limit) {
       state.posts = previous;
       state.next = discoveryNext();
@@ -187,8 +195,8 @@ namespace Fedi {
     state.next = undefined;
     state.error = "";
     state.loading = true;
-    render();
-    if (!append) void loadSuggestions();
+    update();
+    if (!append && !quiet) void loadSuggestions();
     const existing = new Set(append ? previous.map(discoveryIdentity) : []);
     const publicPosts: Record<PublicTimeline, Post[]> = { local: [], federated: [] };
     const errors: Record<PublicTimeline, string> = { local: "", federated: "" };
@@ -205,7 +213,7 @@ namespace Fedi {
       let cursor = append ? cursors[timeline] : undefined;
       const visited = new Set<string>();
       try {
-        for (let page = 0; page < 3 && current(); page++) {
+        for (let page = 0; page < (quiet ? 1 : 3) && current(); page++) {
           if (cursor) visited.add(cursor);
           const result = await api.timeline(timeline, cursor, signal);
           if (!current()) return;
@@ -235,7 +243,7 @@ namespace Fedi {
       learn(interests.likes);
       interests.tags.forEach((tag) => { if (tag.following !== false) tags.set(tag.name.toLowerCase(), 4); });
       const extras: Post[] = [];
-      if (api && !append) {
+      if (api && !append && !quiet) {
         const lists = await Promise.allSettled(shuffled(interests.lists).slice(0, 2).map((list) => api.timeline(`list:${list.id}`, undefined, signal)));
         if (!current()) return;
         for (const result of lists) if (result.status === "fulfilled") { learn(result.value.posts); extras.push(...result.value.posts); }
@@ -251,8 +259,15 @@ namespace Fedi {
         if (publicPosts.local[i]) candidates.push(publicPosts.local[i]);
       }
       candidates.push(...extras);
+      if (quiet) candidates.push(...previous);
       rememberDiscoveryLikes(candidates);
-      const ranked = rankDiscoveryPosts(candidates, tags, authors);
+      let ranked = rankDiscoveryPosts(candidates, tags, authors);
+      if (quiet) {
+        const refreshed = new Map(ranked.map((post) => [discoveryIdentity(post), post]));
+        const old = new Set(previous.map(discoveryIdentity));
+        ranked = [...ranked.filter((post) => !old.has(discoveryIdentity(post))),
+          ...previous.flatMap((post) => refreshed.get(discoveryIdentity(post)) || [])];
+      }
       state.posts = append ? [...previous, ...ranked.filter((post) => !existing.has(discoveryIdentity(post)))] : ranked;
       discovery.errors = errors;
       if (errors.local && errors.federated && !state.posts.length) {
@@ -266,7 +281,7 @@ namespace Fedi {
         void api.relationships([...new Set(state.posts.map((post) => post.author.id))]).then((rows) => {
           if (!current()) return;
           rows.forEach((row) => state.relationships.set(row.id, row));
-          render();
+          update();
         }).catch(() => { /* Optional follow metadata must not block reading. */ });
       }
     } catch (error) {
@@ -277,7 +292,7 @@ namespace Fedi {
         discovery.autoLoad = !state.error && !discovery.errors.local && !discovery.errors.federated &&
           (!append || Math.min(discovery.limit, eligibleDiscoveryPosts(state.posts).length) > previousVisible);
         state.loading = false;
-        render();
+        update();
       }
     }
   }

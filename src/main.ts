@@ -229,7 +229,7 @@ namespace Fedi {
         if (id === "all" || id === "article" || id === "post") setFeedFilter(id);
         break;
       case "refresh":
-        await loadFeed();
+        await refreshReading(Date.now(), true);
         break;
       case "load-more":
         await loadFeed(true);
@@ -518,6 +518,7 @@ namespace Fedi {
   }
 
   export async function boot(): Promise<void> {
+    setupPullRefresh();
     applyTheme();
     updateConversationViewport();
     window.visualViewport?.addEventListener("resize", updateConversationViewport);

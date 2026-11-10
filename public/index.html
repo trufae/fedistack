@@ -29,6 +29,10 @@
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
     <div id="app"></div>
+    <div id="pull-refresh" role="status" aria-live="polite" aria-atomic="true">
+      <span class="pull-refresh-spinner" aria-hidden="true"></span>
+      <span class="sr-only" id="pull-refresh-label"></span>
+    </div>
     <dialog id="modal" aria-labelledby="modal-title"></dialog>
     <div id="toast" role="status" aria-live="polite"></div>
     <noscript

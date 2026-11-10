@@ -195,6 +195,7 @@ namespace Fedi {
   }
 
   export function render(): void {
+    updatePullRefresh();
     const app = document.getElementById("app")!;
     const suggestionScrolls = new Map(Array.from(app.querySelectorAll<HTMLElement>(".suggestion-track"), (track) => [track.id, track.scrollLeft]));
     const search = document.activeElement as HTMLInputElement | null;
@@ -384,13 +385,14 @@ namespace Fedi {
     append = false,
     target = feedTarget,
     force = true,
+    quiet = false,
   ): Promise<void> {
     const api = state.api;
     const key = JSON.stringify([state.view, state.timeline, state.query, state.filter,
       state.exploring, state.discoveryLanguages, append, target]);
     if (state.loading && feedInFlight?.api === api && feedInFlight.key === key)
       return feedInFlight.promise;
-    const promise = runLoadFeed(append, target, force);
+    const promise = runLoadFeed(append, target, force, quiet);
     const request = { api, key, promise };
     feedInFlight = request;
     const done = () => { if (feedInFlight === request) feedInFlight = undefined; };
@@ -402,6 +404,7 @@ namespace Fedi {
     append: boolean,
     target: number,
     force: boolean,
+    quiet: boolean,
   ): Promise<void> {
     if (append && !state.next) return;
     const version = ++loadVersion,
@@ -411,9 +414,18 @@ namespace Fedi {
     const current = () => version === loadVersion && state.api === api && !controller.signal.aborted;
     if (state.view === "discover" && state.exploring && !state.query) {
       feedSource = undefined;
-      await loadDiscovery(api, controller.signal, current, append);
+      await loadDiscovery(api, controller.signal, current, append, quiet);
       return;
     }
+    const previous = state.posts, previousNext = state.next;
+    const visible = () => JSON.stringify([state.posts, state.accounts, state.searchTags,
+      state.next, state.error, [...state.relationships.values()]]);
+    let shown = quiet ? visible() : "";
+    const update = () => {
+      if (quiet && state.loading) return;
+      const next = quiet ? visible() : "";
+      if (!quiet || shown !== next) { render(); shown = next; }
+    };
     const existing = new Set(append ? state.posts.map((p) => p.id) : []);
     const visited = new Set<string>();
     const tagQuery = hashtagName(state.query.trim());
@@ -446,7 +458,7 @@ namespace Fedi {
     let reuseCache = false;
     state.loading = true;
     state.error = "";
-    if (!append) {
+    if (!append && !quiet) {
       if (cached) {
         state.posts = cached.posts;
         state.next = cached.next;
@@ -463,8 +475,8 @@ namespace Fedi {
         reuseCache = true;
       }
     }
-    render();
-    if (!append && state.view !== "bookmarks") void loadSuggestions();
+    update();
+    if (!append && !quiet && state.view !== "bookmarks") void loadSuggestions();
     if (reuseCache) return;
     try {
       let posts: Post[];
@@ -508,8 +520,8 @@ namespace Fedi {
           if (searching) {
             const found = await api.search(state.query, controller.signal, cursor);
             if (!current()) return;
-            state.accounts = [...new Map([...state.accounts, ...found.accounts].map((account) => [account.id, account])).values()];
-            state.searchTags = [...new Set([...state.searchTags, ...(found.hashtags || [])])];
+            state.accounts = [...new Map([...(quiet && !append ? [] : state.accounts), ...found.accounts].map((account) => [account.id, account])).values()];
+            state.searchTags = [...new Set([...(quiet && !append ? [] : state.searchTags), ...(found.hashtags || [])])];
             result = found;
           } else result = await api.timeline(timeline, cursor, controller.signal);
           if (!current()) return;
@@ -522,12 +534,22 @@ namespace Fedi {
         if (!current()) return;
         rememberDiscoveryLikes(posts);
         loaded = [...new Map([...loaded, ...posts].map((p) => [p.id, p])).values()];
+        // A refresh only reads the head. Keep already loaded older pages when
+        // it overlaps, otherwise retain the new cursor so no unseen gap is lost.
+        if (quiet && !append && !state.query && state.next && posts.length) {
+          const overlap = previous.findIndex((post) => post.id === posts[posts.length - 1].id);
+          if (overlap >= 0) {
+            const ids = new Set(loaded.map((post) => post.id));
+            loaded.push(...previous.slice(overlap + 1).filter((post) => !ids.has(post.id)));
+            state.next = previousNext;
+          }
+        }
         // Keep readable cached articles while scanning note-only fresh pages.
         if (append || visibleFeedPosts(loaded).length || !visibleFeedPosts().length)
           state.posts = loaded;
         if (!paginated) state.next = undefined;
         save();
-        render();
+        update();
         if (api) {
           const ids = [...new Set([
               ...posts.map((p) => p.author.id),
@@ -539,18 +561,18 @@ namespace Fedi {
               if (!current()) return;
               relations.forEach((r) => state.relationships.set(r.id, r));
               save();
-              render();
+              update();
             }).catch(() => { /* Relationship metadata is optional for reading. */ });
           }
         }
         if (!current()) return;
         if (
-          !paginated || searching ||
+          quiet || !paginated || searching ||
           !state.next ||
           visibleFeedPosts(loaded).filter((p) => !existing.has(p.id)).length >= target
         )
           break;
-        render();
+        update();
       }
       state.posts = loaded;
       save();
@@ -567,37 +589,46 @@ namespace Fedi {
     } finally {
       if (current()) {
         state.loading = false;
-        render();
+        update();
       }
     }
   }
 
-  let readingRefresh: { api: API; key: string; at: number; failures: number } | undefined;
+  export function canRefreshReading(): boolean {
+    return state.view === "profile" ? !!state.profile?.api :
+      ["home", "discover", "bookmarks"].includes(state.view) &&
+      (state.view !== "home" || state.timeline !== "lists");
+  }
+  let readingRefresh: { api: API | null; key: string; at: number; manualAt: number; failures: number } | undefined;
   let refreshingReading = false;
-  export async function refreshReading(now = Date.now()): Promise<void> {
-    const api = state.api, p = state.profile;
-    if (!api || refreshingReading || state.loading || p?.loading || profileImageUpdating() || state.query ||
+  export async function refreshReading(now = Date.now(), manual = false): Promise<void> {
+    const p = state.view === "profile" ? state.profile : null, api = p?.api || state.api;
+    if (!canRefreshReading() || refreshingReading || state.loading || p?.loading || profileImageUpdating() ||
+        (!manual && (!api || state.query || state.view === "bookmarks" ||
         (state.view === "discover" && state.exploring && state.posts.length > 0) ||
-        (state.view !== "profile" && state.timeline === "lists") ||
-        !["home", "discover", "profile"].includes(state.view) ||
+        (typeof window !== "undefined" && window.scrollY > 200))) ||
         (typeof document !== "undefined" && (document.hidden || document.activeElement?.matches("input,textarea,[contenteditable=true]"))) ||
-        (typeof navigator !== "undefined" && navigator.onLine === false) ||
-        (typeof window !== "undefined" && window.scrollY > 200)) return;
-    const key = JSON.stringify([state.view, state.timeline, p?.id, p?.tab, p?.server]);
+        (typeof navigator !== "undefined" && navigator.onLine === false)) return;
+    const key = JSON.stringify([state.view, state.timeline, state.query, p?.id, p?.tab, p?.server]);
     const empty = p ? !p.posts.length && !p.people.length : !state.posts.length;
     const interval = empty ? 5000 : 30000;
     if (readingRefresh?.api !== api || readingRefresh.key !== key)
-      readingRefresh = { api, key, at: 0, failures: 0 };
+      readingRefresh = { api, key, at: 0, manualAt: 0, failures: 0 };
     const refresh = readingRefresh;
-    const updated = p ? p.updated : readFeedCache(feedCacheKey(state.timeline) || "")?.updated || 0;
-    if (now < Math.max(refresh.at, updated + interval)) return;
+    const updated = p ? p.updated : !state.query && !(state.view === "discover" && state.exploring)
+      ? readFeedCache(feedCacheKey(state.view === "bookmarks" ? "bookmarks" : state.timeline) || "")?.updated || 0 : 0;
+    const due = manual ? Math.max(refresh.manualAt, refresh.failures ? refresh.at : 0, updated + 5000)
+      : Math.max(refresh.at, updated + interval);
+    if (now < due) return;
     refreshingReading = true;
     try {
       if (p) await refreshProfile();
-      else await loadFeed(false);
-      const failed = p ? !!state.profile?.error : !!state.error;
+      else await loadFeed(false, feedTarget, true, true);
+      const failed = p ? !!p.error : !!state.error || (state.view === "discover" && state.exploring &&
+        !!(discovery.errors.local || discovery.errors.federated));
       refresh.failures = failed ? refresh.failures + 1 : 0;
       refresh.at = now + (failed ? Math.min(120000, interval * 2 ** refresh.failures) : interval);
+      refresh.manualAt = Math.max(now, Date.now()) + 5000;
     } finally { refreshingReading = false; }
   }
 

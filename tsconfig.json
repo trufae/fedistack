@@ -26,6 +26,7 @@
     "src/server-drafts.ts",
     "src/messages.ts",
     "src/interests.ts",
+    "src/refresh.ts",
     "src/main.ts"
   ]
 }

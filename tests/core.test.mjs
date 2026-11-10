@@ -5260,6 +5260,16 @@ function cachedFeedFixture() {
   return fixture;
 }
 
+function captureFeedRenders(get) {
+  const frames = [];
+  let html = get("app").innerHTML;
+  Object.defineProperty(get("app"), "innerHTML", {
+    get: () => html,
+    set(value) { html = value; frames.push(value); },
+  });
+  return frames;
+}
+
 test("timeline requests use forty posts for initial and older pages", async () => {
   const calls = [];
   const { app } = setup(async (url) => {
@@ -5621,6 +5631,204 @@ test("automatic refresh checks visible reading, respects freshness and backs off
   await app.refreshReading(now + 62000); assert.equal(calls, 3);
   await app.refreshReading(now + 93000); assert.equal(calls, 3);
   await app.refreshReading(now + 123000); assert.equal(calls, 4);
+});
+
+test("pull refresh keeps the feed intact, skips unchanged renders and shares work with polling", async () => {
+  const { app, get, post } = cachedFeedFixture();
+  const posts = [post("head")];
+  app.state.api.timeline = async () => ({ posts, next: "older" });
+  await app.loadFeed(false, 1);
+  const html = get("app").innerHTML;
+  let calls = 0, finish;
+  const frames = captureFeedRenders(get);
+  app.state.api.timeline = () => { calls++; return new Promise((resolve) => { finish = resolve; }); };
+  const now = Date.now() + 6000;
+  const refresh = app.refreshReading(now, true);
+  await app.refreshReading(now, true);
+  await app.refreshReading(now + 31000);
+  assert.equal(calls, 1);
+  assert.equal(get("app").innerHTML, html);
+  assert.equal(frames.length, 0);
+  finish({ posts, next: "older" });
+  await refresh;
+  await new Promise(setImmediate);
+  assert.equal(frames.length, 0);
+  await app.refreshReading(now + 1000, true);
+  assert.equal(calls, 1, "repeated pulls within five seconds do not refetch");
+});
+
+test("pull refresh reads one head page, retains overlapping older pages and uses a fresh cursor across gaps", async () => {
+  const { app, get, post } = cachedFeedFixture();
+  const now = Date.now() + 6000;
+  const head = post("head"), older = post("older");
+  app.state.api.timeline = async () => ({ posts: [head, older], next: "old-cursor" });
+  await app.loadFeed(false, 1);
+  let calls = 0;
+  const frames = captureFeedRenders(get);
+  app.state.api.timeline = async () => { calls++; return { posts: [post("new"), head], next: "new-cursor" }; };
+  await app.refreshReading(now, true);
+  await new Promise(setImmediate);
+  assert.equal(calls, 1);
+  assert.equal(frames.length, 1);
+  assert.doesNotMatch(frames[0], /class="loading"/);
+  assert.deepEqual(Array.from(app.state.posts, (p) => p.id), ["new", "head", "older"]);
+  assert.equal(app.state.next, "old-cursor");
+  app.state.api.timeline = async () => ({ posts: [post("distant")], next: "gap-cursor" });
+  await app.refreshReading(now + 6000, true);
+  assert.deepEqual(Array.from(app.state.posts, (p) => p.id), ["distant"]);
+  assert.equal(app.state.next, "gap-cursor");
+});
+
+test("pull refresh keeps readable content on failure, backs off, and clears unauthorized data", async () => {
+  const { app, post } = cachedFeedFixture();
+  const now = Date.now() + 6000;
+  app.state.api.timeline = async () => ({ posts: [post("old")] });
+  await app.loadFeed(false, 1);
+  let calls = 0;
+  app.state.api.timeline = async () => { calls++; throw new Error("Offline"); };
+  await app.refreshReading(now, true);
+  assert.equal(app.state.posts[0].id, "old");
+  assert.equal(app.state.error, "Offline");
+  await app.refreshReading(now + 6000, true);
+  assert.equal(calls, 1);
+  app.state.api.timeline = async () => { throw new app.APIError("Sign in again", 401); };
+  await app.refreshReading(now + 61000, true);
+  assert.equal(app.state.posts.length, 0);
+});
+
+test("pull refresh cannot commit an old feed after navigation", async () => {
+  const { app, context, get, post } = cachedFeedFixture();
+  let finish;
+  app.state.api.timeline = () => new Promise((resolve) => { finish = resolve; });
+  const refresh = app.refreshReading(Date.now(), true);
+  context.location.hash = "#settings";
+  await app.route();
+  const html = get("app").innerHTML;
+  finish({ posts: [post("stale")] });
+  await refresh;
+  assert.equal(get("app").innerHTML, html);
+  assert.equal(app.state.view, "settings");
+  assert.equal(app.state.posts.length, 0);
+});
+
+test("pull refresh replaces search results and supports Saved without automatic polling", async () => {
+  const { app, post } = cachedFeedFixture();
+  app.state.view = "discover";
+  app.state.query = "words";
+  app.state.accounts = [app.demoAuthors[0]];
+  app.state.searchTags = ["old"];
+  app.state.api.search = async () => ({ posts: [post("found")], accounts: [], hashtags: ["fresh"] });
+  await app.refreshReading(Date.now(), true);
+  assert.equal(app.state.posts[0].id, "found");
+  assert.equal(app.state.accounts.length, 0);
+  assert.deepEqual(Array.from(app.state.searchTags), ["fresh"]);
+  app.state.query = "";
+  app.state.view = "bookmarks";
+  let calls = 0;
+  app.state.api.timeline = async (timeline) => { calls++; assert.equal(timeline, "bookmarks"); return { posts: [] }; };
+  await app.refreshReading();
+  assert.equal(calls, 0);
+  await app.refreshReading(Date.now(), true);
+  assert.equal(calls, 1);
+});
+
+test("Discover pull refresh only reads two public heads and keeps the loaded mix stable", async () => {
+  const { app, get, post } = cachedFeedFixture();
+  const posts = [post("first"), post("second")];
+  app.state.view = "discover";
+  app.state.exploring = true;
+  app.state.posts = posts;
+  app.state.next = "discovery";
+  Object.assign(app.discovery, {
+    owner: JSON.stringify([app.state.session.server, app.state.session.account.id]),
+    posts, cursors: { local: "local-next", federated: "federated-next" },
+  });
+  const calls = [];
+  app.state.api.favourites = async () => ({ posts: [] });
+  app.state.api.followedTags = async () => ({ tags: [] });
+  app.state.api.get = async () => [];
+  app.state.api.timeline = async (timeline, cursor) => {
+    calls.push([timeline, cursor]);
+    return { posts: [posts[0]], next: `${timeline}-next` };
+  };
+  app.render();
+  const frames = captureFeedRenders(get);
+  await app.refreshReading(Date.now(), true);
+  await new Promise(setImmediate);
+  assert.deepEqual(calls.sort(), [["federated", undefined], ["local", undefined]]);
+  assert.deepEqual(Array.from(app.state.posts, (p) => p.id), ["first", "second"]);
+  assert.equal(frames.length, 0);
+  assert.equal(app.state.error, "");
+});
+
+function pullFixture() {
+  const { app, context } = setup(), { get } = elements(context);
+  const events = {}, windowEvents = {};
+  const indicator = get("pull-refresh"), label = get("pull-refresh-label");
+  indicator.style = { setProperty() {} };
+  context.document.addEventListener = (name, handler) => { events[name] = handler; };
+  context.document.documentElement.classList = { toggle() {} };
+  context.window = { scrollY: 0, addEventListener(name, handler) { windowEvents[name] = handler; } };
+  context.navigator = { onLine: true };
+  context.matchMedia = () => ({ matches: true });
+  context.getComputedStyle = () => ({ overflowX: "visible", overflowY: "visible" });
+  const target = { closest: () => null, parentElement: context.document.body };
+  const touch = (x, y) => ({ identifier: 1, clientX: x, clientY: y });
+  const start = (x = 100, y = 100) => events.touchstart({ target, touches: [touch(x, y)] });
+  const move = (x, y, extra = {}) => {
+    const event = { touches: [touch(x, y)], cancelable: true, preventDefault() { this.prevented = true; }, ...extra };
+    events.touchmove(event);
+    return event;
+  };
+  app.setupPullRefresh();
+  return { app, context, events, windowEvents, indicator, label, target, start, move };
+}
+
+test("mobile pull gesture arms only at the top and refreshes once on release", async () => {
+  const { app, context, events, indicator, label, start, move } = pullFixture();
+  let calls = 0, finish;
+  app.refreshReading = () => { calls++; return new Promise((resolve) => { finish = resolve; }); };
+  context.window.scrollY = 50;
+  start(); move(100, 300); events.touchend();
+  assert.equal(calls, 0);
+  context.window.scrollY = 0;
+  start(); move(100, 160); events.touchend();
+  assert.equal(calls, 0, "short pulls cancel");
+  start();
+  assert.equal(move(100, 260).prevented, true);
+  assert.equal(indicator.dataset.state, "ready");
+  assert.equal(label.textContent, "Release to refresh");
+  assert.equal(calls, 0, "crossing the threshold alone does not refresh");
+  events.touchend();
+  assert.equal(calls, 1);
+  assert.equal(indicator.dataset.state, "loading");
+  start(); move(100, 300); events.touchend();
+  assert.equal(calls, 1);
+  finish();
+  await new Promise((resolve) => setTimeout(resolve, 420));
+  assert.equal(indicator.dataset.state, "");
+});
+
+test("pull gesture ignores sideways, canceled, multi-touch, nested, editing and desktop gestures", () => {
+  const { app, context, events, windowEvents, target, start, move } = pullFixture();
+  let calls = 0;
+  app.refreshReading = async () => { calls++; };
+  start(); move(260, 110); move(260, 400); events.touchend();
+  start(); move(100, 280); events.touchcancel(); events.touchend();
+  start(); move(100, 280, { touches: [{}, {}] }); events.touchend();
+  start(); move(100, 280); move(100, 120); events.touchend();
+  start(); move(100, 280, { cancelable: false }); events.touchend();
+  start(); move(100, 280); context.location.hash = "#discover"; windowEvents.hashchange(); events.touchend();
+  target.scrollHeight = 100; target.clientHeight = 50;
+  context.getComputedStyle = () => ({ overflowY: "auto" });
+  start(); move(100, 280); events.touchend();
+  target.scrollHeight = 0;
+  app.state.view = "editor";
+  start(); move(100, 280); events.touchend();
+  app.state.view = "home";
+  context.matchMedia = () => ({ matches: false });
+  start(); move(100, 280); events.touchend();
+  assert.equal(calls, 0);
 });
 
 test("empty profiles refresh automatically so a background import becomes visible", async () => {

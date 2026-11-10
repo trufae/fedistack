@@ -32,6 +32,7 @@ Fedistack starts at **0.1.0**. `package.json` is the source of truth for the app
 | `src/profile.ts`  | Shared account profiles, paginated activity, people lists, recommendations |
 | `src/editor.ts`   | Draft lifecycle, formatting, preview, single-post publishing  |
 | `src/editor-input.ts` | Mobile editor viewport, typing preferences, and article-only Vim integration |
+| `src/refresh.ts` | Mobile pull-to-refresh gesture and its independent status indicator |
 | `public/editor-vim.js` | Standalone textarea Vim modes, motions, selections, and basic editing |
 | `src/media.ts`    | Image uploads, attachment management, inline images, alt text and galleries |
 | `src/messages.ts` | Conversation loading, participants, private replies           |
@@ -59,5 +60,7 @@ The architecture was informed by source review of [Elk's API setup](https://gith
 API references: [Mastodon OAuth](https://docs.joinmastodon.org/methods/oauth/), [statuses](https://docs.joinmastodon.org/methods/statuses/), [conversations](https://docs.joinmastodon.org/methods/conversations/), [followed hashtags](https://docs.joinmastodon.org/methods/followed_tags/), [hashtag subscriptions](https://docs.joinmastodon.org/methods/tags/), [lists](https://docs.joinmastodon.org/methods/lists/), [Pleroma extensions](https://docs.pleroma.social/backend/development/API/differences_in_mastoapi_responses/), and [Mastodon's registration rate limit](https://github.com/mastodon/mastodon/blob/main/config/initializers/rack_attack.rb).
 
 Reading requests use per-view abort controllers. The API client shares relationship reads per account ID, batches at 80, and caches metadata for one minute; successful follow/mute/block mutations supersede older in-flight reads. Suggestions share a pending request and retry failures after one minute (honoring Retry-After). Visible reading uses a single five-second polling timer with freshness checks and failure backoff, rather than a streaming connection.
+
+Mobile pull-to-refresh and polling share the refresh guard and error backoff. Manual refreshes have a five-second cooldown. Feed refreshes fetch only the head page, preserve overlapping older pages, and skip rendering unchanged responses. Discover refreshes check one page from each public timeline, reuse interests and loaded posts, and preserve their order. The pull indicator sits outside the rendered app so gestures and loading feedback do not rebuild page content.
 
 Search uses the [Mastodon v2 search API](https://docs.joinmastodon.org/methods/search/), including all three result categories. Pagination uses separate `type`/`offset` pairs because combined searches ignore `offset`; raw result counts advance cursors before client filtering. Exact hashtag queries use the [tag timeline API](https://docs.joinmastodon.org/methods/timelines/#tag), independent of full-text indexing. `resolve=true` discovers specific accounts or URLs, not arbitrary remote keywords.

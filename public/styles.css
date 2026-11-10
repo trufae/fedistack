@@ -1416,6 +1416,16 @@ footer p {
 .editor-done {
   display: none;
 }
+.editor-vim-status {
+  flex-shrink: 0;
+  padding: 0 8px;
+  color: var(--muted);
+  font: 11px ui-monospace, SFMono-Regular, monospace;
+  white-space: nowrap;
+}
+.writing-area[data-vim-mode="normal"] {
+  caret-shape: block;
+}
 .editor-toolbar {
   display: flex;
   flex: 1;

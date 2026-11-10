@@ -248,6 +248,7 @@ namespace Fedi {
         document.getElementById(`${languageSelect}-clear`)?.focus({ preventScroll: true });
       else target?.focus({ preventScroll: true });
     }
+    updateEditorVim();
     if (state.view === "editor") updateEditorMeta();
     updateEditorViewport();
     document.title = `${state.view === "reader" && state.reading ? state.reading.title || (state.reading.kind === "article" ? "Article" : "Note") : state.view === "editor" ? (state.draft?.kind === "post" ? "New note" : state.draft?.title) || "New draft" : state.view === "profile" ? state.profile?.account?.name || "Profile" : state.view === "people" ? "People to follow" : state.view === "discover" ? "Discover" : "Your reading room"} — Fedistack`;

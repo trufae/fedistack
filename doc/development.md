@@ -30,7 +30,8 @@ Fedistack starts at **0.1.0**. `package.json` is the source of truth for the app
 | `src/app.ts`      | Routes, state, feed, reader, library, settings                |
 | `src/profile.ts`  | Shared account profiles, paginated activity, people lists, recommendations |
 | `src/editor.ts`   | Draft lifecycle, formatting, preview, single-post publishing  |
-| `src/editor-input.ts` | Mobile editor viewport, keyboard punctuation preferences, and code-aware typing |
+| `src/editor-input.ts` | Mobile editor viewport, typing preferences, and article-only Vim integration |
+| `public/editor-vim.js` | Standalone textarea Vim modes, motions, selections, and basic editing |
 | `src/media.ts`    | Image uploads, attachment management, inline images, alt text and galleries |
 | `src/messages.ts` | Conversation loading, participants, private replies           |
 | `src/interests.ts` | Hashtag subscriptions, list management, and list membership   |
@@ -38,7 +39,7 @@ Fedistack starts at **0.1.0**. `package.json` is the source of truth for the app
 | `src/demo.ts`     | Explicitly fictional offline content                          |
 | `src/main.ts`     | Event delegation and application startup                      |
 
-TypeScript namespaces compile into one classic script with `tsc --outFile`; ES-module loading is deliberately avoided so opening the distribution from disk remains possible. Styling and local SVG illustrations are original to this project.
+TypeScript namespaces compile into one classic script with `tsc --outFile`; ES-module loading is deliberately avoided so opening the distribution from disk remains possible. `public/editor-vim.js` is copied alongside the bundle and loaded first as a separate classic script. Styling and local SVG illustrations are original to this project.
 
 Tests cover publishing limits, Markdown escaping, account-scoped drafts, server draft round-trips and conflicts, scheduled publishing and retries, keyboard formatting, API transport, OAuth state/PKCE, file-origin login, rate limiting, DM audiences, view rendering, and static serving. Browser visual QA and authenticated end-to-end actions require a browser session and a real account; the automated tests use mock API responses and do not publish to an account.
 

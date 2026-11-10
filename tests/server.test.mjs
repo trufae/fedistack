@@ -29,6 +29,7 @@ test("the local server serves the complete static distribution and blocks traver
   for (const [path, type] of [
     ["/", "text/html"],
     ["/app.js", "text/javascript"],
+    ["/editor-vim.js", "text/javascript"],
     ["/styles.css", "text/css"],
     ["/favicon.ico", "image/x-icon"],
     ["/manifest.webmanifest", "application/manifest+json"],

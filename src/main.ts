@@ -592,6 +592,7 @@ namespace Fedi {
     document.addEventListener("change", (event) => {
       const el = event.target as HTMLInputElement;
       if (el.id === "editor-smart-punctuation") setEditorSmartPunctuation(el.checked);
+      if (el.id === "editor-vim") setEditorVim(el.checked);
       if (el.id === "list-select") {
         state.homeTimeline = state.timeline = el.value.startsWith("list:") ? el.value as HomeTimeline : "lists";
         state.query = "";

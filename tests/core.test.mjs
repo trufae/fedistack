@@ -5,6 +5,7 @@ import { webcrypto } from "node:crypto";
 import vm from "node:vm";
 
 const bundle = readFileSync(new URL("../dist/app.js", import.meta.url), "utf8");
+const vimScript = readFileSync(new URL("../dist/editor-vim.js", import.meta.url), "utf8");
 function storage() {
   const data = new Map();
   return {
@@ -56,6 +57,7 @@ function setup(
     },
     history: { replaceState() {} },
   });
+  vm.runInContext(vimScript, context);
   vm.runInContext(bundle, context);
   return { app: context.Fedi, context };
 }
@@ -5479,6 +5481,97 @@ function editingClient(body = "First line\nSecond line") {
   get("modal").close = () => {};
   return { ...client, get, textarea };
 }
+
+function vimClient(body = "First line\nSecond line") {
+  const client = editingClient(body), { app, textarea, get } = client;
+  const handlers = new Map();
+  textarea.ownerDocument = {}; // This DOM stub has no focused layout surface.
+  textarea.addEventListener = (name, handler) => handlers.set(name, handler);
+  textarea.removeEventListener = (name, handler) => {
+    if (handlers.get(name) === handler) handlers.delete(name);
+  };
+  textarea.setSelectionRange(0, 0);
+  get("editor-vim-status");
+  get("save-status");
+  const key = (key, modifiers = {}) => {
+    const event = { key, ...modifiers,
+      preventDefault() { this.defaultPrevented = true; },
+      stopPropagation() { this.stopped = true; },
+    };
+    handlers.get("keydown")?.(event);
+    if (!event.stopped) app.editorKeydown(event);
+    return event;
+  };
+  return { ...client, handlers, key };
+}
+
+test("Vim defaults off, persists its preference, and only attaches to an article body", () => {
+  const { app, context, textarea, get, handlers } = vimClient();
+  assert.equal(app.editorVimEnabled, false);
+  assert.match(app.editorView(), /id="editor-vim" type="checkbox" >/);
+  app.updateEditorVim();
+  assert.equal(handlers.size, 0);
+  app.setEditorVim(true);
+  assert.equal(handlers.size, 3);
+  assert.equal(get("editor-vim-status").textContent, "Vim · normal");
+  assert.equal(get("editor-vim-status").hidden, false);
+  assert.equal(setup(undefined, { localStorage: context.localStorage }).app.editorVimEnabled, true);
+  app.state.draft.kind = "post";
+  app.updateEditorVim();
+  assert.equal(handlers.size, 0);
+  assert.equal(textarea.dataset.vimMode, undefined);
+  assert.doesNotMatch(app.editorView(), /editor-vim/);
+  app.state.draft.kind = "article";
+  app.state.preview = true;
+  app.updateEditorVim();
+  assert.equal(handlers.size, 0);
+  app.state.preview = false;
+  app.updateEditorVim();
+  assert.equal(handlers.size, 3);
+  app.setEditorVim(false);
+  assert.equal(handlers.size, 0);
+  assert.equal(get("editor-vim-status").hidden, true);
+  assert.equal(setup(undefined, { localStorage: context.localStorage }).app.editorVimEnabled, false);
+});
+
+test("Vim edits use the existing draft autosave path and visual selections work with formatting", () => {
+  const { app, textarea, key, get } = vimClient("hello world");
+  app.setEditorVim(true);
+  key("v"); key("l"); key("l"); key("l"); key("l");
+  key("b", { ctrlKey: true });
+  assert.equal(textarea.value, "**hello** world");
+  assert.equal(app.state.draft.body, textarea.value);
+  key("Escape"); key("0"); key("x");
+  assert.equal(textarea.value, "*hello** world");
+  assert.equal(get("save-status").dataset.state, "pending");
+  app.flushDraft();
+  assert.equal(app.getDrafts()[0].body, "*hello** world");
+  assert.equal(get("save-status").textContent, "Saved");
+  key("i");
+  assert.equal(get("editor-vim-status").textContent, "Vim · insert");
+  assert.equal(key("h").defaultPrevented, undefined);
+  key("s", { metaKey: true });
+  assert.equal(get("toast").textContent, "Draft saved.");
+});
+
+test("Vim Escape keeps Zen active and native Markdown keys only edit in Insert mode", () => {
+  const { app, textarea, key } = vimClient("- item");
+  app.setEditorVim(true);
+  app.state.focus = true;
+  key("i"); key("Escape");
+  assert.equal(app.state.focus, true);
+  assert.equal(key("Tab").defaultPrevented, undefined);
+  assert.equal(textarea.value, "- item");
+  key("Enter");
+  assert.equal(textarea.value, "- item");
+  key("A"); key("Enter");
+  assert.equal(textarea.value, "- item\n- ");
+  key("Tab");
+  assert.equal(textarea.value, "- item\n-   ");
+  app.state.view = "messages";
+  app.updateEditorVim();
+  assert.equal(textarea.dataset.vimMode, undefined);
+});
 
 test("image uploads use multipart, fall back only for unsupported v2, and poll processing without re-uploading", async () => {
   const requests = [];

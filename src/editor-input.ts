@@ -1,4 +1,38 @@
+declare const ArticleVim: {
+  attach(textarea: HTMLTextAreaElement, options: {
+    onModeChange(mode: string): void;
+    replace(text: string, start: number, end: number): void;
+    canEdit(): boolean;
+  }): () => void;
+};
+
 namespace Fedi {
+  export let editorVimEnabled = readStore("editor-vim", false);
+  let vimEditor: HTMLTextAreaElement | null = null;
+  let detachVim: (() => void) | undefined;
+  export function updateEditorVim(): void {
+    const textarea = editorVimEnabled && state.view === "editor" && state.draft?.kind === "article" && !state.preview
+      ? document.getElementById("draft-body") as HTMLTextAreaElement | null : null;
+    if (textarea === vimEditor) return;
+    detachVim?.();
+    detachVim = undefined;
+    vimEditor = textarea;
+    const status = document.getElementById("editor-vim-status");
+    if (status) status.hidden = !textarea;
+    if (textarea) detachVim = ArticleVim.attach(textarea, {
+      replace: insertEditorText,
+      canEdit: () => !editorPublishing(),
+      onModeChange: (mode) => {
+        if (status) status.textContent = `Vim · ${mode.replace("-", " ")}`;
+      },
+    });
+  }
+  export function setEditorVim(enabled: boolean): void {
+    editorVimEnabled = enabled;
+    if (!writeStore("editor-vim", enabled)) toast("Vim preference is only saved for this tab.");
+    updateEditorVim();
+  }
+
   export let editorSmartPunctuation = readStore("editor-smart-punctuation", false);
   let editorViewportWidth = 0, editorFullHeight = 0;
   let mobileEditorFocus = false, editorKeyboardOpen = false;

@@ -1372,16 +1372,35 @@ test("the save shortcut captures current input and does not create empty drafts"
   assert.equal(prevented, 2);
 });
 
-test("publication management controls are visible only on the current user's publications", () => {
+test("the reader puts Edit above the title and groups all sharing icons after repost", () => {
+  const { app, context } = setup();
+  const { get } = elements(context);
+  const own = { ...app.demoPosts[0], author: app.demoMe, url: "https://example.org/own" };
+  app.state.view = "reader";
+  app.state.reading = own;
+  app.render();
+  const html = get("app").innerHTML;
+  assert.match(html, /class="page-top">[^]*data-action="edit-publication"[^]*<\/header><article class="reader">[^]*<h1>/);
+  assert.match(html, /data-action="repost"[^]*data-action="share"[^]*aria-label="Open original post"[^]*data-action="save"/);
+  assert.doesNotMatch(html, /data-action="(?:delete|unpublish)-publication"/);
+  assert.match(app.postCard(own), /data-action="edit-publication"[^]*<h2>/);
+  for (const post of [app.demoPosts[0], { ...own, visibility: "direct" }]) {
+    app.state.reading = post;
+    app.render();
+    assert.doesNotMatch(get("app").innerHTML, /data-action="edit-publication"/);
+  }
+});
+
+test("Delete and Unpublish are available only when editing a publication", () => {
   const { app } = setup();
-  const own = { ...app.demoPosts[0], author: app.demoMe };
-  assert.match(app.postActions(own), /data-action="edit-publication"/);
-  assert.match(app.postActions(own), /data-action="delete-publication"/);
-  assert.match(app.postActions(own), /data-action="unpublish-publication"/);
-  assert.doesNotMatch(
-    app.postActions(app.demoPosts[0]),
-    /data-action="(?:edit|delete|unpublish)-publication"/,
-  );
+  for (const kind of ["article", "post"]) {
+    const draft = app.newDraft(kind);
+    app.state.draft = draft;
+    assert.doesNotMatch(app.editorView(), /data-action="(?:unpublish|delete)-publication"/);
+    draft.editingId = "original";
+    assert.match(app.editorView(), /data-action="unpublish-publication" data-id="original"/);
+    assert.match(app.editorView(), /data-action="delete-publication" data-id="original"/);
+  }
 });
 
 test("editing an article reconstructs its original Markdown without losing its subtitle", () => {
@@ -1955,6 +1974,7 @@ test("pending account mutations cannot overwrite public reader posts with the sa
   get("modal").close = () => {};
   click(local.id);
   const deleting = app.deletePublication(local.id);
+  await new Promise(setImmediate);
   const remote = { ...local, title: "Remote shared article" };
   app.state.view = "reader";
   app.state.readerServer = "https://source.example";
@@ -2157,7 +2177,7 @@ function ownPublication(app) {
   return post;
 }
 
-test("the reader offers deletion only for your comments and asks for confirmation", () => {
+test("the reader offers deletion only for your comments and asks for confirmation", async () => {
   const { app, context } = setup();
   const { get } = elements(context);
   const parent = ownPublication(app);
@@ -2172,7 +2192,7 @@ test("the reader offers deletion only for your comments and asks for confirmatio
   const modal = get("modal");
   modal.querySelector = () => null;
   modal.showModal = () => { modal.open = true; };
-  app.confirmDeletePublication(mine.id);
+  await app.confirmDeletePublication(mine.id);
   assert.equal(modal.open, true);
   assert.match(modal.innerHTML, /Delete this comment\?/);
   assert.match(modal.innerHTML, /data-action="confirm-delete-publication" data-id="my-comment"[^>]*>Delete comment/);
@@ -2320,12 +2340,50 @@ test("Your writing loads and paginates replies while keeping publications, boost
   assert.deepEqual(Array.from(app.state.ownPosts, (p) => p.id), ["article", "reply"]);
   assert.match(get("app").innerHTML, /Body of reply/);
   assert.match(get("app").innerHTML, /href="#read\/parent%2Fid"/);
-  assert.match(get("app").innerHTML, /Delete comment/);
+  assert.match(get("app").innerHTML, /data-action="edit-publication" data-id="reply"/);
   assert.doesNotMatch(get("app").innerHTML, /Body of article|Body of private-message|Body of boosted|Load older replies/);
   app.state.libraryTab = "published";
   app.render();
   assert.match(get("app").innerHTML, /Body of article/);
   assert.doesNotMatch(get("app").innerHTML, /Body of reply/);
+});
+
+test("a resumed edit can delete or unpublish the uncached original and keep the draft", async () => {
+  for (const action of ["delete", "unpublish"]) {
+    const { app, context } = setup();
+    const { get } = elements(context);
+    const post = ownPublication(app);
+    app.state.posts = [];
+    app.state.ownPosts = [];
+    app.state.reading = null;
+    app.state.view = "editor";
+    const draft = { ...article, body: "Local edits", editingId: post.id };
+    app.state.draft = draft;
+    assert.equal(app.saveDraft(draft), true);
+    const modal = get("modal");
+    modal.querySelector = () => null;
+    modal.showModal = () => { modal.open = true; };
+    modal.close = () => { modal.open = false; };
+    const deleted = [];
+    app.state.api = {
+      status: async (id) => { assert.equal(id, post.id); return post; },
+      deleteStatus: async (id) => deleted.push(id),
+    };
+    const confirm = action === "delete" ? app.confirmDeletePublication : app.confirmUnpublishPublication;
+    await confirm(post.id);
+    assert.match(modal.innerHTML, new RegExp(`data-action="confirm-${action}-publication" data-id="mine"`));
+    assert.deepEqual(deleted, []);
+    const remove = action === "delete" ? app.deletePublication : app.unpublishPublication;
+    await remove(post.id);
+    assert.deepEqual(deleted, [post.id]);
+    assert.equal(draft.editingId, undefined);
+    assert.equal(app.getDrafts().length, 1);
+    const [saved] = app.getDrafts();
+    assert.equal(saved.id, draft.id);
+    assert.equal(saved.body, "Local edits");
+    assert.equal(saved.editingId, undefined);
+    assert.equal(context.location.hash, action === "delete" ? "drafts" : "");
+  }
 });
 
 test("unpublishing saves the original source before removal and opens an unpublished draft", async () => {

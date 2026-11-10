@@ -73,8 +73,14 @@ namespace Fedi {
   function scheduleButton(d: Draft): string {
     return state.session && !d.editingId ? action("schedule", "Schedule", "", "button subtle") : "";
   }
+  function publicationManagement(d: Draft): string {
+    return d.editingId
+      ? action("unpublish-publication", "Unpublish", d.editingId, "button subtle") +
+        action("delete-publication", "Delete", d.editingId, "button subtle delete-link")
+      : "";
+  }
   function editorOptions(d: Draft): string {
-    return `<details class="editor-more"><summary class="icon-button" aria-label="More editor options" title="More editor options">···</summary><div class="editor-menu">${scheduleButton(d)}<button class="button subtle zen-toggle" data-action="focus" aria-pressed="${state.focus}" title="Zen mode (⌘/Ctrl+Shift+F)"><span data-zen-label>${state.focus ? "Exit Zen" : "Zen mode"}</span></button><label class="editor-typing-option"><input id="editor-smart-punctuation" type="checkbox" ${editorSmartPunctuation ? "checked" : ""}> Smart punctuation</label><p>Keyboard quotes and corrections. Always off in code.</p></div></details>`;
+    return `<details class="editor-more"><summary class="icon-button" aria-label="More editor options" title="More editor options">···</summary><div class="editor-menu">${scheduleButton(d)}<button class="button subtle zen-toggle" data-action="focus" aria-pressed="${state.focus}" title="Zen mode (⌘/Ctrl+Shift+F)"><span data-zen-label>${state.focus ? "Exit Zen" : "Zen mode"}</span></button><label class="editor-typing-option"><input id="editor-smart-punctuation" type="checkbox" ${editorSmartPunctuation ? "checked" : ""}> Smart punctuation</label><p>Keyboard quotes and corrections. Always off in code.</p>${publicationManagement(d)}</div></details>`;
   }
   function noteComposerView(d: Draft): string {
     const me = state.session?.account || demoMe;
@@ -84,7 +90,7 @@ namespace Fedi {
       ${draftMediaView(d)}
       ${publicationSettings(d)}
       <div class="note-save-row"><span id="character-count"></span></div>
-      <footer class="note-footer">${draftSaveControls(d)}${scheduleButton(d)}<button id="note-publish" class="button primary" data-action="publish-note" ${(!d.body.trim() && !d.media?.length) || mediaBusy(d) ? "disabled" : ""}>${d.editingId ? "Update note" : "Note"}</button></footer>
+      <footer class="note-footer">${draftSaveControls(d)}${scheduleButton(d)}<button id="note-publish" class="button primary" data-action="publish-note" ${(!d.body.trim() && !d.media?.length) || mediaBusy(d) ? "disabled" : ""}>${d.editingId ? "Update note" : "Note"}</button>${publicationManagement(d)}</footer>
     </section>`;
   }
   export function editorView(): string {
@@ -535,16 +541,16 @@ namespace Fedi {
       publishing = false;
     }
   }
-  function ownedPublication(id: string): Post {
-    const post = findPost(id);
-    if (
-      !post ||
-      state.readerServer ||
-      post.author.id !== (state.session?.account.id || "you") ||
-      post.visibility === "direct"
-    ) {
-      throw new Error("You can only manage your own publications.");
+  async function ownedPublication(id: string): Promise<Post> {
+    let post = findPost(id);
+    const draft = state.draft, api = state.api;
+    if (!post && api && state.view === "editor" && draft?.editingId === id) {
+      post = await api.status(id);
+      if (state.api !== api || state.draft !== draft)
+        throw new Error("The editing session has changed.");
     }
+    if (!post || !canManagePublication(post))
+      throw new Error("You can only manage your own publications.");
     return post;
   }
   export function draftFromSource(
@@ -569,8 +575,9 @@ namespace Fedi {
     };
   }
   export async function editPublication(id: string): Promise<void> {
-    const post = ownedPublication(id),
-      api = state.api;
+    const api = state.api,
+      post = await ownedPublication(id);
+    if (state.api !== api) return;
     const existing = getDrafts().find((d) => d.editingId === id);
     if (existing) {
       navigate(`write/${encodeURIComponent(existing.id)}`);
@@ -599,24 +606,26 @@ namespace Fedi {
           visibility: post.visibility as Draft["visibility"],
         };
   }
-  export function confirmUnpublishPublication(id: string): void {
-    const post = ownedPublication(id);
+  export async function confirmUnpublishPublication(id: string): Promise<void> {
+    const post = await ownedPublication(id);
     showModal(
       "Move this publication to drafts?",
-      `<p><strong>${escapeHTML(post.title || plainText(post.markdown).slice(0, 100))}</strong></p><p>First, save a Markdown draft in this browser. Then remove the published version${state.api ? " from your server and request removal from the fediverse" : " from the demo"}.</p><p>Publishing it again creates a new post and link. Existing likes and replies do not transfer.</p>${action("confirm-unpublish-publication", "Move to drafts", id, "button primary")} ${action("close-modal", "Keep published", "", "button subtle")}`,
+      `<p><strong>${escapeHTML(post.title || plainText(post.markdown).slice(0, 100))}</strong></p><p>First, save ${state.draft?.editingId === id ? "your current edits as a draft" : "a Markdown draft"} in this browser. Then remove the published version${state.api ? " from your server and request removal from the fediverse" : " from the demo"}.</p><p>Publishing it again creates a new post and link. Existing likes and replies do not transfer.</p>${action("confirm-unpublish-publication", "Move to drafts", id, "button primary")} ${action("close-modal", "Keep published", "", "button subtle")}`,
     );
   }
   export async function unpublishPublication(id: string): Promise<void> {
-    const post = ownedPublication(id),
-      api = state.api;
-    // A stable local ID reuses the recovery copy if a removal must be retried.
-    const draftId = `unpublished:${id}`;
-    const draft =
-      getDrafts().find((d) => d.id === draftId) ||
+    const api = state.api,
+      post = await ownedPublication(id);
+    if (state.api !== api) return;
+    const editing = state.draft?.editingId === id ? state.draft : null;
+    const draftId = editing?.id || `unpublished:${id}`;
+    const draft = editing || getDrafts().find((d) => d.id === draftId) ||
       (await publicationDraft(post, api));
     if (state.api !== api) return;
-    draft.id = draftId;
-    delete draft.editingId;
+    if (!editing) {
+      draft.id = draftId;
+      delete draft.editingId;
+    }
     if (!saveDraft(draft))
       throw new Error(
         "Could not save the draft. The published version was not removed. Free up browser storage and try again.",
@@ -631,11 +640,12 @@ namespace Fedi {
     if (state.api !== api) return;
     removePublicationFromState(post);
     closeModal();
-    toast("Unpublished. Your article is saved in drafts.");
-    navigate(`write/${encodeURIComponent(draft.id)}`);
+    toast("Unpublished. Your draft is saved.");
+    if (editing && state.draft === editing) render();
+    else navigate(`write/${encodeURIComponent(draft.id)}`);
   }
-  export function confirmDeletePublication(id: string): void {
-    const post = ownedPublication(id),
+  export async function confirmDeletePublication(id: string): Promise<void> {
+    const post = await ownedPublication(id),
       kind = post.replyTo ? "comment" : "publication";
     showModal(
       `Delete this ${kind}?`,
@@ -643,14 +653,18 @@ namespace Fedi {
     );
   }
   export async function deletePublication(id: string): Promise<void> {
-    const post = ownedPublication(id),
-      api = state.api;
+    const api = state.api,
+      post = await ownedPublication(id);
+    if (state.api !== api) return;
+    if (state.draft?.editingId === id && !flushDraft())
+      throw new Error("Could not save your draft. The publication was not deleted.");
     if (api) await api.deleteStatus(id);
     if (state.api !== api) return;
+    const wasEditing = state.view === "editor" && state.draft?.editingId === id;
     const wasReading = removePublicationFromState(post);
     closeModal();
     toast(post.replyTo ? "Comment deleted." : "Publication deleted.");
-    if (state.view === "reader" && wasReading) {
+    if (wasEditing || (state.view === "reader" && wasReading)) {
       state.libraryTab = post.replyTo ? "replies" : "published";
       navigate("drafts");
     } else render();
@@ -702,6 +716,7 @@ namespace Fedi {
         delete d.editingId;
         saveDraft(d);
       });
+    if (state.draft?.editingId === id) delete state.draft.editingId;
     const wasReading = !state.readerServer && state.reading?.id === id;
     if (wasReading) state.reading = null;
     return wasReading;

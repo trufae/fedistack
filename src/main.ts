@@ -280,10 +280,10 @@ namespace Fedi {
         await editPublication(id);
         break;
       case "delete-publication":
-        confirmDeletePublication(id);
+        await confirmDeletePublication(id);
         break;
       case "unpublish-publication":
-        confirmUnpublishPublication(id);
+        await confirmUnpublishPublication(id);
         break;
       case "confirm-unpublish-publication":
         await unpublishPublication(id);

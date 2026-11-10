@@ -1,7 +1,50 @@
 namespace Fedi {
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
   let publishing = false;
+  let pendingLeave: { draft: Draft; key: string; version: number; proceed: () => void | Promise<void> } | undefined;
   export function editorPublishing(): boolean { return publishing; }
+  export function draftHasContent(d: Draft): boolean {
+    return !!(d.title.trim() || d.subtitle.trim() || d.body.trim() || d.warning.trim() ||
+      d.visibility !== "public" || d.editingId || d.media?.length || mediaBusy(d));
+  }
+  function draftSaved(d: Draft): boolean {
+    const stored = getDrafts().find((saved) => saved.id === d.id);
+    return !!stored && draftContent(stored) === draftContent(d);
+  }
+  export function requestEditorLeave(proceed: () => void | Promise<void>): boolean {
+    const d = state.view === "editor" ? state.draft : null;
+    if (!d) return false;
+    if (publishing) {
+      toast("Wait for publishing to finish before leaving the editor.");
+      return true;
+    }
+    captureDraft();
+    if (!draftHasContent(d) && flushDraft()) return false;
+    showModal("Save your draft before leaving?", `<p><strong>${escapeHTML(d.title || (d.kind === "post" ? "Your note" : "Untitled article"))}</strong></p><p id="leave-save-status" role="status" aria-live="polite">${draftSaved(d) ? "Your work is saved on this device." : "You have unsaved changes."}</p><p>Save your draft, then pick up where you left off with <strong>Continue editing</strong> in <strong>Your writing</strong>. ${d.editingId ? "Your published version stays unchanged until you choose Update." : "Your draft stays unpublished."}</p><div class="leave-editor-actions">${action("save-and-leave", "Save draft & leave", "", "button primary")}${action("close-modal", "Keep editing", "", "button subtle")}</div>${action("export-current", "Export a copy .md", "", "text-button")}`);
+    pendingLeave = { draft: d, key: draftKey(), version: modalVersion, proceed };
+    return true;
+  }
+  export async function saveAndLeaveEditor(): Promise<void> {
+    const pending = pendingLeave;
+    if (!pending || pending.version !== modalVersion || pending.draft !== state.draft || pending.key !== draftKey() ||
+        !(document.getElementById("modal") as HTMLDialogElement).open) return;
+    captureDraft();
+    if (!flushDraft()) throw new Error("Your draft could not be saved. Keep editing, retry saving, or export a copy. You are still in the editor.");
+    pendingLeave = undefined;
+    closeModal();
+    state.draft = null;
+    toast("Draft saved. Continue editing from Your writing.");
+    try {
+      await pending.proceed();
+    } catch (error) {
+      if (state.view === "editor" && !state.draft && draftKey() === pending.key) state.draft = pending.draft;
+      throw error;
+    }
+  }
+  export function saveEditorOnExit(): boolean {
+    if (state.view === "editor") captureDraft();
+    return flushDraft();
+  }
   export function newDraft(kind: Draft["kind"] = "article"): Draft {
     return {
       id: uid(),
@@ -58,11 +101,10 @@ namespace Fedi {
     return "";
   }
   function draftSaveControls(d: Draft): string {
-    const stored = getDrafts().find((saved) => saved.id === d.id);
-    const saved = stored && JSON.stringify(stored) === JSON.stringify(d);
+    const saved = draftSaved(d);
     const status = saved
       ? "saved"
-      : d.title || d.body || d.subtitle || d.media?.length
+      : draftHasContent(d)
         ? "pending"
         : "empty";
     return `<div class="draft-save-controls"><button type="button" class="button subtle small-button" data-action="save-draft" aria-describedby="save-status" title="Save draft (⌘/Ctrl+S)">Save draft</button><span id="save-status" role="status" aria-live="polite" data-state="${status}">${saved ? "Saved" : status === "empty" ? "" : "Unsaved"}</span></div>`;
@@ -130,6 +172,10 @@ namespace Fedi {
     value: string,
     status: "saved" | "pending" | "empty" | "error",
   ): void {
+    const leaveStatus = document.getElementById("leave-save-status");
+    if (leaveStatus) leaveStatus.textContent = status === "saved" ? "Your work is saved on this device."
+      : status === "error" ? "Your changes have not been saved. Keep this editor open or export a copy."
+      : status === "empty" ? "There is no text to save." : "You have unsaved changes.";
     const element = document.getElementById("save-status");
     if (!element) return;
     if (status === "error" && element.dataset.state !== "error") toast(value);
@@ -194,8 +240,8 @@ namespace Fedi {
       d.publishKey = undefined;
       d.scheduleKey = undefined;
       d.scheduleTime = undefined;
+      draftChanged(false);
     }
-    draftChanged(false);
   }
   export function draftChanged(resetKeys = true): void {
     const d = state.draft;
@@ -212,8 +258,9 @@ namespace Fedi {
     if (publishing) return true;
     const d = state.draft;
     if (!d) return true;
-    const empty = !d.title.trim() && !d.body.trim() && !d.subtitle.trim() && !d.media?.length && !mediaBusy(d);
+    const empty = !draftHasContent(d);
     const success = empty && !d.serverId && !d.serverSaveKey ? removeDraft(d.id) : saveDraft(d);
+    if (success && !empty) writeStore(`${draftKey()}:resume`, d.id);
     saveIndicator(
       success
         ? empty
@@ -232,8 +279,7 @@ namespace Fedi {
       toast("Could not save your draft. Export a copy to keep your writing.");
       return;
     }
-    toast(d.title.trim() || d.subtitle.trim() || d.body.trim() || d.media?.length
-      ? "Draft saved." : "Nothing to save yet.");
+    toast(draftHasContent(d) ? "Draft saved." : "Nothing to save yet.");
   }
   export function insertEditorText(text: string, start?: number, end?: number): void {
     if (publishing) return;
@@ -672,6 +718,7 @@ namespace Fedi {
     closeModal();
     toast(post.replyTo ? "Comment deleted." : "Publication deleted.");
     if (wasEditing || (state.view === "reader" && wasReading)) {
+      if (wasEditing) state.draft = null;
       state.libraryTab = post.replyTo ? "replies" : "published";
       navigate("drafts");
     } else render();

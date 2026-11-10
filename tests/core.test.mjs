@@ -1356,11 +1356,13 @@ test("editor keyboard formatting changes the selection and retains the draft", (
 });
 
 test("leaving and deleting a draft does not resurrect it on the next save", async () => {
-  const { app, context } = setup();
-  elements(context);
+  const { app, context } = editorNavigationFixture();
   app.state.view = "editor";
   app.state.draft = { ...article };
   context.location.hash = "#settings";
+  await app.route();
+  assert.equal(app.state.view, "editor");
+  await app.saveAndLeaveEditor();
   await app.route();
   assert.equal(app.state.draft, null);
   app.removeDraft(article.id);
@@ -1369,8 +1371,7 @@ test("leaving and deleting a draft does not resurrect it on the next save", asyn
 });
 
 test("an unsaved draft stays in the editor if storage fails during navigation", async () => {
-  const { app, context } = setup();
-  elements(context);
+  const { app, context, get } = editorNavigationFixture();
   app.state.view = "editor";
   app.state.draft = { ...article };
   context.localStorage.setItem = () => {
@@ -1378,6 +1379,8 @@ test("an unsaved draft stays in the editor if storage fails during navigation", 
   };
   context.location.hash = "#settings";
   await app.route();
+  await assert.rejects(app.saveAndLeaveEditor(), /could not be saved/);
+  assert.equal(get("modal").open, true);
   assert.equal(app.state.view, "editor");
   assert.equal(app.state.draft.body, article.body);
 });
@@ -1583,7 +1586,8 @@ async function postActionFixture(fetch) {
   const { get } = elements(context);
   const listeners = new Map();
   context.document.addEventListener = (name, listener) => listeners.set(name, listener);
-  context.window = { addEventListener() {} };
+  const windowListeners = new Map();
+  context.window = { addEventListener: (name, listener) => windowListeners.set(name, listener) };
   context.matchMedia = () => ({ matches: false, addEventListener() {} });
   get("modal").addEventListener = () => {};
   const route = app.route;
@@ -1596,8 +1600,233 @@ async function postActionFixture(fetch) {
     listeners.get("click")({ target: { closest: () => button } });
     return button;
   };
-  return { app, context, get, click };
+  return { app, context, get, click, listeners, windowListeners };
 }
+
+function editorNavigationFixture(stores) {
+  const client = setup(undefined, stores);
+  let hash = "";
+  Object.defineProperty(client.context.location, "hash", {
+    get: () => hash,
+    set: (value) => { hash = value && !value.startsWith("#") ? `#${value}` : value; },
+  });
+  const { get } = elements(client.context);
+  const modal = get("modal");
+  modal.querySelector = () => null;
+  modal.showModal = () => { modal.open = true; };
+  modal.close = () => { modal.open = false; };
+  client.context.history.replaceState = (_state, _title, url) => { client.context.location.hash = url; };
+  return { ...client, get };
+}
+
+for (const kind of ["article", "post"]) test(`leaving a ${kind} requires confirmation and saves the latest input before continuing`, async () => {
+  for (const destination of ["home", "drafts", "note", "write", "write/another", "discover?q=writing"]) {
+    const { app, context, get } = editorNavigationFixture();
+    const draft = { ...article, kind, editingId: "original", media: [{ id: "image", description: "A picture" }] };
+    app.state.view = "editor";
+    app.state.draft = draft;
+    app.saveDraft(draft);
+    context.location.hash = `#write/${draft.id}`;
+    const textarea = get("draft-body");
+    Object.assign(textarea, { value: "Fresh writing before autosave", selectionStart: 8, selectionEnd: 12 });
+    get("app").innerHTML = "The existing editor";
+    app.navigate(destination);
+    assert.equal(context.location.hash, `#write/${draft.id}`);
+    assert.equal(app.state.draft, draft);
+    assert.equal(get("app").innerHTML, "The existing editor");
+    assert.match(get("modal").innerHTML, /unsaved changes/);
+    assert.match(get("modal").innerHTML, /Keep editing/);
+    assert.match(get("modal").innerHTML, /published version stays unchanged/);
+    app.closeModal();
+    await app.saveAndLeaveEditor();
+    assert.equal(app.state.draft, draft, "a dismissed dialog cannot navigate later");
+    assert.equal(textarea.selectionStart, 8);
+    assert.equal(textarea.selectionEnd, 12);
+
+    app.navigate(destination);
+    get("modal").close(); // Native Escape closes the dialog without a button action.
+    await app.saveAndLeaveEditor();
+    assert.equal(app.state.draft, draft);
+
+    app.flushDraft();
+    app.navigate(destination);
+    assert.match(get("modal").innerHTML, /saved on this device/);
+    assert.equal(app.state.view, "editor", "autosaved work still gets a leave confirmation");
+    await app.saveAndLeaveEditor();
+    assert.equal(context.location.hash, `#${destination}`);
+    assert.equal(app.state.draft, null);
+    const saved = app.getDrafts()[0];
+    assert.equal(saved.body, textarea.value);
+    assert.equal(saved.editingId, "original");
+    assert.equal(saved.media[0].description, "A picture");
+  }
+});
+
+test("Back/Forward hash navigation restores the editor URL and can be cancelled or confirmed", async () => {
+  const { app, context, get } = editorNavigationFixture();
+  app.state.view = "editor";
+  app.state.draft = { ...article };
+  get("draft-body").value = "An edit made just before Back";
+  context.location.hash = "#settings";
+  await app.route();
+  assert.equal(context.location.hash, `#write/${article.id}`);
+  assert.equal(app.state.view, "editor");
+  app.closeModal();
+  assert.equal(app.state.draft.body, "An edit made just before Back");
+  context.location.hash = "#settings";
+  await app.route();
+  await app.saveAndLeaveEditor();
+  context.location.hash = "#settings";
+  await app.route();
+  assert.equal(app.state.view, "settings");
+  assert.equal(app.getDrafts()[0].body, "An edit made just before Back");
+});
+
+test("save-and-leave retries a failed save without navigating or losing input", async () => {
+  const { app, context, get } = editorNavigationFixture();
+  app.state.view = "editor";
+  app.state.draft = { ...article };
+  app.saveDraft(app.state.draft);
+  context.location.hash = `#write/${article.id}`;
+  get("draft-body").value = "Keep these unsaved edits";
+  const setItem = context.localStorage.setItem;
+  context.localStorage.setItem = () => { throw new Error("Storage full"); };
+  app.navigate("drafts");
+  await assert.rejects(app.saveAndLeaveEditor(), /could not be saved/);
+  assert.equal(get("modal").open, true);
+  assert.equal(context.location.hash, `#write/${article.id}`);
+  assert.equal(app.state.draft.body, "Keep these unsaved edits");
+  assert.equal(app.getDrafts()[0].body, article.body);
+  context.localStorage.setItem = setItem;
+  await app.saveAndLeaveEditor();
+  assert.equal(context.location.hash, "#drafts");
+  assert.equal(app.getDrafts()[0].body, "Keep these unsaved edits");
+});
+
+test("empty editors leave freely, warning-only drafts are saved, and the same draft keeps its editor", async () => {
+  const { app, context, get } = editorNavigationFixture();
+  app.state.view = "editor";
+  app.state.draft = app.newDraft();
+  app.navigate("settings");
+  assert.equal(context.location.hash, "#settings");
+  assert.equal(get("modal").open, undefined);
+  assert.equal(app.getDrafts().length, 0);
+  app.state.draft.warning = "Keep this content warning";
+  context.location.hash = `#write/${app.state.draft.id}`;
+  app.navigate("settings");
+  assert.equal(get("modal").open, true);
+  await app.saveAndLeaveEditor();
+  assert.equal(app.getDrafts()[0].warning, "Keep this content warning");
+  app.state.draft = { ...article };
+  get("app").innerHTML = "Keep selection and undo history";
+  app.navigate(`write/${article.id}`);
+  context.location.hash = `#write/${article.id}`;
+  await app.route();
+  assert.equal(get("app").innerHTML, "Keep selection and undo history");
+});
+
+test("Your writing offers the last edited draft above every tab and restores it after reload", async () => {
+  const { app, context, get } = editorNavigationFixture();
+  app.saveDraft({ ...article, editingId: "published-id", body: "Unpublished edits" });
+  app.saveDraft({ ...article, id: "other", title: "Another draft" });
+  context.location.hash = `#write/${article.id}`;
+  await app.route();
+  app.navigate("drafts");
+  await app.saveAndLeaveEditor();
+  context.location.hash = "#drafts";
+  await app.route();
+  for (const tab of ["drafts", "published", "replies", "scheduled"]) {
+    app.state.libraryTab = tab;
+    app.render();
+    const html = get("app").innerHTML;
+    assert.match(html, /WORK IN PROGRESS · UNPUBLISHED CHANGES/);
+    assert.match(html, /class="continue-editing"[^]*?href="#write\/draft-one"[^]*?>Continue editing/);
+    assert.ok(html.indexOf('class="continue-editing"') < html.indexOf('class="timeline-tabs"'));
+  }
+  const reloaded = editorNavigationFixture({ localStorage: context.localStorage });
+  reloaded.context.location.hash = "#drafts";
+  await reloaded.app.route();
+  assert.match(reloaded.get("app").innerHTML, /WORK IN PROGRESS · UNPUBLISHED CHANGES/);
+  reloaded.context.location.hash = `#write/${article.id}`;
+  await reloaded.app.route();
+  assert.equal(reloaded.app.state.draft.body, "Unpublished edits");
+  assert.equal(reloaded.app.state.draft.editingId, "published-id");
+  app.removeDraft(article.id);
+  app.render();
+  assert.match(get("app").innerHTML, /class="continue-editing"[^]*?href="#write\/other"/);
+  app.removeDraft("other");
+  app.render();
+  assert.doesNotMatch(get("app").innerHTML, /class="continue-editing"/);
+  app.state.session = { server: "https://another.example", account: { id: "someone-else" } };
+  assert.equal(app.getDrafts().length, 0);
+});
+
+test("internal links use the leave guard while modified clicks keep their normal behavior", async () => {
+  const { app, context, get, listeners } = await postActionFixture();
+  const modal = get("modal");
+  modal.querySelector = () => null;
+  modal.showModal = () => { modal.open = true; };
+  modal.close = () => { modal.open = false; };
+  app.state.view = "editor";
+  app.state.draft = { ...article };
+  context.location.hash = `#write/${article.id}`;
+  const link = { hash: "#home", target: "", hasAttribute: () => false };
+  let prevented = false;
+  const event = { button: 0, target: { closest: (selector) => selector === 'a[href^="#"]' ? link : null }, preventDefault() { prevented = true; } };
+  listeners.get("click")({ ...event, ctrlKey: true });
+  assert.equal(prevented, false);
+  assert.equal(modal.open, undefined);
+  listeners.get("click")(event);
+  assert.equal(prevented, true);
+  assert.equal(modal.open, true);
+  assert.equal(context.location.hash, `#write/${article.id}`);
+});
+
+test("page exit captures the latest input and warns when local saving fails", async () => {
+  const { app, context, get, windowListeners } = await postActionFixture();
+  app.state.view = "editor";
+  app.state.draft = { ...article };
+  get("draft-body").value = "Last input before hiding the page";
+  windowListeners.get("pagehide")();
+  assert.equal(app.getDrafts()[0].body, get("draft-body").value);
+  get("draft-body").value = "Last input before closing the tab";
+  let prevented = false;
+  const event = { preventDefault() { prevented = true; } };
+  windowListeners.get("beforeunload")(event);
+  assert.equal(app.getDrafts()[0].body, get("draft-body").value);
+  assert.equal(prevented, false);
+  context.localStorage.setItem = () => { throw new Error("Storage full"); };
+  get("draft-body").value = "Unsaved text that must not disappear";
+  windowListeners.get("beforeunload")(event);
+  assert.equal(prevented, true);
+  assert.equal(event.returnValue, "");
+  assert.equal(app.state.draft.body, get("draft-body").value);
+});
+
+test("blocked Back navigation preserves scrolling, while resuming a draft starts at the editor header", async () => {
+  const { app, context, get, windowListeners } = await postActionFixture();
+  const modal = get("modal");
+  modal.querySelector = () => null;
+  modal.showModal = () => { modal.open = true; };
+  modal.close = () => { modal.open = false; };
+  app.state.view = "editor";
+  app.state.draft = { ...article };
+  app.saveDraft(app.state.draft);
+  const scrolls = [];
+  context.window.scrollY = 400;
+  context.window.scrollTo = (...args) => { scrolls.push(args); context.window.scrollY = args[1]; };
+  context.location.hash = "#settings";
+  windowListeners.get("hashchange")();
+  assert.equal(app.state.view, "editor");
+  assert.equal(scrolls.length, 0);
+  app.closeModal();
+  app.state.view = "drafts";
+  app.state.draft = null;
+  context.location.hash = `#write/${article.id}`;
+  windowListeners.get("hashchange")();
+  assert.equal(app.state.view, "editor");
+  assert.deepEqual(scrolls, [[0, 0]]);
+});
 
 test("Share copies the current Fedistack reader link and keeps the original separately accessible", async () => {
   const { app, context, get, click } = await postActionFixture();
@@ -3966,11 +4195,13 @@ test("Zen mode preserves the editor and Escape dismisses a dialog before leaving
 });
 
 test("opening a Note preserves the article draft and resumes in its compact composer", async () => {
-  const { app, context } = setup();
-  const { get } = elements(context);
+  const { app, context, get } = editorNavigationFixture();
   app.state.view = "editor";
   app.state.draft = { ...article };
   context.location.hash = "#note";
+  await app.route();
+  assert.equal(app.state.draft.kind, "article");
+  await app.saveAndLeaveEditor();
   await app.route();
   assert.equal(app.state.draft.kind, "post");
   assert.equal(
@@ -4165,6 +4396,20 @@ test("a failed server save keeps the local draft and never retries as an immedia
   const writes = server.requests.filter((r) => r.method === "POST");
   assert.equal(writes.length, 1);
   assert.match(writes[0].body.scheduled_at, /^9999-/);
+});
+
+test("server sync preserves warning-only drafts and unfinished edits with an empty body", async () => {
+  for (const fields of [{ warning: "Keep this warning" }, { editingId: "original" }, { visibility: "private" }]) {
+    const server = scheduledServer(), { app } = draftClient(server);
+    const draft = { ...app.newDraft(), ...fields };
+    app.saveDraft(draft);
+    await app.syncServerDraft(draft.id);
+    assert.equal(app.getDrafts().length, 1);
+    const second = draftClient(server);
+    await second.app.loadServerDrafts();
+    assert.equal(second.app.getDrafts().length, 1);
+    assert.equal(second.app.draftContent(second.app.getDrafts()[0]), app.draftContent(draft));
+  }
 });
 
 test("draft replacement creates the new copy before deleting the previous copy", async () => {

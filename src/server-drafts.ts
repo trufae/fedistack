@@ -158,7 +158,7 @@ namespace Fedi {
     for (const old of d.serverPreviousIds || []) await removeServerDraftCopy(api, old);
     if (d.serverPreviousIds?.length) updateReference(key, id, { serverPreviousIds: [] });
     if (draftKey() === key && mediaBusy(d)) return;
-    if (!d.title.trim() && !d.subtitle.trim() && !d.body.trim() && !d.media?.length) {
+    if (!draftHasContent(d)) {
       if (d.serverId) await removeServerDraftCopy(api, d.serverId);
       storeDrafts(key, accountDrafts(key).filter((x) => x.id !== id));
       if (draftKey() === key && state.draft?.id === id) clearReference(state.draft);

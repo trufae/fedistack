@@ -163,6 +163,7 @@ namespace Fedi {
         await checkServer(button);
         break;
       case "disconnect":
+        if (requestEditorLeave(() => handleAction(name, id, button))) break;
         if (!flushDraft())
           throw new Error(
             "Export your current draft before logging out; browser storage is unavailable.",
@@ -317,6 +318,9 @@ namespace Fedi {
         break;
       case "save-draft":
         saveCurrentDraft();
+        break;
+      case "save-and-leave":
+        await saveAndLeaveEditor();
         break;
       case "finish-editing":
         finishMobileEditing();
@@ -536,6 +540,14 @@ namespace Fedi {
       state.api = new API(state.session.server, state.session.token);
     else state.session = null;
     document.addEventListener("click", (event) => {
+      const link = (event.target as Element).closest<HTMLAnchorElement>('a[href^="#"]');
+      if (state.view === "editor" && link && !event.defaultPrevented && event.button === 0 &&
+          !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey &&
+          !link.hasAttribute("download") && (!link.target || link.target === "_self")) {
+        event.preventDefault();
+        navigate(link.hash.slice(1));
+        return;
+      }
       const tab = (event.target as Element).closest<HTMLAnchorElement>(
         '.mobile-nav a[aria-current="page"]',
       );
@@ -622,8 +634,10 @@ namespace Fedi {
       if (state.view === "home" && state.timeline === "home") homeScroll = window.scrollY;
       if (state.view === "discover" && state.exploring && !state.query) discoveryScroll = window.scrollY;
       const fromReader = state.view === "reader";
+      const previousDraft = state.view === "editor" ? state.draft : null;
       const hash = location.hash;
       const loading = route();
+      if (previousDraft && state.draft === previousDraft && state.view === "editor") return;
       const restore = state.view === "home" && state.timeline === "home" ? homeScroll
         : fromReader && state.view === "discover" && state.exploring ? discoveryScroll : 0;
       window.scrollTo(0, restore);
@@ -634,18 +648,18 @@ namespace Fedi {
         });
       }
     });
-    window.addEventListener("pagehide", flushDraft);
+    window.addEventListener("pagehide", saveEditorOnExit);
     window.addEventListener("online", () => {
       for (const draft of getDrafts()) queueDraftSync(draft);
     });
     window.addEventListener("beforeunload", (event) => {
-      if (!flushDraft()) {
+      if (!saveEditorOnExit() || editorPublishing() || (state.draft && mediaBusy(state.draft))) {
         event.preventDefault();
         event.returnValue = "";
       }
     });
     document.addEventListener("visibilitychange", () => {
-      if (document.hidden) flushDraft();
+      if (document.hidden) saveEditorOnExit();
       else void refreshReading();
     });
     window.addEventListener("online", () => { void refreshReading(); });

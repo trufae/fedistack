@@ -1653,11 +1653,21 @@ footer p {
 .publishing-options label {
   font-size: 11px;
 }
+.editor-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  padding: 18px 35px 35px;
+}
+.editor-footer .button {
+  flex-shrink: 0;
+}
 .editor-note {
+  flex: 1;
   font-size: 10px;
   color: var(--muted);
   line-height: 1.7;
-  padding: 18px 35px 35px;
 }
 .article-preview-heading h1 {
   overflow-wrap: anywhere;
@@ -3135,7 +3145,7 @@ summary {
     gap: 10px;
     font-size: 9px;
   }
-  .editor-note {
+  .editor-footer {
     padding: 18px 24px;
   }
   .publishing-options > div {
@@ -3577,6 +3587,10 @@ body.zen-mode {
   resize: none;
   overflow-y: auto;
 }
+.zen-mode .editor-footer {
+  flex-shrink: 0;
+  padding: 12px var(--zen-gutter);
+}
 .zen-mode .editor-top > a,
 .zen-mode .article-heading,
 .zen-mode .article-preview-heading,
@@ -3741,7 +3755,7 @@ body.zen-mode {
   .mobile-editor-focus .editor-bottom,
   .mobile-editor-focus .draft-media,
   .mobile-editor-focus .publishing-options,
-  .mobile-editor-focus .editor-note {
+  .mobile-editor-focus .editor-footer {
     visibility: hidden;
   }
 }

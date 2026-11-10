@@ -707,18 +707,16 @@ main {
 .post-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  justify-content: space-between;
+  gap: 8px;
   align-items: center;
   margin: 17px -5px 0;
 }
-.post-actions > div {
-  display: flex;
-  gap: 15px;
+.post-edit {
+  min-height: 32px;
 }
-.post-owner-actions {
+.post-byline .post-edit {
   margin-left: auto;
-  flex-wrap: wrap;
+  flex-shrink: 0;
 }
 .post-actions .icon {
   width: 17px;
@@ -1352,7 +1350,8 @@ footer p {
   color: var(--accent);
   font-weight: 650;
 }
-.post-owner-actions .delete-link,
+.editor-menu .delete-link,
+.note-footer .delete-link,
 .comment .delete-link {
   color: var(--accent);
 }

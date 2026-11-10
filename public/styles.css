@@ -2798,7 +2798,7 @@ summary {
   .sidebar {
     position: relative;
     height: auto;
-    padding: 2px 20px;
+    padding: 18px 20px 10px;
     flex-direction: row;
     align-items: center;
     justify-content: space-between;
@@ -2820,10 +2820,6 @@ summary {
     display: inline-flex;
     min-width: 44px;
     min-height: 44px;
-  }
-  .sidebar .mobile-account-action .avatar {
-    width: 31px;
-    height: 31px;
   }
   .desktop-sign-in {
     display: none;
@@ -2865,8 +2861,7 @@ summary {
   .timeline-tabs > button {
     padding-block: 8px;
   }
-  .timeline-tabs button,
-  .feed-controls button {
+  .timeline-tabs button {
     min-height: 44px;
     min-width: 44px;
   }

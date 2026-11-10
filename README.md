@@ -17,7 +17,7 @@ If you have a [Mastodon](https://mastodon.social/) account all your data will re
 - **Stay in the conversation.** Post notes, reply to readers, follow authors, and browse your direct messages.
 - **Keep working at your own pace.** Autosave drafts on your device and sync them to your server, resume on another device, and export Markdown backups. Schedule publications for automatic release.
 - **Read comfortably anywhere.** A responsive layout, light and dark themes, and a reading focus mode for phones and desktops.
-- **Host it yourself.** A static site with zero runtime dependencies, no analytics, and no application server to maintain.
+- **Host it yourself.** A static site with locally bundled assets, no analytics, and no application server to maintain.
 
 Fedistack connects to servers with a Mastodon-compatible API. Article publishing needs a server with long-post and rich-text support; other servers can be used for reading and short notes. [Check compatibility →](doc/publishing.md)
 

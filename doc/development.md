@@ -2,7 +2,7 @@
 
 [Documentation](README.md) · [Fedistack](../README.md)
 
-Vanilla TypeScript, handwritten CSS, and zero runtime dependencies. TypeScript is the only development dependency.
+Vanilla TypeScript and handwritten CSS, with Highlight.js for code-block highlighting. TypeScript is the only development dependency.
 
 ## Build and test
 
@@ -39,7 +39,7 @@ Fedistack starts at **0.1.0**. `package.json` is the source of truth for the app
 | `src/demo.ts`     | Explicitly fictional offline content                          |
 | `src/main.ts`     | Event delegation and application startup                      |
 
-TypeScript namespaces compile into one classic script with `tsc --outFile`; ES-module loading is deliberately avoided so opening the distribution from disk remains possible. `public/editor-vim.js` is copied alongside the bundle and loaded first as a separate classic script. Styling and local SVG illustrations are original to this project.
+TypeScript namespaces compile into one classic script with `tsc --outFile`; ES-module loading is deliberately avoided so opening the distribution from disk remains possible. `public/editor-vim.js` and the prebuilt common-language script from `@highlightjs/cdn-assets` are copied alongside the bundle and loaded first as separate classic scripts. Highlight.js and its license ship in `dist/`; highlighting requires no CDN or runtime fetch. Styling and local SVG illustrations are original to this project.
 
 Tests cover publishing limits, Markdown escaping, account-scoped drafts, server draft round-trips and conflicts, scheduled publishing and retries, keyboard formatting, API transport, OAuth state/PKCE, file-origin login, rate limiting, DM audiences, view rendering, and static serving. Browser visual QA and authenticated end-to-end actions require a browser session and a real account; the automated tests use mock API responses and do not publish to an account.
 
@@ -49,7 +49,7 @@ Tests cover publishing limits, Markdown escaping, account-scoped drafts, server 
 
 ## Icons
 
-See [icons and exports](icons.md) to edit the SVG and regenerate the PNG and ICO assets. Generated assets are checked in, so ordinary builds need only TypeScript.
+See [icons and exports](icons.md) to edit the SVG and regenerate the PNG and ICO assets. Generated assets are checked in, so ordinary builds need only the npm dependencies.
 
 ## References
 

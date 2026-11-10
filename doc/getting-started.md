@@ -3,7 +3,6 @@
 [Documentation](README.md) · [Fedistack](../README.md)
 
 ```sh
-# Optional if tsc is already installed:
 npm ci
 
 make             # same as make dist

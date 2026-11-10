@@ -1,3 +1,10 @@
+// The locally bundled Highlight.js classic script exposes this browser API.
+declare const hljs: {
+  getLanguage(name: string): unknown;
+  highlight(code: string, options: { language: string; ignoreIllegals: boolean }): { value: string };
+  highlightAuto(code: string): { value: string; language?: string };
+};
+
 namespace Fedi {
   export function escapeHTML(value: unknown): string {
     return String(value ?? "").replace(
@@ -77,6 +84,22 @@ namespace Fedi {
     return result + escapeHTML(source.slice(cursor));
   }
 
+  function codeBlock(source: string, info: string): string {
+    let language = info.trim().split(/\s+/)[0].toLowerCase();
+    let content = escapeHTML(source);
+    // Unknown languages (and a missing optional script) remain readable plain code.
+    if (typeof hljs !== "undefined" && (!language || hljs.getLanguage(language))) {
+      if (language) content = hljs.highlight(source, { language, ignoreIllegals: true }).value;
+      else {
+        const result = hljs.highlightAuto(source);
+        content = result.value;
+        language = result.language || "";
+      }
+    }
+    const classes = /^[\w+-]+$/.test(language) ? ` class="hljs language-${language}"` : "";
+    return `<pre><code${classes}>${content}</code></pre>`;
+  }
+
   export function markdown(source: string, linkHashtags = false, depth = 0): string {
     if (depth > 32) return escapeHTML(source);
     const lines = source.replace(/\r\n?/g, "\n").split("\n");
@@ -95,7 +118,7 @@ namespace Fedi {
         i++;
         while (i < lines.length && !lines[i].startsWith("```"))
           code.push(lines[i++]);
-        output.push(`<pre><code>${escapeHTML(code.join("\n"))}</code></pre>`);
+        output.push(codeBlock(code.join("\n"), line.slice(3)));
         i++;
         continue;
       }
@@ -185,7 +208,11 @@ namespace Fedi {
       if (tag === "em" || tag === "i") return `*${text}*`;
       if (tag === "blockquote")
         return `\n\n> ${text.trim().replace(/\n/g, "\n> ")}\n\n`;
-      if (tag === "pre") return `\n\n\`\`\`\n${node.textContent}\n\`\`\`\n\n`;
+      if (tag === "pre") {
+        const classes = `${node.querySelector("code")?.getAttribute("class") || ""} ${node.getAttribute("class") || ""}`;
+        const language = /(?:^|\s)(?:language|lang)-([\w+-]+)(?=\s|$)/i.exec(classes)?.[1] || "";
+        return `\n\n\`\`\`${language}\n${node.textContent}\n\`\`\`\n\n`;
+      }
       if (tag === "code") return `\`${text}\``;
       if (tag === "del" || tag === "s") return `~~${text}~~`;
       if (tag === "li") {

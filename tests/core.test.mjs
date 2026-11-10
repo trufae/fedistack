@@ -6,6 +6,7 @@ import vm from "node:vm";
 
 const bundle = readFileSync(new URL("../dist/app.js", import.meta.url), "utf8");
 const vimScript = readFileSync(new URL("../dist/editor-vim.js", import.meta.url), "utf8");
+const highlightScript = readFileSync(new URL("../dist/highlight.min.js", import.meta.url), "utf8");
 function storage() {
   const data = new Map();
   return {
@@ -57,6 +58,7 @@ function setup(
     },
     history: { replaceState() {} },
   });
+  vm.runInContext(highlightScript, context);
   vm.runInContext(vimScript, context);
   vm.runInContext(bundle, context);
   return { app: context.Fedi, context };
@@ -275,6 +277,7 @@ test("the distribution uses local classic scripts and assets, with no module/fil
     "utf8",
   );
   assert.match(html, /<script src="app.js" defer>/);
+  assert.match(html, /<script src="highlight.min.js" defer>[\s\S]*<script src="app.js" defer>/);
   assert.doesNotMatch(html, /type="module"|https?:\/\//);
   assert.doesNotThrow(() => new vm.Script(bundle));
   assert.doesNotMatch(bundle, /\bimport\s*\(/);
@@ -290,10 +293,43 @@ test("Markdown renders headings, emphasis, lists, quotes, links, and code blocks
   assert.match(rendered, /<ul><li>First<\/li><li>Second<\/li><\/ul>/);
   assert.match(rendered, /<blockquote>A quote<\/blockquote>/);
   assert.match(
-    rendered,
-    /<pre><code>&lt;script&gt;\*\*code\*\*&lt;\/script&gt;<\/code><\/pre>/,
+    rendered.replace(/<\/?span\b[^>]*>/g, ""),
+    /<pre><code[^>]*>&lt;script&gt;\*\*code\*\*&lt;\/script&gt;<\/code><\/pre>/,
   );
   assert.match(rendered, /rel="noopener noreferrer"/);
+});
+
+test("code fences highlight explicit languages and aliases, and detect unlabeled code", () => {
+  const { app } = setup();
+  for (const [language, code] of [
+    ["ts", "const answer: number = 42;"],
+    ["js", "const answer = 42;"],
+    ["python", "def answer():\n    return 42"],
+    ["c", "int main(void) { return 42; }"],
+    ["bash", 'echo "$HOME"'],
+  ]) {
+    const rendered = app.markdown(`\`\`\`${language}\n${code}\n\`\`\``);
+    assert.match(rendered, new RegExp(`class="hljs language-${language}"`));
+    assert.match(rendered, /<span class="hljs-/);
+    assert.equal(rendered.replace(/<[^>]*>/g, ""), app.escapeHTML(code));
+  }
+  assert.match(app.markdown('```\n{"answer": 42, "ready": true}\n```'), /<span class="hljs-/);
+  assert.match(app.markdown('```TS title=example\nconst answer = 42;\n```'), /class="hljs language-ts"/);
+});
+
+test("highlighted code stays escaped, with plain fallbacks for unsupported languages", () => {
+  const { app, context } = setup();
+  const code = '<script>alert("x")</script> & <img src=x onerror=alert(1)>';
+  for (const language of ["html", "js", "", "unknown", "text", 'js"onclick="alert(1)', "__proto__"]) {
+    const rendered = app.markdown(`\`\`\`${language}\n${code}\n\`\`\``);
+    assert.doesNotMatch(rendered, /<script|<img|<code[^>]*onclick=/);
+    assert.equal(rendered.replace(/<[^>]*>/g, ""), app.escapeHTML(code));
+    if (!["html", "js", ""].includes(language)) assert.doesNotMatch(rendered, /<span/);
+  }
+  context.hljs = undefined;
+  const rendered = app.markdown(`\`\`\`js\n${code}\n\`\`\``);
+  assert.doesNotMatch(rendered, /<span|<script|<img/);
+  assert.equal(rendered.replace(/<[^>]*>/g, ""), app.escapeHTML(code));
 });
 
 test("Markdown cannot inject executable HTML or unsafe links", () => {

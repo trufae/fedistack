@@ -11,6 +11,8 @@ dist: version
 	mkdir -p dist/assets
 	$(TSC) --project tsconfig.json
 	cp public/index.html public/styles.css public/editor-vim.js public/manifest.webmanifest public/.htaccess dist/
+	cp node_modules/@highlightjs/cdn-assets/highlight.min.js dist/
+	cp node_modules/@highlightjs/cdn-assets/LICENSE dist/highlight-LICENSE.txt
 	cp public/assets/*.svg public/assets/*.png public/assets/*.ico dist/assets/
 	node scripts/build-icons.mjs
 

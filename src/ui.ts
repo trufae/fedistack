@@ -215,14 +215,15 @@ namespace Fedi {
   export function postActions(post: Post): string {
     const share = `<button class="icon-button" data-action="share" data-id="${escapeHTML(post.id)}" aria-label="Share publication" title="Share in Fedistack">${icon("link")}</button>`;
     const original = post.url ? `<a class="icon-button" href="${escapeHTML(post.url)}" target="_blank" rel="noopener noreferrer" aria-label="Open original post" title="Open original post">${icon("external")}</a>` : "";
+    const links = `<div class="post-action-links">${share}${original}</div>`;
     if (state.readerServer)
-      return `<div class="post-actions">${share}${original}</div>`;
+      return `<div class="post-actions">${links}</div>`;
     return `<div class="post-actions">
       <button class="icon-button ${post.liked ? "liked" : ""}" data-action="like" data-id="${escapeHTML(post.id)}" aria-label="${post.liked ? "Unlike" : "Like"}" aria-pressed="${post.liked}">${icon("heart")}<span>${post.likes || ""}</span></button>
       <a class="icon-button" href="${escapeHTML(postReadLink(post.id))}" aria-label="Read ${post.replies} comments">${icon("comment")}<span>${post.replies || ""}</span></a>
       <button class="icon-button ${post.reposted ? "reposted" : ""}" data-action="repost" data-id="${escapeHTML(post.id)}" aria-label="${post.reposted ? "Undo repost" : "Repost"}" aria-pressed="${!!post.reposted}" title="${!canRepost(post) ? "Only public and unlisted posts can be reposted" : post.reposted ? "Undo repost" : "Repost"}"${canRepost(post) ? "" : " disabled"}>${icon("repost")}<span>${post.reposts || ""}</span></button>
-      ${share}${original}
-      <button class="icon-button ${post.saved ? "saved" : ""}" data-action="save" data-id="${escapeHTML(post.id)}" aria-label="${post.saved ? "Remove bookmark" : "Save for later"}" aria-pressed="${post.saved}">${icon("bookmark")}</button></div>`;
+      <button class="icon-button ${post.saved ? "saved" : ""}" data-action="save" data-id="${escapeHTML(post.id)}" aria-label="${post.saved ? "Remove bookmark" : "Save for later"}" aria-pressed="${post.saved}">${icon("bookmark")}</button>
+      ${links}</div>`;
   }
 
   function previewExcerpt(text: string, limit: number): string {

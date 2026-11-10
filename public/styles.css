@@ -725,6 +725,11 @@ main {
   align-items: center;
   margin: 17px -5px 0;
 }
+.post-action-links {
+  display: flex;
+  gap: inherit;
+  margin-left: auto;
+}
 .post-edit {
   min-height: 32px;
 }

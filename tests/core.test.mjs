@@ -1489,7 +1489,7 @@ test("the save shortcut captures current input and does not create empty drafts"
   assert.equal(prevented, 2);
 });
 
-test("the reader puts Edit above the title and groups all sharing icons after repost", () => {
+test("the reader puts Edit above the title and places bookmark between repost and sharing links", () => {
   const { app, context } = setup();
   const { get } = elements(context);
   const own = { ...app.demoPosts[0], author: app.demoMe, url: "https://example.org/own" };
@@ -1498,7 +1498,7 @@ test("the reader puts Edit above the title and groups all sharing icons after re
   app.render();
   const html = get("app").innerHTML;
   assert.match(html, /class="page-top">[^]*data-action="edit-publication"[^]*<\/header><article class="reader">[^]*<h1>/);
-  assert.match(html, /data-action="repost"[^]*data-action="share"[^]*aria-label="Open original post"[^]*data-action="save"/);
+  assert.match(html, /data-action="repost"[^]*data-action="save"[^]*data-action="share"[^]*aria-label="Open original post"/);
   assert.doesNotMatch(html, /data-action="(?:delete|unpublish)-publication"/);
   assert.match(app.postCard(own), /data-action="edit-publication"[^]*<h2>/);
   for (const post of [app.demoPosts[0], { ...own, visibility: "direct" }]) {

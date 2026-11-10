@@ -2,13 +2,22 @@
 
 [Documentation](README.md) · [Fedistack](../README.md)
 
-```sh
-npm ci
+Install Node.js, npm, and Make, then run:
 
+```sh
 make             # same as make dist
 make serve       # http://127.0.0.1:8080
 make test        # Node's built-in test runner
 make check       # strict TypeScript check
+```
+
+Make installs the locked npm dependencies, including TypeScript and Highlight.js, on the first build, when either package manifest changes, or if required build files are missing. No separate npm command is needed. The initial install needs access to the npm registry.
+
+On Alpine Linux, install the build tools and create a deployment archive with:
+
+```sh
+apk add nodejs npm make zip
+make zip         # creates fedistack.zip
 ```
 
 `make serve PORT=8081` changes the local port. Node 20+ is recommended for development and tests. The browser needs modern DOM, Fetch, Web Crypto, and dialog APIs.

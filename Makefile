@@ -1,13 +1,25 @@
-TSC ?= $(shell if test -x node_modules/.bin/tsc; then echo node_modules/.bin/tsc; else echo tsc; fi)
+TSC ?= node_modules/.bin/tsc
+NPM ?= npm
 PORT ?= 8080
 
-.PHONY: all dist version icons check test serve clean
+.PHONY: all deps dist version icons check test serve clean zip
 all: dist
+
+# TypeScript is required to build, even when npm is configured to omit dev dependencies.
+deps:
+	@if test ! -f node_modules/.fedistack-deps \
+		|| test package.json -nt node_modules/.fedistack-deps \
+		|| test package-lock.json -nt node_modules/.fedistack-deps \
+		|| test ! -x node_modules/.bin/tsc \
+		|| test ! -f node_modules/@highlightjs/cdn-assets/highlight.min.js \
+		|| test ! -f node_modules/@highlightjs/cdn-assets/LICENSE; then \
+		$(NPM) ci --include=dev && touch node_modules/.fedistack-deps; \
+	fi
 
 version:
 	node scripts/version.mjs
 
-dist: version
+dist: deps version
 	mkdir -p dist/assets
 	$(TSC) --project tsconfig.json
 	cp public/index.html public/styles.css public/editor-vim.js public/manifest.webmanifest public/.htaccess dist/
@@ -19,7 +31,7 @@ dist: version
 icons:
 	./scripts/generate-icons.sh
 
-check: version
+check: deps version
 	$(TSC) --project tsconfig.json --noEmit
 
 test: dist

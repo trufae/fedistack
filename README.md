@@ -23,13 +23,15 @@ Fedistack connects to servers with a Mastodon-compatible API. Article publishing
 
 ## Try it locally
 
-With Node.js and Make installed:
+With Node.js, npm, and Make installed:
 
 ```sh
 git clone https://github.com/trufae/fedistack.git
 cd fedistack
 make && make serve
 ```
+
+Make installs the locked npm dependencies on the first build and whenever `package.json` or `package-lock.json` changes.
 
 Open **http://127.0.0.1:8080** and choose **Sign in** to use your existing Fediverse account. A clearly labeled preview with fictional stories is available before signing in. Ready to host your own copy? Run `make` and upload the contents of `dist/` to a static host.
 

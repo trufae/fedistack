@@ -7,10 +7,11 @@ Vanilla TypeScript and handwritten CSS, with Highlight.js for code-block highlig
 ## Build and test
 
 ```sh
-npm ci
 make check
 make test
 ```
+
+Make installs the locked npm dependencies on the first build and when either package manifest changes, including development dependencies when `NODE_ENV=production`.
 
 `make test` builds the distribution before running Node’s built-in test runner. See [getting started](getting-started.md) for the local server and static hosting.
 

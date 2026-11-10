@@ -35,6 +35,8 @@ Make installs the locked npm dependencies on the first build and whenever `packa
 
 Open **http://127.0.0.1:8080** and choose **Sign in** to use your existing Fediverse account. A clearly labeled preview with fictional stories is available before signing in. Ready to host your own copy? Run `make` and upload the contents of `dist/` to a static host.
 
+Set a default login instance and optionally lock sign-in to it in `public/config.js` before building, or in the hosted `config.js`. See [login server configuration](doc/getting-started.md#default-login-server).
+
 ## Explore further
 
 - [Getting started and hosting](doc/getting-started.md)

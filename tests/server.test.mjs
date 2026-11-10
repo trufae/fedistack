@@ -29,6 +29,7 @@ test("the local server serves the complete static distribution and blocks traver
   for (const [path, type] of [
     ["/", "text/html"],
     ["/app.js", "text/javascript"],
+    ["/config.js", "text/javascript"],
     ["/highlight.min.js", "text/javascript"],
     ["/editor-vim.js", "text/javascript"],
     ["/styles.css", "text/css"],
@@ -49,6 +50,10 @@ test("the local server serves the complete static distribution and blocks traver
     assert.ok((await response.arrayBuffer()).byteLength > 0);
   }
   const html = await (await fetch(origin + "/")).text();
+  assert.ok(html.indexOf('src="config.js"') < html.indexOf('src="app.js"'));
+  const config = await fetch(origin + "/config.js");
+  assert.equal(config.headers.get("cache-control"), "no-cache");
+  assert.match(await config.text(), /globalThis.FEDISTACK_CONFIG/);
   const links = Array.from(html.matchAll(/<link rel="(?:icon|apple-touch-icon|manifest)" href="([^"]+)"/g),
     (match) => match[1]);
   assert.equal(links.length, 5);

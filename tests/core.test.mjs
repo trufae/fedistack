@@ -21,8 +21,10 @@ function setup(
     throw new Error("Unexpected network request");
   },
   stores = {},
+  config = {},
 ) {
   const context = vm.createContext({
+    FEDISTACK_CONFIG: config,
     URL,
     URLSearchParams,
     FormData,
@@ -394,6 +396,90 @@ test("the server picker contains no password field and validates the host before
   assert.match(modal.innerHTML, /name="remember" checked/);
 });
 
+test("a configured default prefills the picker and still allows other instances", async () => {
+  const { app } = setup(undefined, {}, { defaultServer: " HTTPS://Example.ORG:443/ " });
+  let html;
+  app.showModal = (_title, body) => { html = body; };
+  app.connectDialog();
+  assert.match(html, /name="fediverse-server"[^>]*value="example.org"/);
+  assert.equal(app.loginServer(""), "https://example.org");
+  assert.equal(app.loginServer("elsewhere.example"), "https://elsewhere.example");
+  assert.equal(new app.API("elsewhere.example", "token").server, "https://elsewhere.example");
+});
+
+test("locked sign-in skips server entry for OAuth and manual tokens", async () => {
+  const requests = [];
+  const { app, context } = setup(async (url) => {
+    requests.push(url);
+    return Response.json({ client_id: "client", client_secret: "secret" });
+  }, {}, { defaultServer: "EXAMPLE.org", allowOtherServers: false });
+  const { get } = elements(context);
+  let html;
+  app.showModal = (_title, body) => { html = body; };
+  app.connectDialog();
+  assert.doesNotMatch(html, /name="fediverse-server"|check-server|Enter your server|choose a server/);
+  assert.match(html, /Continue to example.org/);
+  assert.match(html, /name="remember"/);
+  get("remember-session").checked = true;
+  app.connectTokenDialog();
+  assert.match(html, /data-server="https:\/\/example.org"/);
+  assert.match(html, /name="remember" checked/);
+  await app.startOAuth("", false, true);
+  assert.deepEqual(requests, ["https://example.org/api/v1/apps"]);
+  assert.equal(new URL(context.location.assigned).origin, "https://example.org");
+  assert.equal(app.readStore("oauth", null, true).remember, true);
+  assert.equal(new app.API("https://EXAMPLE.org:443/", "token").server, "https://example.org");
+});
+
+test("locked sign-in rejects foreign OAuth, tokens, and sessions before making requests", async () => {
+  let requests = 0;
+  const { app } = setup(async () => { requests++; }, {}, {
+    defaultServer: "example.org", allowOtherServers: false,
+  });
+  for (const server of ["other.example", "example.org.evil.example", "https://example.org:8443"]) {
+    await assert.rejects(app.startOAuth(server), /only supports signing in to example.org/);
+    assert.throws(() => new app.API(server, "token"), /only supports signing in/);
+    assert.throws(() => app.saveSession({ server, token: "token" }), /only supports signing in/);
+  }
+  for (const redirect of ["https://reader.example/fedistack/", "urn:ietf:wg:oauth:2.0:oob"]) {
+    app.writeStore("oauth", {
+      server: "https://other.example", redirect, state: "expected", created: Date.now(),
+    }, true);
+    await assert.rejects(app.finishOAuth("code", "expected"), /only supports signing in/);
+    assert.equal(app.readStore("oauth", null, true), null);
+  }
+  assert.equal(requests, 0);
+});
+
+test("locked deployments ignore old foreign sessions in either store and keep drafts", () => {
+  for (const remember of [false, true]) {
+    const stores = { localStorage: storage(), sessionStorage: storage() };
+    const session = { server: "https://other.example", token: "old-token", remember };
+    stores[remember ? "localStorage" : "sessionStorage"].setItem("fedistack:session", JSON.stringify(session));
+    stores.localStorage.setItem("fedistack:drafts:https://other.example:me", JSON.stringify([article]));
+    const { app } = setup(undefined, stores, { defaultServer: "example.org", allowOtherServers: false });
+    assert.equal(app.state.session, null);
+    assert.equal(app.readStore("drafts:https://other.example:me", [])[0].id, article.id);
+    stores.localStorage.setItem("fedistack:session", JSON.stringify({ ...session, server: "https://EXAMPLE.org:443/" }));
+    assert.equal(app.loadSession().server, "https://example.org");
+  }
+});
+
+test("missing or invalid deployment settings disable sign-in instead of opening the instance picker", async () => {
+  for (const config of [null, false, { defaultServer: "http://example.org" },
+    { defaultServer: "https://example.org/path" }, { defaultServer: 123 },
+    { allowOtherServers: false }, { defaultServer: "example.org", allowOtherServers: "false" }]) {
+    const { app } = setup(undefined, {}, config);
+    let html;
+    app.showModal = (_title, body) => { html = body; };
+    app.connectDialog();
+    assert.match(html, /configuration/);
+    assert.doesNotMatch(html, /<form/);
+    await assert.rejects(app.startOAuth("example.org"), /configuration/);
+    assert.throws(() => new app.API("example.org", "token"), /configuration/);
+  }
+});
+
 test("server submission starts OAuth while token submission verifies the chosen server", async () => {
   const { app, context } = setup();
   const { get } = elements(context);
@@ -475,7 +561,7 @@ test("failed sign-in storage does not restore an older account or claim a succes
   const { app, context } = setup();
   app.writeStore("session", { token: "old-account", remember: true });
   context.localStorage.setItem = () => { throw new Error("Storage full"); };
-  assert.equal(app.saveSession({ token: "new-account", remember: true }), false);
+  assert.equal(app.saveSession({ server: "https://example.org", token: "new-account", remember: true }), false);
   assert.equal(app.loadSession(), null);
   context.localStorage.removeItem = () => { throw new Error("Storage unavailable"); };
   app.writeStore("session", { token: "temporary" }, true);

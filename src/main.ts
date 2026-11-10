@@ -106,7 +106,7 @@ namespace Fedi {
     }
     button.disabled = true;
     try {
-      const cap = await new API(input.value).capabilities();
+      const cap = await new API(loginServer(input.value)).capabilities();
       const target = document.getElementById("server-capabilities");
       if (target)
         target.innerHTML = `<div class="capability-card ${supportsArticles(cap) ? "compatible" : ""}"><strong>${supportsArticles(cap) ? "Ready for long-form writing" : "Reading and notes supported"}</strong><p>${cap.maxChars.toLocaleString()} characters · ${cap.format === "text/markdown" ? "Native Markdown" : cap.format === "text/html" ? "Rich HTML" : "Plain text"}</p>${supportsArticles(cap) ? "" : `<small>${escapeHTML(articleSupportProblem(cap))}</small>`}</div>`;

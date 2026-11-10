@@ -1,7 +1,7 @@
 <IfModule mod_headers.c>
     Header always unset Cross-Origin-Embedder-Policy
     Header always unset Cross-Origin-Opener-Policy
-    <FilesMatch "^(index\.html|manifest\.webmanifest|favicon\.ico)$">
+    <FilesMatch "^(index\.html|config\.js|manifest\.webmanifest|favicon\.ico)$">
         Header always set Cache-Control "no-cache"
     </FilesMatch>
 </IfModule>

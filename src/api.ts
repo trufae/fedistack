@@ -107,7 +107,7 @@ namespace Fedi {
       server: string,
       private token = "",
     ) {
-      this.server = serverURL(server);
+      this.server = token ? loginServer(server) : serverURL(server);
     }
 
     async request<T>(
@@ -782,7 +782,7 @@ namespace Fedi {
     manual = false,
     remember = false,
   ): Promise<void> {
-    const api = new API(server);
+    const api = new API(loginServer(server));
     if (location.protocol === "file:") {
       const capabilities = await api.capabilities();
       if (
@@ -876,7 +876,14 @@ namespace Fedi {
         "This sign-in expired or could not be verified. Please connect again.",
       );
     }
-    const token = await new API(pending.server).post<{ access_token: string }>(
+    let server: string;
+    try {
+      server = loginServer(pending.server);
+    } catch (error) {
+      writeStore("oauth", null, true);
+      throw error;
+    }
+    const token = await new API(server).post<{ access_token: string }>(
       "/oauth/token",
       new URLSearchParams({
         client_id: pending.client_id,
@@ -893,7 +900,7 @@ namespace Fedi {
       );
     writeStore("oauth", null, true);
     return {
-      ...(await new API(pending.server, token.access_token).verify()),
+      ...(await new API(server, token.access_token).verify()),
       remember: pending.remember === true,
     };
   }

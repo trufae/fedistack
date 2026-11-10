@@ -16,6 +16,7 @@
     "src/link-preview.ts",
     "src/storage.ts",
     "src/api.ts",
+    "src/config.ts",
     "src/demo.ts",
     "src/ui.ts",
     "src/app.ts",

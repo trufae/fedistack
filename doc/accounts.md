@@ -4,6 +4,8 @@
 
 Click **Sign in** at the top-right of the site on desktop or beside the Fedistack logo on mobile. You can also sign in from the welcome panel or mobile navigation. Enter your instance domain and optionally check compatibility. OAuth registers Fedistack with the instance and redirects to the instance's sign-in page. Your password never enters Fedistack. OAuth uses a state parameter and an S256 PKCE challenge; registration and token exchange use form encoding.
 
+Your host may prefill the instance or limit sign-in to one server. On a site with a fixed instance, choose **Continue to…** without entering a server. Hosts can configure this in [the deployment settings](getting-started.md#default-login-server).
+
 The additional sign-in options support a manual authorization code or an existing application access token with `read` and `write` permissions. For a token, enter the instance domain first, then choose **Other sign-in options → Sign in with token** to open a separate token entry dialog.
 
 Check **Keep me signed in on this device** before signing in to retain the access token in local storage across app launches. Leave it unchecked for temporary tab storage. The choice applies to OAuth and manual tokens; OAuth registration credentials and pending authorization data always remain in tab storage. After installing the Home Screen app, sign in and enable this option inside the app.

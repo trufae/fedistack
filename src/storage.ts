@@ -29,10 +29,16 @@ namespace Fedi {
   }
 
   export function loadSession(): Session | null {
-    return (
-      readStore<Session | null>("session", null, true) ||
-      readStore<Session | null>("session", null)
-    );
+    for (const temporary of [true, false]) {
+      const session = readStore<Session | null>("session", null, temporary);
+      if (!session || typeof session.server !== "string" || !session.server.trim()) continue;
+      try {
+        return { ...session, server: loginServer(session.server) };
+      } catch {
+        // A deployment can restrict sign-in after an account was saved.
+      }
+    }
+    return null;
   }
 
   export function clearSession(): void {
@@ -48,6 +54,7 @@ namespace Fedi {
   }
 
   export function saveSession(session: Session): boolean {
+    loginServer(session.server);
     clearSession();
     return writeStore("session", session, session.remember !== true);
   }

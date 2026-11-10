@@ -24,6 +24,27 @@ make zip         # creates fedistack.zip
 
 Upload the **contents of `dist/`** to any static HTTP(S) host. Subdirectories work; navigation uses URL hashes and all assets use relative paths. There is no application server, framework, bundler, CDN, external font, or analytics service.
 
+## Default login server
+
+Edit `public/config.js` before running `make`, or edit `config.js` on your static host without rebuilding:
+
+```js
+globalThis.FEDISTACK_CONFIG = {
+  defaultServer: "social.example.org",
+  allowOtherServers: false,
+};
+```
+
+`defaultServer` accepts an HTTPS instance domain or origin. With `allowOtherServers: true`, it prefills the editable server field. With `false`, sign-in shows **Continue to social.example.org** with no server field or compatibility step. OAuth, manual codes, and token sign-in all use that instance; saved sessions for other instances are ignored and their drafts are kept. A locked site must specify a valid default server.
+
+When Fedistack is hosted on the instance's own HTTPS origin, you can use `defaultServer: location.origin` to use that host automatically. For example, a copy at `https://social.example.org/fedistack/` will sign in to `https://social.example.org`.
+
+The shipped defaults (`defaultServer: ""`, `allowOtherServers: true`) let users choose any instance. Missing or invalid configuration disables sign-in until fixed. The restriction controls this client's login flow; it does not change federation or public reading links and is not a server access-control policy.
+
+Serve `config.js` with `Cache-Control: no-cache` so changes take effect on reload. The included local server and Apache `.htaccess` already do this. Each build copies `public/config.js` over `dist/config.js`, so keep permanent settings in `public/config.js` or reapply hosted settings during deployment.
+
+## Mobile and offline use
+
 On iPhone or iPad, open the hosted site in Safari and choose **Share → Add to Home Screen**. Enable **Open as Web App** if offered. The shortcut uses the Fedistack icon and opens in standalone mode. To pick up updated installation metadata, add a new shortcut from the updated site. Pinch and double-tap zoom are disabled for the touch layout; scrolling remains available.
 
 You can also open `dist/index.html` directly. The offline demo, editor, drafts, themes, and local interactions work without a server or network. **Mastodon login and writes require localhost or HTTPS:** browsers send `Origin: null` from `file://`, which Mastodon's CSRF protection rejects with a generic 422. This is an instance restriction a static client cannot override. Use `make serve` for a live Mastodon account. Other compatible servers may allow the manual authorization-code flow from a local file.

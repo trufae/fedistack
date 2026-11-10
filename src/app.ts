@@ -907,16 +907,27 @@ namespace Fedi {
   }
 
   export function connectDialog(): void {
+    if (loginConfig.error) {
+      showModal("Sign-in unavailable", `<p>${escapeHTML(loginConfig.error)}</p>`);
+      return;
+    }
+    const host = loginConfig.defaultServer ? new URL(loginConfig.defaultServer).host : "";
+    const serverField = loginConfig.allowOtherServers
+      ? `<label for="fediverse-server">Your server<input id="fediverse-server" name="fediverse-server" type="text" inputmode="url" value="${escapeHTML(host)}" placeholder="infosec.exchange" required autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"></label>`
+      : "";
+    const introduction = loginConfig.allowOtherServers
+      ? "Sign in with your existing Fediverse account. Enter your server below to continue to its sign-in page."
+      : `Sign in with your <strong>${escapeHTML(host)}</strong> account. Continue to your server to authorize Fedistack.`;
     showModal(
       "Sign in to Fedistack",
-      `<p>Sign in with your existing Fediverse account. Enter your server below to continue to its sign-in page. For articles, choose a server with <strong>5,000+ characters and Markdown or HTML support</strong>, such as infosec.exchange, or a suitably configured Akkoma or Pleroma instance.</p>${location.protocol === "file:" ? '<div class="local-file-notice"><strong>Opened as a local file</strong><p>Mastodon servers require localhost or HTTPS for sign-in. Run <code>make serve</code>, then open <a href="http://127.0.0.1:8080" target="_blank" rel="noopener noreferrer">http://127.0.0.1:8080</a>. Offline reading and drafts work here.</p></div>' : ""}<form id="connect-form" autocomplete="off"><label for="fediverse-server">Your server<input id="fediverse-server" name="fediverse-server" type="text" inputmode="url" placeholder="infosec.exchange" required autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"></label><div id="server-capabilities"></div>${rememberSessionOption()}<div class="form-buttons"><button type="button" class="button subtle" data-action="check-server">Check compatibility</button><button class="button primary" type="submit">Sign in ${icon("arrow")}</button></div><details class="token-details"><summary>Other sign-in options</summary><label class="manual-option"><input type="checkbox" name="manual"> Use a manual authorization code</label><button type="button" class="button subtle" data-action="connect-token">Sign in with token</button></details></form><p class="fine-print">Mastodon sign-in and publishing need localhost or HTTPS. Some other servers support the manual code flow from a local file. No application backend is required.</p>`,
+      `<p>${introduction}</p>${location.protocol === "file:" ? '<div class="local-file-notice"><strong>Opened as a local file</strong><p>Mastodon servers require localhost or HTTPS for sign-in. Run <code>make serve</code>, then open <a href="http://127.0.0.1:8080" target="_blank" rel="noopener noreferrer">http://127.0.0.1:8080</a>. Offline reading and drafts work here.</p></div>' : ""}<form id="connect-form" autocomplete="off">${serverField}<div id="server-capabilities"></div>${rememberSessionOption()}<div class="form-buttons">${loginConfig.allowOtherServers ? '<button type="button" class="button subtle" data-action="check-server">Check compatibility</button>' : ""}<button class="button primary" type="submit">${!loginConfig.allowOtherServers ? `Continue to ${escapeHTML(host)}` : "Sign in"} ${icon("arrow")}</button></div><details class="token-details"><summary>Other sign-in options</summary><label class="manual-option"><input type="checkbox" name="manual"> Use a manual authorization code</label><button type="button" class="button subtle" data-action="connect-token">Sign in with token</button></details></form>`,
     );
   }
 
   export function connectTokenDialog(): void {
-    const input = document.getElementById("fediverse-server") as HTMLInputElement;
-    if (!input.reportValidity()) return;
-    const server = serverURL(input.value);
+    const input = document.getElementById("fediverse-server") as HTMLInputElement | null;
+    if (input && !input.reportValidity()) return;
+    const server = loginServer(input?.value || "");
     const remember = (
       document.getElementById("remember-session") as HTMLInputElement | null
     )?.checked;

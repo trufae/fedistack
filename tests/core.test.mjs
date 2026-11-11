@@ -3919,6 +3919,28 @@ test("short, multiline, and media-only notes keep usable preview headings", () =
   assert.match(long, new RegExp(`<h2>${"🦊".repeat(100)}…</h2><p class="excerpt">${"🦊".repeat(20)} The rest of the note\\.</p>`));
 });
 
+test("URL-first notes use the following text for their feed headline", () => {
+  const { app, context } = setup();
+  const { get } = elements(context);
+  const url = "https://example.org/a_long_article";
+  const note = { ...app.demoPosts[0], kind: "post", title: "", subtitle: "", image: "" };
+  for (const opening of [`${url} `, `[${url}](${url})\n\n`, `**${url}**\n<https://example.net/>\n`]) {
+    const card = app.postCard({ ...note, markdown: `${opening}A melting statue. It's a cute hack.` });
+    assert.match(card, /<h2>A melting statue\.<\/h2><p class="excerpt">It&#39;s a cute hack\.<\/p>/);
+    assert.ok(card.includes(`class="link-preview" href="${url}"`));
+  }
+  const onlyLink = { ...note, markdown: `[${url}](${url})` };
+  assert.match(app.postCard(onlyLink), /<h2>Note<\/h2><span class="continue-reading">/);
+  app.state.linkPreviews = false;
+  assert.match(app.postCard(onlyLink), /<h2>Note<\/h2>/);
+  app.state.view = "reader";
+  app.state.reading = onlyLink;
+  app.render();
+  assert.ok(get("app").innerHTML.includes(`href="${url}"`));
+  assert.match(app.postCard({ ...note, markdown: `[A labelled link](${url})` }), /<h2>A labelled link<\/h2>/);
+  assert.match(app.postCard({ ...note, title: "A written title", markdown: url }), /<h2>A written title<\/h2>/);
+});
+
 function feedFixture() {
   const { app, context } = setup();
   const { get } = elements(context);

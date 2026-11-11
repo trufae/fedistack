@@ -240,15 +240,18 @@ namespace Fedi {
   function postPreview(post: Post): { title: string; excerpt: string } {
     // Preview headings are display-only; the reader keeps the original post.
     const content = articleContent(post);
-    const body = plainText(content.body.replace(/!?\[([^\]]*)\]\([^)]+\)/g, "$1"))
+    const authoredTitle = post.title.trim();
+    const text = content.body.replace(/!?\[([^\]]*)\]\([^)]+\)/g, "$1");
+    const previewText = authoredTitle ? text : text.trimStart()
+      .replace(/^(?:[*_`~]*<?https?:\/\/\S+(?:\s+|$))+/i, "");
+    const body = plainText(previewText)
       .replace(/^[ \t]*(?:>\s*|[-+*]\s+|\d+[.)]\s+)/gm, "")
       .replace(/[^\S\r\n]+/g, " ").trim();
     const opening = body.split(/\r?\n/, 1)[0].match(/^.*?(?:[.!?](?=\s|$)|[。！？]|$)/)?.[0] || "";
     const headline = previewExcerpt(opening, 100);
     const consumed = Array.from(opening).length > 100 ? headline.slice(0, -1) : headline;
-    const title = post.title.trim() || headline || (post.kind === "article" ? "Untitled article" : "Note");
-    const excerpt = content.subtitle.trim() || (post.title.trim()
-      ? body : body.slice(consumed.length));
+    const title = authoredTitle || headline || (post.kind === "article" ? "Untitled article" : "Note");
+    const excerpt = content.subtitle.trim() || (authoredTitle ? body : body.slice(consumed.length));
     return { title, excerpt: previewExcerpt(excerpt, 180) };
   }
 

@@ -1337,12 +1337,6 @@ footer p {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
-.reading-prose p,
-.reading-prose li,
-.reading-prose blockquote {
-  text-align: justify;
-  text-align-last: start;
-}
 .reader-end {
   margin: 40px 0 24px;
   padding-top: 23px;

@@ -403,6 +403,7 @@ namespace Fedi {
     </li>`;
   }
   export function suggestionsView(inline = false): string {
+    if (state.view === "discover" && state.loading && !state.posts.length) return "";
     const accounts = suggestedAccounts();
     if (!accounts.length) return "";
     const heading = '<div class="section-heading"><h3>People to follow</h3><a class="suggestions-see-all" href="#people">See all</a></div>';

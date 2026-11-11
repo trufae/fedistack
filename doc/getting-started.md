@@ -39,7 +39,7 @@ globalThis.FEDISTACK_CONFIG = {
 
 When Fedistack is hosted on the instance's own HTTPS origin, you can use `defaultServer: location.origin` to use that host automatically. For example, a copy at `https://social.example.org/fedistack/` will sign in to `https://social.example.org`.
 
-The shipped defaults (`defaultServer: ""`, `allowOtherServers: true`) let users choose any instance. Missing or invalid configuration disables sign-in until fixed. The restriction controls this client's login flow; it does not change federation or public reading links and is not a server access-control policy.
+`index.html` loads `config.js` with a plain script tag before `app.js`. The app reads `globalThis.FEDISTACK_CONFIG`; it does not fetch or parse a configuration file. Missing settings use the shipped defaults (`defaultServer: ""`, `allowOtherServers: true`), letting users choose any instance. Server URLs are validated when signing in. The restriction controls this client's login flow; it does not change federation or public reading links and is not a server access-control policy.
 
 Serve `config.js` with `Cache-Control: no-cache` so changes take effect on reload. The included local server and Apache `.htaccess` already do this. Each build copies `public/config.js` over `dist/config.js`, so keep permanent settings in `public/config.js` or reapply hosted settings during deployment.
 

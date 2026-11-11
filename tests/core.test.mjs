@@ -5,6 +5,7 @@ import { webcrypto } from "node:crypto";
 import vm from "node:vm";
 
 const bundle = readFileSync(new URL("../dist/app.js", import.meta.url), "utf8");
+const configScript = readFileSync(new URL("../dist/config.js", import.meta.url), "utf8");
 const vimScript = readFileSync(new URL("../dist/editor-vim.js", import.meta.url), "utf8");
 const highlightScript = readFileSync(new URL("../dist/highlight.min.js", import.meta.url), "utf8");
 function storage() {
@@ -21,10 +22,9 @@ function setup(
     throw new Error("Unexpected network request");
   },
   stores = {},
-  config = {},
+  config,
 ) {
   const context = vm.createContext({
-    FEDISTACK_CONFIG: config,
     URL,
     URLSearchParams,
     FormData,
@@ -61,6 +61,8 @@ function setup(
     },
     history: { replaceState() {} },
   });
+  if (config === undefined) vm.runInContext(configScript, context);
+  else if (config !== null) context.FEDISTACK_CONFIG = config;
   vm.runInContext(highlightScript, context);
   vm.runInContext(vimScript, context);
   vm.runInContext(bundle, context);
@@ -401,7 +403,7 @@ test("a configured default prefills the picker and still allows other instances"
   let html;
   app.showModal = (_title, body) => { html = body; };
   app.connectDialog();
-  assert.match(html, /name="fediverse-server"[^>]*value="example.org"/);
+  assert.match(html, /name="fediverse-server"[^>]*value=" HTTPS:\/\/Example.ORG:443\/ "/);
   assert.equal(app.loginServer(""), "https://example.org");
   assert.equal(app.loginServer("elsewhere.example"), "https://elsewhere.example");
   assert.equal(new app.API("elsewhere.example", "token").server, "https://elsewhere.example");
@@ -418,7 +420,7 @@ test("locked sign-in skips server entry for OAuth and manual tokens", async () =
   app.showModal = (_title, body) => { html = body; };
   app.connectDialog();
   assert.doesNotMatch(html, /name="fediverse-server"|check-server|Enter your server|choose a server/);
-  assert.match(html, /Continue to example.org/);
+  assert.match(html, /Continue to EXAMPLE.org/);
   assert.match(html, /name="remember"/);
   get("remember-session").checked = true;
   app.connectTokenDialog();
@@ -465,18 +467,28 @@ test("locked deployments ignore old foreign sessions in either store and keep dr
   }
 });
 
-test("missing or invalid deployment settings disable sign-in instead of opening the instance picker", async () => {
-  for (const config of [null, false, { defaultServer: "http://example.org" },
-    { defaultServer: "https://example.org/path" }, { defaultServer: 123 },
-    { allowOtherServers: false }, { defaultServer: "example.org", allowOtherServers: "false" }]) {
-    const { app } = setup(undefined, {}, config);
+test("a missing config script leaves the server picker and sign-in available", async () => {
+  const { app, context } = setup(async () =>
+    Response.json({ client_id: "client", client_secret: "secret" }), {}, null);
+  assert.equal("FEDISTACK_CONFIG" in context, false);
+  let html;
+  app.showModal = (_title, body) => { html = body; };
+  app.connectDialog();
+  assert.match(html, /name="fediverse-server"[^>]*value=""/);
+  assert.equal(new app.API("example.org", "token").server, "https://example.org");
+  await app.startOAuth("example.org");
+  assert.equal(new URL(context.location.assigned).origin, "https://example.org");
+});
+
+test("an invalid default server can be corrected in the picker before sign-in", () => {
+  for (const defaultServer of ["http://example.org", "https://example.org/path"]) {
+    const { app } = setup(undefined, {}, { defaultServer });
     let html;
     app.showModal = (_title, body) => { html = body; };
     app.connectDialog();
-    assert.match(html, /configuration/);
-    assert.doesNotMatch(html, /<form/);
-    await assert.rejects(app.startOAuth("example.org"), /configuration/);
-    assert.throws(() => new app.API("example.org", "token"), /configuration/);
+    assert.match(html, /name="fediverse-server"/);
+    assert.throws(() => app.loginServer(""), /Enter an HTTPS server domain/);
+    assert.equal(app.loginServer("example.org"), "https://example.org");
   }
 });
 

@@ -50,6 +50,7 @@ test("the local server serves the complete static distribution and blocks traver
     assert.ok((await response.arrayBuffer()).byteLength > 0);
   }
   const html = await (await fetch(origin + "/")).text();
+  assert.match(html, /<script src="config\.js"><\/script>/);
   assert.ok(html.indexOf('src="config.js"') < html.indexOf('src="app.js"'));
   const config = await fetch(origin + "/config.js");
   assert.equal(config.headers.get("cache-control"), "no-cache");

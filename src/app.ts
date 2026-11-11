@@ -907,11 +907,7 @@ namespace Fedi {
   }
 
   export function connectDialog(): void {
-    if (loginConfig.error) {
-      showModal("Sign-in unavailable", `<p>${escapeHTML(loginConfig.error)}</p>`);
-      return;
-    }
-    const host = loginConfig.defaultServer ? new URL(loginConfig.defaultServer).host : "";
+    const host = loginConfig.defaultServer;
     const serverField = loginConfig.allowOtherServers
       ? `<label for="fediverse-server">Your server<input id="fediverse-server" name="fediverse-server" type="text" inputmode="url" value="${escapeHTML(host)}" placeholder="infosec.exchange" required autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"></label>`
       : "";

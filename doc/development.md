@@ -27,6 +27,8 @@ Fedistack starts at **0.1.0**. `package.json` is the source of truth for the app
 | `src/api.ts`      | Transport, capabilities, OAuth, rate limits, response mapping |
 | `src/markdown.ts` | Escaped Markdown rendering and HTML conversion                |
 | `src/link-preview.ts` | Open Graph metadata, cached client lookups, and framed link previews |
+| `src/sharing.ts` | Publication metadata in the document head and shared query links |
+| `scripts/share-preview.mjs` | Optional crawler HTML, anonymous status fetching, and public-address validation |
 | `src/storage.ts`  | Defensive browser storage and account-scoped drafts           |
 | `src/server-drafts.ts` | Server draft synchronization and scheduled-post management |
 | `src/app.ts`      | Routes, state, feed, reader, library, settings                |

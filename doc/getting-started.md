@@ -24,6 +24,25 @@ make zip         # creates fedistack.zip
 
 Upload the **contents of `dist/`** to any static HTTP(S) host. Subdirectories work; navigation uses URL hashes and all assets use relative paths. There is no application server, framework, bundler, CDN, external font, or analytics service.
 
+## Article previews when sharing
+
+The reader sets [Open Graph](https://ogp.me/) and Twitter card metadata with the article title, subtitle (or an excerpt), and its first available attached or inline image. Private publications use generic site metadata; content warnings replace the preview text and suppress images.
+
+Most link-preview crawlers need these tags in the initial HTML. Static hosts cannot produce article-specific responses for `#` links: [URL fragments never reach the server](https://developer.mozilla.org/en-US/docs/Web/URI/Reference/Fragment). Static hosting continues to work, but those crawlers only see the generic Fedistack tags.
+
+For article previews, run the included Node server from the repository after building:
+
+```sh
+make
+FEDISTACK_PUBLIC_URL=https://reader.example/fedistack/ node scripts/serve.mjs 8080
+```
+
+Put an HTTPS reverse proxy in front of `127.0.0.1:8080`. Forward `/fedistack/` to the server's `/`, including the query string and `config.js`; set `FEDISTACK_PUBLIC_URL` to the external base URL with its trailing slash. Keep `dist/` and both `scripts/serve.mjs` and `scripts/share-preview.mjs` on the host. The server uses only Node's built-in modules at runtime.
+
+The Node server enables `sharePreviews` in the served configuration. **Share publication** then copies a `?p=…` URL (with `server=…` for another instance). The server reads the public status without credentials and places its metadata in the HTML before returning it; opening the link enters the usual reader. Existing hash links remain readable but must be shared again to get a crawler-readable URL. `make serve` enables previews locally too.
+
+Only public and unlisted statuses returned anonymously by a public HTTPS instance on port 443 receive article metadata. Requests reject private network addresses and redirects, time out after six seconds, and limit responses to 1 MiB. Unavailable or restricted posts fall back to generic metadata while keeping the reader accessible. Preview clients may cache older cards. Leave `sharePreviews: false` on static hosts; set it to `true` only if an equivalent `?p=ID&server=ORIGIN` handler is installed.
+
 ## Default login server
 
 Edit `public/config.js` before running `make`, or edit `config.js` on your static host without rebuilding:

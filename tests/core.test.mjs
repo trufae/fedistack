@@ -1971,6 +1971,116 @@ function sharedStatus(overrides = {}) {
   };
 }
 
+test("publication metadata uses the article subtitle and its own images", () => {
+  const { app } = setup();
+  const post = {
+    ...app.demoPosts[0], title: 'Title with "quotes" & <angle brackets>', subtitle: "A useful subtitle",
+    markdown: "# Title\n\nArticle text.", image: "https://images.example/cover.jpg", imageAlt: "The cover",
+    linkPreview: { title: "Someone else's page", image: "https://images.example/unrelated.jpg" },
+  };
+  assert.deepEqual(JSON.parse(JSON.stringify(app.publicationMetadata(post))), {
+    title: post.title, description: post.subtitle, image: post.image, imageAlt: "The cover", type: "article",
+  });
+  post.media = [{ type: "image", url: "https://images.example/full.jpg", previewUrl: "https://images.example/thumb.jpg", description: "Full image" }];
+  assert.equal(app.publicationMetadata(post).image, post.media[0].url);
+  post.image = "javascript:alert(1)";
+  post.media = [];
+  post.subtitle = "";
+  post.markdown = `# ${post.title}\n\nInferred subtitle\n\nBody text.\n\n![A \\[quoted\\] & image](https://images.example/inline.jpg?a=1&b=2)`;
+  const inferred = app.publicationMetadata(post);
+  assert.equal(inferred.description, "Inferred subtitle");
+  assert.equal(inferred.image, "https://images.example/inline.jpg?a=1&b=2");
+  assert.equal(inferred.imageAlt, "A [quoted] & image");
+  post.markdown = "A **formatted** body without a subtitle.\n\n```md\n![Code](https://images.example/code.jpg)\n```";
+  const excerpt = app.publicationMetadata(post);
+  assert.match(excerpt.description, /^A formatted body without a subtitle/);
+  assert.equal(excerpt.image, "");
+  for (const visibility of ["private", "direct"]) {
+    const metadata = app.publicationMetadata({ ...post, visibility });
+    assert.equal(metadata.type, "website");
+    assert.doesNotMatch(JSON.stringify(metadata), /formatted body|quotes/);
+  }
+  const warning = app.publicationMetadata({ ...post, warning: "Sensitive topic" });
+  assert.equal(warning.description, "Sensitive topic");
+  assert.equal(warning.image, "");
+  assert.doesNotMatch(warning.title, /quotes/);
+});
+
+test("reader sharing tags update in place and clear when leaving an article", () => {
+  const { app, context } = setup();
+  elements(context);
+  const tags = [];
+  context.document.head = {
+    querySelector(selector) {
+      const [, attribute, value] = /^meta\[(\w+)="([^"]+)"\]$/.exec(selector);
+      return tags.find((tag) => tag[attribute] === value) || null;
+    },
+    appendChild(tag) { tags.push(tag); },
+  };
+  context.document.createElement = () => ({
+    setAttribute(key, value) { this[key] = value; },
+    remove() { tags.splice(tags.indexOf(this), 1); },
+  });
+  const value = (key) => tags.find((tag) => tag.name === key || tag.property === key)?.content;
+  app.state.view = "reader";
+  app.state.reading = { ...app.demoPosts[0], title: 'A "title" & more', subtitle: "The subtitle", image: "assets/garden.svg" };
+  app.render();
+  app.render();
+  assert.equal(value("og:title"), 'A "title" & more');
+  assert.equal(value("og:description"), "The subtitle");
+  assert.equal(value("description"), "The subtitle");
+  assert.equal(value("og:type"), "article");
+  assert.equal(value("og:image"), "https://reader.example/fedistack/assets/garden.svg");
+  assert.equal(value("twitter:card"), "summary_large_image");
+  assert.equal(value("og:url"), app.publicationLink(app.state.reading));
+  assert.equal(tags.filter((tag) => tag.property === "og:title").length, 1);
+  app.state.reading = { ...app.state.reading, image: "", markdown: "No picture.", subtitle: "Another article" };
+  app.render();
+  assert.equal(value("og:description"), "Another article");
+  assert.equal(value("og:image"), undefined);
+  assert.equal(value("og:image:alt"), undefined);
+  assert.equal(value("twitter:image"), undefined);
+  assert.equal(value("twitter:card"), "summary");
+  app.state.view = "home";
+  app.render();
+  assert.equal(value("og:type"), "website");
+  assert.equal(value("og:url"), "https://reader.example/fedistack/");
+  assert.match(value("og:title"), /^Fedistack/);
+  assert.doesNotMatch(value("description"), /Another article/);
+});
+
+test("preview-enabled share links reach the server and open the same public reader", async () => {
+  const id = "~opaque/id?&";
+  const { app, context } = await postActionFixture(async (url) => Response.json(url.endsWith("/context")
+    ? { ancestors: [], descendants: [] } : sharedStatus({ id })));
+  app.loginConfig.sharePreviews = true;
+  app.state.api = new app.API("https://source.example", "secret-token");
+  const post = { ...app.demoPosts[0], id };
+  context.location.href = "https://reader.example/fedistack/?code=secret#home";
+  const link = new URL(app.publicationLink(post));
+  assert.equal(link.hash, "");
+  assert.equal(link.searchParams.get("p"), id);
+  assert.equal(link.searchParams.get("server"), "https://source.example");
+  assert.doesNotMatch(link.href, /secret/);
+  const privateLink = new URL(app.publicationLink({ ...post, visibility: "private" }));
+  assert.equal(privateLink.search, "");
+  assert.match(privateLink.hash, /^#@/);
+  app.state.api = null;
+  Object.assign(context.location, { href: link.href, search: link.search, hash: "" });
+  context.history.replaceState = (_state, _title, path) => {
+    const url = new URL(path, context.location.href);
+    Object.assign(context.location, { href: url.href, hash: url.hash, search: url.search });
+  };
+  app.openSharedPublication();
+  assert.equal(context.location.search, "");
+  await app.route();
+  assert.equal(app.state.error, "");
+  assert.equal(app.state.reading.id, id);
+  assert.equal(app.publicationLink(app.state.reading), link.href);
+  app.state.readerServer = context.location.origin;
+  assert.equal(new URL(app.publicationLink(post)).searchParams.has("server"), false);
+});
+
 test("same-origin sharing copies a compact UUID link that opens without an account", async () => {
   const id = "01a1b21a-0895-7011-a0ba-ae115d92861f";
   const origin = "https://lolcathost.org";

@@ -726,6 +726,7 @@ namespace Fedi {
         formError(error);
       }
     } else {
+      openSharedPublication();
       // Saved sessions retain credentials, but server support is not permanent.
       void refreshSessionCapabilities().catch(() => {
         // Allow offline reading and writing; publishing checks again before sending.

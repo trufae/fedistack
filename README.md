@@ -37,6 +37,8 @@ Open **http://127.0.0.1:8080** and choose **Sign in** to use your existing Fediv
 
 Set a default login instance and optionally lock sign-in to it in `public/config.js` before building, or in the hosted `config.js`. See [login server configuration](doc/getting-started.md#default-login-server).
 
+For shared links that show an article's title, subtitle, and image in other clients, use the optional [Node preview server](doc/getting-started.md#article-previews-when-sharing). Static hosting remains supported.
+
 ## Explore further
 
 - [Getting started and hosting](doc/getting-started.md)

@@ -6,4 +6,7 @@ globalThis.FEDISTACK_CONFIG = {
   defaultServer: "",
   // Set false to hide the server picker and allow sign-in only to defaultServer.
   allowOtherServers: true,
+  // Enable only when the host serves article metadata for ?p=ID&server=ORIGIN.
+  // The included Node server enables this automatically.
+  sharePreviews: false,
 };

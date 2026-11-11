@@ -147,6 +147,10 @@ namespace Fedi {
     url.hash = server
       ? `@${encodeURIComponent(username)}/${publicationID(post.id)}${server !== url.origin ? `?${new URLSearchParams({ server })}` : ""}`
       : `read/${encodeURIComponent(post.id)}`;
+    if (server && loginConfig.sharePreviews && ["public", "unlisted"].includes(post.visibility)) {
+      url.hash = "";
+      url.search = new URLSearchParams({ p: post.id, ...(server !== url.origin ? { server } : {}) }).toString();
+    }
     return url.href;
   }
   export function navigate(path: string): void {
@@ -237,6 +241,7 @@ namespace Fedi {
   }
 
   export function render(): void {
+    updateSharingMetadata();
     updatePullRefresh();
     const app = document.getElementById("app")!;
     const suggestionScrolls = new Map(Array.from(app.querySelectorAll<HTMLElement>(".suggestion-track"), (track) => [track.id, track.scrollLeft]));

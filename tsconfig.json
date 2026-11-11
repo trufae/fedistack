@@ -19,6 +19,7 @@
     "src/config.ts",
     "src/demo.ts",
     "src/ui.ts",
+    "src/sharing.ts",
     "src/app.ts",
     "src/discovery.ts",
     "src/profile.ts",

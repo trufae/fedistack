@@ -244,7 +244,7 @@ namespace Fedi {
     return { mentions: post.mentions, server: safeURL(post.author.url || "") || state.readerServer || state.session?.server };
   }
 
-  function postPreview(post: Post): { title: string; excerpt: string } {
+  export function postPreview(post: Post): { title: string; excerpt: string } {
     // Preview headings are display-only; the reader keeps the original post.
     const content = articleContent(post);
     const authoredTitle = post.title.trim();

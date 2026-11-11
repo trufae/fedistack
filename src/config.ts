@@ -1,4 +1,4 @@
-declare var FEDISTACK_CONFIG: { defaultServer?: string; allowOtherServers?: boolean } | undefined;
+declare var FEDISTACK_CONFIG: { defaultServer?: string; allowOtherServers?: boolean; sharePreviews?: boolean } | undefined;
 
 namespace Fedi {
   export const loginConfig = { defaultServer: "", allowOtherServers: true, ...globalThis.FEDISTACK_CONFIG };

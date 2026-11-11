@@ -3783,7 +3783,7 @@ test("untitled long posts get a preview headline and retain their original reade
   const html = get("app").innerHTML;
   assert.doesNotMatch(html, /reader-subtitle/);
   assert.equal(html.split(opening).length, 3); // Post text and the linked page's description.
-  assert.match(html, /<div class="prose reading-prose"><p>Let me elaborate/);
+  assert.match(html, /<div class="prose reading-prose"[^>]*><p>Let me elaborate/);
   assert.match(html, /<h1>A later section<\/h1>/);
   assert.match(html, /class="link-preview" href="https:\/\/example.org\/article"/);
 });
@@ -3799,12 +3799,12 @@ test("the reader and card show an authored headline once and preserve distinct h
   assert.match(get("app").innerHTML, /<h1>Headline<\/h1>/);
   assert.equal(get("app").innerHTML.split("Headline").length, 2);
   assert.match(app.postCard(post), /<h2>Headline<\/h2><p class="excerpt">Section/);
-  assert.match(get("app").innerHTML, /<div class="prose reading-prose"><h2>Section<\/h2>/);
+  assert.match(get("app").innerHTML, /<div class="prose reading-prose"[^>]*><h2>Section<\/h2>/);
 
   app.state.reading = { ...post, title: "Remote title", subtitle: "An authored subtitle" };
   app.render();
   assert.match(get("app").innerHTML, /<h1>Remote title<\/h1><p class="reader-subtitle">An authored subtitle<\/p>/);
-  assert.match(get("app").innerHTML, /<div class="prose reading-prose"><h1><strong>Headline<\/strong><\/h1>/);
+  assert.match(get("app").innerHTML, /<div class="prose reading-prose"[^>]*><h1><strong>Headline<\/strong><\/h1>/);
 });
 
 test("article previews use the authored subtitle and link to the complete post", () => {
@@ -3839,7 +3839,7 @@ test("published articles put the subtitle below a single title, before the bylin
       assert.equal(html.split(subtitle).length, 2);
       assert.match(html, /<h1>Myths in R2Land<\/h1><p class="reader-subtitle">How to turn 372 critical advisories into safer software\.<\/p>\s*<div class="post-byline">/);
       assert.ok(html.indexOf("reader-subtitle") < html.indexOf('class="post-actions"'));
-      assert.match(html, /<div class="prose reading-prose"><h2>The findings<\/h2>/);
+      assert.match(html, /<div class="prose reading-prose"[^>]*><h2>The findings<\/h2>/);
       assert.match(html, /<h1>A distinct heading<\/h1>/);
       assert.match(app.postCard(cached), /<p class="excerpt">How to turn 372 critical advisories into safer software\.<\/p>/);
     }
@@ -4245,7 +4245,7 @@ test("returning from a Discover post restores every loaded batch without refresh
   context.location.hash = "#read/reading-30";
   await app.route();
   assert.equal(app.state.reading.id, "reading-30");
-  assert.match(get("app").innerHTML, /class="text-button" href="#discover">[^]*?Back to reading/);
+  assert.match(get("app").innerHTML, /class="text-button reader-back" href="#discover"[^>]*>[^]*?Back to reading/);
   context.location.hash = "#discover";
   await app.route();
   assert.equal(requests.length, count);

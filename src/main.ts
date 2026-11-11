@@ -338,6 +338,9 @@ namespace Fedi {
       case "focus":
         toggleFocus();
         break;
+      case "reader-font-size":
+        changeReaderFontSize(id === "decrease" ? -2 : 2);
+        break;
       case "format":
         formatSelection(id);
         break;
@@ -566,7 +569,7 @@ namespace Fedi {
       const button = (event.target as Element).closest<HTMLButtonElement>(
         "button[data-action]",
       );
-      if (!button || button.disabled) return;
+      if (!button || button.disabled || button.ariaDisabled === "true") return;
       const name = button.dataset.action!,
         id = button.dataset.id || "";
       const key = `${name}:${id}`;

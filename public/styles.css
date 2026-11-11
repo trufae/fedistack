@@ -1291,6 +1291,18 @@ footer p {
   .media-item > img { width: 64px; height: 64px; }
   .attachment-gallery { gap: 8px; }
 }
+.page-top > .reader-controls {
+  flex-shrink: 0;
+  gap: 6px;
+}
+.reader-font-button {
+  font-size: 15px;
+  font-weight: 600;
+}
+.reader-font-button[aria-disabled="true"] {
+  opacity: 0.4;
+  cursor: default;
+}
 .reader {
   padding: 20px 40px 0;
 }
@@ -1327,11 +1339,11 @@ footer p {
   margin: 0 -8px 34px;
   border-radius: 4px;
 }
-/* Keep reading, preview, and writing at the same compact text scale. */
+/* Reading defaults to the same compact text scale as preview and writing. */
 .reading-prose,
 .writing-area {
   color: var(--prose-ink);
-  font-size: 16px;
+  font-size: var(--reader-font-size, 16px);
   font-weight: normal;
   line-height: 1.4;
   -webkit-font-smoothing: antialiased;
@@ -3629,9 +3641,17 @@ body.zen-mode {
   }
   .editor-back span,
   .editor-preview span,
-  .page-top [data-action="focus"],
+  .editor-top [data-action="focus"],
   .editor-menu .zen-toggle {
     display: none;
+  }
+  .reader-back span {
+    display: none;
+  }
+  .reader-back,
+  .reader-controls .icon-button {
+    min-width: 44px;
+    min-height: 44px;
   }
   .editor-top .button {
     min-height: 44px;

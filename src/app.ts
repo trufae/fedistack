@@ -2,6 +2,8 @@ namespace Fedi {
   type FeedFilter = "all" | "article" | "post";
   const storedFilter = readStore<unknown>("home-filter", "all");
   let homeFilter: FeedFilter = storedFilter === "article" || storedFilter === "post" ? storedFilter : "all";
+  const readerFontMin = 12, readerFontMax = 32;
+  const storedReaderFontSize = readStore<unknown>("reader-font-size", 16);
   export const state = {
     session: loadSession(),
     api: null as API | null,
@@ -34,6 +36,8 @@ namespace Fedi {
     draft: null as Draft | null,
     preview: false,
     focus: false,
+    readerFontSize: typeof storedReaderFontSize === "number" && Number.isFinite(storedReaderFontSize)
+      ? Math.max(readerFontMin, Math.min(readerFontMax, storedReaderFontSize)) : 16,
     discoveryLanguages: normalizeDiscoveryLanguages(
       readStore<unknown>("discovery-languages", readStore<unknown>("discovery-language", [])),
     ),
@@ -824,6 +828,17 @@ namespace Fedi {
     await loadFeed(false, feedTarget, false);
   }
 
+  export function changeReaderFontSize(step: -2 | 2): void {
+    if (state.view !== "reader") return;
+    state.readerFontSize = Math.max(readerFontMin, Math.min(readerFontMax, state.readerFontSize + step));
+    document.querySelector<HTMLElement>(".reader .reading-prose")?.style.setProperty("--reader-font-size", `${state.readerFontSize}px`);
+    for (const button of document.querySelectorAll<HTMLButtonElement>('[data-action="reader-font-size"]')) {
+      button.setAttribute("aria-disabled", String(button.dataset.id === "decrease"
+        ? state.readerFontSize <= readerFontMin : state.readerFontSize >= readerFontMax));
+    }
+    writeStore("reader-font-size", state.readerFontSize);
+  }
+
   function readerView(): string {
     const p = state.reading;
     if (!p)
@@ -836,10 +851,10 @@ namespace Fedi {
     const replyForm = publicReading
       ? `<p class="muted">${state.session ? "Open the original post to join the conversation." : `Sign in to join the conversation. ${action("connect", "Sign in", "", "text-button")}`}</p>`
       : `<form id="reply-form"><label class="sr-only" for="reply-body">Write a comment</label><textarea id="reply-body" name="body" rows="3" required placeholder="Add a little perspective…">${escapeHTML(state.replyDrafts.get(p.id) || "")}</textarea><div class="reply-footer"><span>${p.visibility === "private" ? "Followers only" : p.visibility === "unlisted" ? "Unlisted reply" : "Public reply"}${!state.session || state.session.format !== "text/plain" ? " · Markdown supported" : ""}</span><button class="button primary" type="submit">Reply ${icon("arrow")}</button></div></form>`;
-    return `<header class="page-top"><a class="text-button" href="#${escapeHTML(state.readerBack)}">${icon("back")} Back to reading</a><div><button class="icon-button" data-action="focus" aria-label="${state.focus ? "Leave" : "Enter"} focus mode" title="Focus mode">${icon("book")}</button>${editPublicationButton(p)}</div></header><article class="reader">
+    return `<header class="page-top"><a class="text-button reader-back" href="#${escapeHTML(state.readerBack)}" aria-label="Back to reading">${icon("back")}<span>Back to reading</span></a><div class="reader-controls"><button class="icon-button reader-font-button" data-action="reader-font-size" data-id="decrease" aria-label="Decrease font size" title="Decrease font size" aria-disabled="${state.readerFontSize <= readerFontMin}">A−</button><button class="icon-button reader-font-button" data-action="reader-font-size" data-id="increase" aria-label="Increase font size" title="Increase font size" aria-disabled="${state.readerFontSize >= readerFontMax}">A+</button><button class="icon-button" data-action="focus" aria-label="${state.focus ? "Leave" : "Enter"} focus mode" title="Focus mode">${icon("book")}</button>${editPublicationButton(p)}</div></header><article class="reader">
       ${hidden ? `<div class="content-warning"><h2>${escapeHTML(p.warning)}</h2>${action("reveal", "Show publication", p.id, "button subtle")}</div>` : `${title ? `<span class="eyebrow">${escapeHTML(p.author.publication || "INDEPENDENT WRITING")}</span>` : ""}${!publicReading && p.author.id === (state.session?.account.id || "you") ? `<span class="published-badge">${state.session ? "Published" : "Published in demo"}</span>` : ""}${title ? `<h1>${escapeHTML(title)}</h1>` : ""}${content.subtitle ? `<p class="reader-subtitle">${escapeHTML(content.subtitle)}</p>` : ""}`}
       <div class="post-byline">${profileAvatar(p.author, false, `post:${p.id}`)}<div>${author}<div class="byline-sub">${new Date(p.created).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })} · ${readingTime(p.markdown)} min read</div></div>${publicReading ? "" : followButton(p.author)}</div>
-      ${postActions(p)}${hidden ? "" : `${!p.media?.length && p.image ? `<img class="reader-cover" data-image-key="cover:${escapeHTML(p.id)}" src="${escapeHTML(p.image)}" alt="${escapeHTML(p.imageAlt || "")}">` : ""}<div class="prose reading-prose">${markdown(content.body, true)}</div>${attachmentGallery(p.media, p.markdown)}${postLinkPreview(p)}<div class="reader-end">${icon("leaf")}<span>Thanks for reading. Keep the conversation going.</span></div>`}</article>
+      ${postActions(p)}${hidden ? "" : `${!p.media?.length && p.image ? `<img class="reader-cover" data-image-key="cover:${escapeHTML(p.id)}" src="${escapeHTML(p.image)}" alt="${escapeHTML(p.imageAlt || "")}">` : ""}<div class="prose reading-prose" style="--reader-font-size: ${state.readerFontSize}px">${markdown(content.body, true)}</div>${attachmentGallery(p.media, p.markdown)}${postLinkPreview(p)}<div class="reader-end">${icon("leaf")}<span>Thanks for reading. Keep the conversation going.</span></div>`}</article>
       <section class="comments"><div class="section-heading"><h2>Conversation <span>${p.replies}</span></h2>${action("share", "Share publication", p.id, "text-button")}</div>${replyForm}
       ${state.error ? `<p class="form-error" role="alert">${escapeHTML(state.error)}</p>` : ""}${state.loading ? '<p class="loading">Loading the conversation…</p>' : state.comments.map(commentCard).join("") || '<p class="muted">Be the first to start the conversation.</p>'}</section>`;
   }

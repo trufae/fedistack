@@ -633,12 +633,17 @@ namespace Fedi {
       }));
       return { items, next: cursor };
     }
+    private conversationPage(next?: string) {
+      return this.request<MastodonConversation[]>(next || "/api/v1/conversations?limit=40");
+    }
+    async conversationUnread(): Promise<Map<string, boolean>> {
+      const { data } = await this.conversationPage();
+      return new Map(data.map(({ id, unread }) => [id, unread]));
+    }
     async conversations(
       next?: string,
     ): Promise<{ conversations: Conversation[]; next?: string }> {
-      const result = await this.request<MastodonConversation[]>(
-        next || "/api/v1/conversations?limit=40",
-      );
+      const result = await this.conversationPage(next);
       return {
         conversations: result.data.map((c) => ({
           id: c.id,

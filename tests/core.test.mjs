@@ -6264,7 +6264,7 @@ function pullFixture() {
     return event;
   };
   app.setupPullRefresh();
-  return { app, context, events, windowEvents, indicator, label, target, start, move };
+  return { app, context, get, events, windowEvents, indicator, label, target, start, move };
 }
 
 test("mobile pull gesture arms only at the top and refreshes once on release", async () => {
@@ -6290,6 +6290,64 @@ test("mobile pull gesture arms only at the top and refreshes once on release", a
   finish();
   await new Promise((resolve) => setTimeout(resolve, 420));
   assert.equal(indicator.dataset.state, "");
+});
+
+test("pulling Your writing reloads publications, replies, drafts and scheduled posts", async () => {
+  const { app, context, get, events, indicator, start, move } = pullFixture();
+  const publication = ownPublication(app);
+  const scheduled = { id: "scheduled", scheduled_at: "2030-01-01T12:00:00Z", params: { text: "Later" } };
+  const remoteDraft = { id: "remote", scheduled_at: app.serverDraftTime(article.id),
+    params: { text: app.encodeServerDraft(article) } };
+  let finish;
+  app.state.api = {
+    accountPosts: async () => ({ posts: [publication, { ...publication, id: "reply", replyTo: "parent" }] }),
+    scheduledStatuses: () => new Promise((resolve) => { finish = resolve; }),
+  };
+  app.state.view = "drafts";
+  app.state.libraryTab = "scheduled";
+  context.location.hash = "#drafts";
+  app.render();
+  const frames = captureFeedRenders(get);
+  start(); move(100, 260); events.touchend();
+  assert.equal(indicator.dataset.state, "loading");
+  await new Promise(setImmediate);
+  assert.equal(frames.length, 0);
+  finish([scheduled, remoteDraft]);
+  await new Promise(setImmediate);
+  assert.equal(frames.length, 1);
+  assert.match(frames[0], /<h2>Later<\/h2>/);
+  assert.equal(app.state.libraryTab, "scheduled");
+  assert.deepEqual(Array.from(app.state.ownPosts, (p) => p.id), [publication.id, "reply"]);
+  assert.equal(app.getDrafts()[0].id, article.id);
+});
+
+test("pulling Messages refreshes the inbox quietly and keeps conversations on failure", async () => {
+  for (const failed of [false, true]) {
+    const { app, context, get, events, indicator, start, move } = pullFixture();
+    ownPublication(app);
+    const conversation = { id: "inbox", accounts: [app.demoAuthors[0]], unread: true, messages: [] };
+    const requests = [];
+    app.state.api = { conversations: async (cursor) => {
+      requests.push(cursor);
+      if (failed) throw new Error("Could not fetch conversations");
+      return { conversations: [{ ...conversation, id: "fresh" }], next: "fresh-cursor" };
+    } };
+    app.state.view = "messages";
+    app.state.conversations = [conversation];
+    app.state.conversationNext = "older";
+    context.location.hash = "#messages";
+    app.render();
+    const frames = captureFeedRenders(get);
+    start(); move(100, 260); events.touchend();
+    assert.equal(indicator.dataset.state, "loading");
+    assert.equal(frames.length, 0);
+    await new Promise(setImmediate);
+    assert.deepEqual(requests, [undefined]);
+    assert.equal(frames.length, 1);
+    assert.match(frames[0], failed ? /href="#messages\/inbox"/ : /href="#messages\/fresh"/);
+    if (failed) assert.match(frames[0], /Could not fetch conversations/);
+    assert.equal(app.state.conversationNext, failed ? "older" : "fresh-cursor");
+  }
 });
 
 test("pull gesture ignores sideways, canceled, multi-touch, nested, editing and desktop gestures", () => {

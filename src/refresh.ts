@@ -8,7 +8,11 @@ namespace Fedi {
 
   function pullContext(): string {
     return JSON.stringify([location.hash, state.view, state.timeline, state.query,
-      state.session?.account.id, state.profile?.id, state.profile?.tab]);
+      state.session?.account.id, state.profile?.id, state.profile?.tab, state.libraryTab, state.conversation]);
+  }
+  function canPullRefresh(): boolean {
+    return canRefreshReading() || (!!state.api && !!state.session &&
+      (state.view === "drafts" || (state.view === "messages" && !state.conversation)));
   }
   function showPull(mode = "", distance = 0): void {
     if (!pullIndicator || !pullLabel) return;
@@ -25,11 +29,11 @@ namespace Fedi {
   }
   export function updatePullRefresh(): void {
     if (!pullIndicator) return;
-    document.documentElement.classList.toggle("pull-refresh-enabled", canRefreshReading());
+    document.documentElement.classList.toggle("pull-refresh-enabled", canPullRefresh());
     if (pull && (pull.context !== pullContext() || pull.api !== state.api)) cancelPull();
   }
   function pullAllowed(): boolean {
-    return matchMedia("(max-width: 700px)").matches && canRefreshReading() &&
+    return matchMedia("(max-width: 700px)").matches && canPullRefresh() && !state.loading &&
       !document.hidden && !(document.getElementById("modal") as HTMLDialogElement | null)?.open &&
       !document.activeElement?.matches("input,textarea,select,[contenteditable=true]") &&
       (window.visualViewport?.scale || 1) === 1;
@@ -79,7 +83,9 @@ namespace Fedi {
     showPull("loading", 56);
     const started = Date.now();
     try {
-      if (navigator.onLine === false) toast("You’re offline. Your reading is still here.");
+      if (navigator.onLine === false) toast("You’re offline.");
+      else if (state.view === "drafts") await loadWriting(true);
+      else if (state.view === "messages") await loadConversations(false, true);
       else await refreshReading(Date.now(), true);
     } catch (error) {
       if (gesture.context === pullContext() && gesture.api === state.api) toast((error as Error).message);

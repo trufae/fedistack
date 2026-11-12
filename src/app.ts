@@ -177,33 +177,32 @@ namespace Fedi {
       ["discover", "compass", "Discover"],
       ["drafts", "edit", "Your writing"],
       ...(state.session ? [["notifications", "bell", "Notifications"]] : []),
-      ["messages", "mail", "Messages"],
       ["settings", "settings", "Settings"],
     ];
   }
   function navView(): View {
     const { view } = state;
     return view === "editor" ? "drafts" : view === "bookmarks" || view === "replies" ? "home"
-      : view === "people" ? "discover" : view;
+      : view === "people" ? "discover" : view === "messages" ? "profile" : view;
   }
   const badgeLabels = {
     notifications: ["Notifications", "Notifications, new activity"],
     messages: ["Messages", "Messages, unread conversations"],
+    profile: ["Your profile", "Your profile, unread conversations"],
+    account: ["Account", "Account, unread conversations"],
   };
   function navUnread(view: keyof typeof badgeLabels): boolean {
     return view === "notifications" ? hasNewNotifications() : hasUnreadMessages();
   }
-  function navBadge(view: string): string {
-    if (view !== "notifications" && view !== "messages") return "";
+  export function navBadge(view: keyof typeof badgeLabels): string {
     const unread = navUnread(view);
     return `<span class="unread-dot" aria-hidden="true"${unread ? "" : " hidden"}></span>`;
   }
-  function navBadgeAttributes(view: string): string {
-    if (view !== "notifications" && view !== "messages") return "";
+  export function navBadgeAttributes(view: keyof typeof badgeLabels): string {
     return ` data-nav-badge="${view}" aria-label="${badgeLabels[view][Number(navUnread(view))]}"`;
   }
   export function updateNavBadges(): void {
-    for (const view of ["notifications", "messages"] as const) {
+    for (const view of Object.keys(badgeLabels) as (keyof typeof badgeLabels)[]) {
       const unread = navUnread(view);
       for (const link of document.querySelectorAll<HTMLElement>(`[data-nav-badge="${view}"]`)) {
         const dot = link.querySelector<HTMLElement>(".unread-dot");
@@ -219,10 +218,10 @@ namespace Fedi {
     const items = navItems();
     return `<aside class="sidebar"><div class="brand-block"><a class="brand" href="#home"><img src="assets/favicon.svg" alt="">fedistack</a><p class="brand-date">${new Date().toLocaleDateString("en", { weekday: "long", month: "long", day: "numeric" })}</p></div>
       ${state.session ? "" : action("connect", "Sign in", "", "button primary account-action mobile-account-action")}
-      <nav aria-label="Main navigation">${items.map(([view, symbol, name]) => `<a href="#${view}" class="nav-item ${current === view ? "active" : ""}" ${current === view ? 'aria-current="page"' : ""}${navBadgeAttributes(view)}>${icon(symbol)}<span>${name}</span>${view === "drafts" && getDrafts().length ? `<span class="nav-count">${getDrafts().length}</span>` : ""}${navBadge(view)}</a>`).join("")}</nav>
+      <nav aria-label="Main navigation">${items.map(([view, symbol, name]) => `<a href="#${view}" class="nav-item ${current === view ? "active" : ""}" ${current === view ? 'aria-current="page"' : ""}${view === "notifications" ? navBadgeAttributes(view) : ""}>${icon(symbol)}<span>${name}</span>${view === "drafts" && getDrafts().length ? `<span class="nav-count">${getDrafts().length}</span>` : ""}${view === "notifications" ? navBadge(view) : ""}</a>`).join("")}</nav>
       <a href="#write" class="button primary write-button">${icon("edit")}<span>Write an article</span></a><a href="#note" class="button subtle note-button">${icon("comment")}<span>Note</span></a>
       <div class="sidebar-bottom"><div class="sidebar-tools"><button class="icon-button" data-action="theme" aria-label="Toggle light and dark theme">${icon(document.documentElement.dataset.theme === "dark" ? "sun" : "moon")}</button></div>
-      ${state.session ? `<button class="profile-switch" data-action="account" aria-haspopup="dialog">${avatar(me, false, "sidebar")}<span><strong>${emojiText(me.name, me.emojis)}</strong><small>${escapeHTML(new URL(state.session.server).host)}</small></span>${icon("chevron")}</button>` : ""}</div></aside>`;
+      ${state.session ? `<button class="profile-switch" data-action="account" aria-haspopup="dialog"${navBadgeAttributes("account")}>${avatar(me, false, "sidebar")}<span><strong>${emojiText(me.name, me.emojis)}</strong><small>${escapeHTML(new URL(state.session.server).host)}</small></span>${navBadge("account")}${icon("chevron")}</button>` : ""}</div></aside>`;
   }
 
   function rightRail(): string {
@@ -237,7 +236,7 @@ namespace Fedi {
     const current = navView();
     const me = state.session?.account || demoMe;
     const items = navItems().filter(([view]) => view !== "settings");
-    return `<nav class="mobile-nav" aria-label="Mobile navigation" style="--nav-items: ${items.length + 1}">${items.map(([view, symbol, name]) => `<a href="#${view}"${view === "drafts" ? ' class="mobile-write"' : ""}${navBadgeAttributes(view) || ` aria-label="${name}"`}${current === view ? ' aria-current="page"' : ""}>${icon(symbol)}${navBadge(view)}</a>`).join("")}${state.session ? `<a href="#profile" aria-label="Your profile"${current === "profile" && state.profile?.owner ? ' aria-current="page"' : ""}>${avatar(me, false, "mobile-account")}</a>` : '<button type="button" data-action="connect" class="mobile-sign-in" aria-label="Sign in" title="Sign in" aria-haspopup="dialog"></button>'}</nav>`;
+    return `<nav class="mobile-nav" aria-label="Mobile navigation" style="--nav-items: ${items.length + 1}">${items.map(([view, symbol, name]) => `<a href="#${view}"${view === "drafts" ? ' class="mobile-write"' : ""}${view === "notifications" ? navBadgeAttributes(view) : ` aria-label="${name}"`}${current === view ? ' aria-current="page"' : ""}>${icon(symbol)}${view === "notifications" ? navBadge(view) : ""}</a>`).join("")}${state.session ? `<a href="#profile"${navBadgeAttributes("profile")}${current === "profile" && (state.profile?.owner || state.view === "messages") ? ' aria-current="page"' : ""}>${avatar(me, false, "mobile-account")}${navBadge("profile")}</a>` : '<button type="button" data-action="connect" class="mobile-sign-in" aria-label="Sign in" title="Sign in" aria-haspopup="dialog"></button>'}</nav>`;
   }
 
   export function render(): void {

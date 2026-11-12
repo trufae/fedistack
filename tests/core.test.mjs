@@ -7591,21 +7591,25 @@ test("the Messages badge uses server unread flags before the inbox opens and cle
   app.state.session = { ...longServer, server: "https://account.example", account: app.demoMe };
   app.state.api = new app.API(app.state.session.server, "token");
   const dot = { hidden: true };
-  const link = get("messages-link");
+  const link = get("profile-link");
   link.querySelector = () => dot;
-  context.document.querySelectorAll = (selector) => selector === '[data-nav-badge="messages"]' ? [link] : [];
+  context.document.querySelectorAll = (selector) => selector === '[data-nav-badge="profile"]' ? [link] : [];
   get("app").innerHTML = "Keep the editor mounted";
   await app.refreshActivityBadges(1000);
   assert.equal(dot.hidden, false);
   assert.equal(app.state.conversations.length, 0);
   assert.equal(get("app").innerHTML, "Keep the editor mounted");
   app.render();
-  assert.equal(get("app").innerHTML.match(/aria-label="Messages, unread conversations"/g).length, 2);
+  const html = get("app").innerHTML;
+  assert.match(html, /class="mobile-nav"[^>]+--nav-items: 5/);
+  assert.match(html, /aria-label="Your profile, unread conversations"/);
+  assert.match(html, /aria-label="Account, unread conversations"/);
+  assert.doesNotMatch(html, /href="#messages"/);
 
   context.location.hash = "#messages/inbox";
   await app.route();
   assert.equal(app.hasUnreadMessages(), false);
-  assert.doesNotMatch(get("app").innerHTML, /Messages, unread conversations/);
+  assert.doesNotMatch(get("app").innerHTML, /unread conversations/);
   assert.deepEqual(calls, [
     ["GET", "/api/v1/notifications"], ["GET", "/api/v1/conversations"],
     ["GET", "/api/v1/conversations"], ["POST", "/api/v1/conversations/inbox/read"],

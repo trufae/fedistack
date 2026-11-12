@@ -47,13 +47,16 @@ namespace Fedi {
     const history = historyForDiscovery();
     return posts.filter((post) => !post.liked && !history.liked.has(`id:${post.id}`) && !history.liked.has(discoveryIdentity(post)));
   }
-  function eligibleDiscoveryPosts(posts: Post[]): Post[] {
-    return filterByLanguages(undiscoveredPosts(posts), state.discoveryLanguages).filter((post) => {
+  function discoveryCandidates(posts: Post[]): Post[] {
+    return undiscoveredPosts(posts).filter((post) => {
       const relationship = state.relationships.get(post.author.id);
       return post.visibility === "public" && !post.warning && !post.replyTo && !post.isReply &&
         post.author.id !== (state.session?.account.id || "you") &&
         !relationship?.blocking && !relationship?.blocked_by && !relationship?.muting;
     });
+  }
+  export function visibleDiscoveryPosts(posts = state.posts): Post[] {
+    return discoveryCandidates(posts).filter((post) => matchesPublication(post));
   }
   function shuffled<T>(values: T[]): T[] {
     return values.map((value) => ({ value, order: Math.random() })).sort((a, b) => a.order - b.order).map(({ value }) => value);
@@ -86,7 +89,7 @@ namespace Fedi {
     const history = historyForDiscovery();
     const seenOrder = new Map([...history.seen].map((key, index) => [key, index + 1]));
     const unique = new Map<string, Post>();
-    for (const post of eligibleDiscoveryPosts(posts)) {
+    for (const post of discoveryCandidates(posts)) {
       const key = discoveryIdentity(post);
       if (!unique.has(key)) unique.set(key, post);
     }
@@ -108,7 +111,7 @@ namespace Fedi {
     return result;
   }
   export function discoveryArticles(posts = state.posts): Post[] {
-    return eligibleDiscoveryPosts(posts).filter((post) => post.kind === "article").slice(0, 3);
+    return visibleDiscoveryPosts(posts).filter((post) => post.kind === "article").slice(0, 3);
   }
   let shownArticles = "";
   export function rememberDiscoveryArticles(posts: Post[]): void {
@@ -122,13 +125,14 @@ namespace Fedi {
     history.seen = new Set([...history.seen].slice(-500));
     saveDiscoveryHistory();
   }
-  export function discoveryTimelineView(): string {
-    const posts = eligibleDiscoveryPosts(state.posts).slice(0, discovery.limit);
+  export function discoveryTimelineView(visible = visibleDiscoveryPosts()): string {
+    const posts = visible.slice(0, discovery.limit);
     const errors = Object.entries(discovery.errors).filter(([, error]) => error);
-    return `<section class="discover-section discover-timelines" aria-label="Mixed public feed"><div class="section-heading"><h2>For you</h2></div>
+    return `<section class="discover-section discover-timelines" aria-label="Mixed public feed"><div class="section-heading"><h2>For you</h2>${feedFilters()}</div>
       <div class="feed" aria-label="Local and federated posts">${posts.slice(0, discoveryBatch).map((post) => postCard(post)).join("")}${suggestionsView(true)}${posts.slice(discoveryBatch).map((post) => postCard(post)).join("")}</div>
       ${!state.loading ? errors.map(([timeline, error]) => `<p class="muted" role="status">${timeline === "local" ? "Local" : "Federated"}: ${escapeHTML(error)} ${action("refresh", "Try again", "", "text-button")}</p>`).join("") : ""}
       ${state.error ? `<p class="error-panel" role="alert">${escapeHTML(state.error)}</p>` : ""}
+      ${!posts.length && !state.loading && !state.error && state.next ? '<p class="end-note">No matching posts in the loaded results.</p>' : ""}
       ${state.loading ? '<div class="loading" role="status">Finding more posts…</div>' : state.next
         ? `<div id="discovery-more" class="load-more">${action("load-more", "Load more posts", "", "button subtle")}</div>`
         : `<p class="end-note">${posts.length ? "You’ve reached the end." : "No new public posts match your discovery preferences yet."}</p>`}</section>`;
@@ -151,8 +155,8 @@ namespace Fedi {
     discoveryObserver = observer;
     observer.observe(more);
   }
-  function discoveryNext(): string | undefined {
-    return eligibleDiscoveryPosts(state.posts).length > discovery.limit || Object.values(discovery.cursors).some(Boolean)
+  export function discoveryNext(): string | undefined {
+    return visibleDiscoveryPosts(state.posts).length > discovery.limit || Object.values(discovery.cursors).some(Boolean)
       ? "discovery" : undefined;
   }
   export function restoreDiscovery(): boolean {
@@ -175,14 +179,14 @@ namespace Fedi {
     };
     const owner = discoveryOwner();
     const previous = discovery.owner === owner ? discovery.posts : [];
-    const previousVisible = Math.min(discovery.limit, eligibleDiscoveryPosts(previous).length);
+    const previousVisible = Math.min(discovery.limit, visibleDiscoveryPosts(previous).length);
     if (discovery.owner !== owner) {
       discovery.cursors = {};
       append = false;
     }
     discovery.owner = owner;
     discovery.limit = append ? discovery.limit + discoveryBatch : quiet ? discovery.limit : discoveryBatch;
-    if (append && eligibleDiscoveryPosts(previous).length >= discovery.limit) {
+    if (append && visibleDiscoveryPosts(previous).length >= discovery.limit) {
       state.posts = previous;
       state.next = discoveryNext();
       render();
@@ -219,7 +223,7 @@ namespace Fedi {
           if (!current()) return;
           rememberDiscoveryLikes(result.posts);
           publicPosts[timeline].push(...result.posts);
-          const fresh = new Set(eligibleDiscoveryPosts(publicPosts[timeline])
+          const fresh = new Set(visibleDiscoveryPosts(publicPosts[timeline])
             .map(discoveryIdentity).filter((id) => !existing.has(id)));
           const next = result.next && !visited.has(result.next) ? result.next : undefined;
           cursors[timeline] = next;
@@ -290,7 +294,7 @@ namespace Fedi {
       if (current()) {
         state.next = discoveryNext();
         discovery.autoLoad = !state.error && !discovery.errors.local && !discovery.errors.federated &&
-          (!append || Math.min(discovery.limit, eligibleDiscoveryPosts(state.posts).length) > previousVisible);
+          (!append || Math.min(discovery.limit, visibleDiscoveryPosts(state.posts).length) > previousVisible);
         state.loading = false;
         update();
       }

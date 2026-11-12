@@ -3144,26 +3144,17 @@ test("demo unpublish preserves title, subtitle, and body and republishes with a 
 test("language filtering matches any selected language and its regional variants", () => {
   const { app } = setup();
   const posts = ["en", "en-US", "EN_gb", "es", "eng", null, undefined].map(
-    (language, id) => ({ id, language }),
+    (language, id) => ({ id, language, kind: id === 1 ? "post" : "article" }),
   );
-  assert.deepEqual(
-    Array.from(app.filterByLanguages(posts, ["en"]), (p) => p.id),
-    [0, 1, 2],
-  );
-  assert.deepEqual(
-    Array.from(app.filterByLanguages(posts, ["es"]), (p) => p.id),
-    [3],
-  );
-  assert.deepEqual(
-    Array.from(app.filterByLanguages(posts, ["en", "es", "ca"]), (p) => p.id),
-    [0, 1, 2, 3],
-  );
-  assert.deepEqual(
-    Array.from(app.filterByLanguages(posts, ["EN_us", "es"]), (p) => p.id),
-    [1, 3],
-  );
-  assert.deepEqual(Array.from(app.filterByLanguages(posts, ["fr", "ca"])), []);
-  assert.equal(app.filterByLanguages(posts, []), posts);
+  for (const [languages, expected] of [
+    [["en"], [0, 1, 2]], [["es"], [3]], [["en", "es", "ca"], [0, 1, 2, 3]],
+    [["fr", "ca"], []], [[], [0, 1, 2, 3, 4, 5, 6]],
+  ]) {
+    app.state.discoveryLanguages = languages;
+    assert.deepEqual(posts.filter((post) => app.matchesPublication(post)).map((post) => post.id), expected);
+  }
+  app.state.discoveryLanguages = ["en"];
+  assert.deepEqual(posts.filter((post) => app.matchesPublication(post, "post")).map((post) => post.id), [1]);
 });
 
 test("saved language lists preserve legacy choices, validate entries, and stay cleared after reload", () => {
@@ -3190,7 +3181,7 @@ test("saved language lists preserve legacy choices, validate entries, and stay c
   assert.deepEqual(Array.from(setup(undefined, { localStorage }).app.state.discoveryLanguages), []);
 });
 
-test("the saved language preferences filter Discover while Home and Saved retain other languages", () => {
+test("the saved language preferences filter Discover, Following, lists, and Saved", () => {
   const { app, context } = setup();
   const { get } = elements(context);
   const posts = [
@@ -3232,17 +3223,20 @@ test("the saved language preferences filter Discover while Home and Saved retain
   );
   assert.match(get("app").innerHTML, /href="#settings" class="button subtle">Change language settings/);
   assert.doesNotMatch(get("app").innerHTML, /data-action="clear-languages"/);
-  for (const view of ["home", "bookmarks"]) {
+  app.setDiscoveryLanguages(["en"]);
+  app.state.session = { ...longServer, server: "https://example.org", account: app.demoMe };
+  for (const [view, timeline] of [["home", "home"], ["home", "list:friends"], ["bookmarks", "home"]]) {
     app.state.view = view;
+    app.state.timeline = timeline;
     app.render();
     assert.match(get("app").innerHTML, /English fixture/);
-    assert.match(get("app").innerHTML, /Spanish fixture/);
-    assert.match(get("app").innerHTML, /Unknown fixture/);
+    assert.doesNotMatch(get("app").innerHTML, /Spanish fixture|Unknown fixture/);
+    assert.match(get("app").innerHTML, /aria-label="Content type"/);
   }
   app.state.view = "settings";
   app.render();
   assert.match(get("app").innerHTML, /id="settings-language"/);
-  assert.match(get("app").innerHTML, /aria-label="Remove Français language filter"/);
+  assert.match(get("app").innerHTML, /aria-label="Remove English language filter"/);
   app.setDiscoveryLanguages([]);
   assert.doesNotMatch(get("app").innerHTML, /data-action="remove-language"/);
   app.state.view = "discover";
@@ -4346,6 +4340,29 @@ function discoveryFixture() {
   return { ...fixture, sources };
 }
 
+test("the Discover mix switches between articles and notes without discarding other languages", async () => {
+  const { app, get, post, sources, requests } = discoveryFixture();
+  app.state.discoveryLanguages = ["en"];
+  sources.federated = [
+    post("english-article", { title: "English article", language: "en" }),
+    post("english-note", { kind: "post", markdown: "English note", language: "en-GB" }),
+    post("german-article", { title: "German article", language: "de" }),
+  ];
+  await app.route();
+  const count = requests.length;
+  assert.match(get("app").innerHTML, /English article/);
+  assert.match(get("app").innerHTML, /English note/);
+  assert.doesNotMatch(get("app").innerHTML, /German article/);
+  app.setFeedFilter("post");
+  assert.match(get("app").innerHTML, /English note/);
+  assert.doesNotMatch(get("app").innerHTML, /English article|German article/);
+  app.setFeedFilter("article");
+  app.setDiscoveryLanguages(["de"]);
+  assert.match(get("app").innerHTML, /German article/);
+  assert.doesNotMatch(get("app").innerHTML, /English article|English note/);
+  assert.equal(requests.length, count);
+});
+
 test("Discover samples likes, followed hashtags and lists, and prefers matching articles from varied sources", async () => {
   const { app, post, sources, requests } = discoveryFixture();
   const author = (id, server) => ({ ...app.demoAuthors[0], id, acct: `${id}@${server}` });
@@ -4389,7 +4406,7 @@ test("Discover excludes liked, private, warned, own, muted and reply posts, dedu
   app.state.relationships.set("muted", { id: "muted", muting: true });
   app.state.api.favourites = async () => ({ posts: [post("past-like", { liked: true })] });
   await app.route();
-  assert.deepEqual(Array.from(app.state.posts, (p) => p.id), ["good"]);
+  assert.deepEqual(Array.from(app.visibleDiscoveryPosts(), (p) => p.id), ["good"]);
   assert.doesNotMatch(get("app").innerHTML, /Previously liked/);
   const history = app.undiscoveredPosts([{ ...liked, liked: false }]);
   assert.equal(history.length, 0);
@@ -4803,12 +4820,12 @@ test("changing a filter tops up sparse results without discarding already loaded
     requests.push({ timeline, next });
     return { posts: Array.from({ length: 9 }, (_, i) => post(`new-${i}`)), next: "more" };
   };
-  app.updateFeedFilters();
+  app.setFeedFilter("all");
   await new Promise(setImmediate);
   assert.equal(requests.length, 1);
   assert.equal(requests[0].next, "older");
   assert.equal(app.state.posts.length, 11);
-  app.updateFeedFilters();
+  app.setFeedFilter("all");
   assert.equal(requests.length, 1);
 });
 
@@ -5587,9 +5604,9 @@ test("own profile refreshes header and counts, shows loaded engagement and setti
   assert.match(profileHTML, /data-metric="likes"[^]*?<strong>6<\/strong>[^]*?width:100%/);
   assert.match(profileHTML, /data-metric="reposts"[^]*?<strong>3<\/strong>[^]*?width:50%/);
   assert.doesNotMatch(profileHTML, /On these|loaded posts|received/);
-  assert.match(get("app").innerHTML, /aria-current="page">Posts<\/a>/);
+  assert.match(get("app").innerHTML, /aria-current="page">Articles<\/a>/);
   assert.match(get("app").innerHTML, /<strong>77<\/strong><span>posts & replies<\/span>/);
-  assert.match(app.profileView(), /class="profile-buttons">[^]*href="#drafts"[^]*href="#settings" class="button subtle"/);
+  assert.match(app.profileView(), /class="profile-buttons">[^]*href="#messages"[^]*href="#drafts"[^]*href="#settings" class="button subtle"/);
   assert.doesNotMatch(app.profileView(), /class="page-top"|href="#home"|href="#bookmarks"|data-action="profile-refresh"/);
   assert.match(get("app").innerHTML, /aria-label="Your profile" aria-current="page"/);
   await app.loadProfilePage(true);
@@ -5603,6 +5620,36 @@ test("own profile refreshes header and counts, shows loaded engagement and setti
   assert.equal(pages[0].searchParams.get("exclude_replies"), "true");
 });
 
+test("profiles default to articles and scan past notes and other languages", async () => {
+  const status = (id, content, language) => sharedStatus({ id, content, language, account: profileAccount() });
+  const pages = [];
+  const { app, context, get } = await profileFixture(async (url) => {
+    const u = new URL(url);
+    if (u.pathname.endsWith("/relationships")) return Response.json([]);
+    if (!u.pathname.endsWith("/statuses")) return Response.json(profileAccount());
+    const cursor = u.searchParams.get("max_id");
+    pages.push(cursor);
+    return cursor ? Response.json([status("article", "# English article\n\nArticle body", "en-US")]) : Response.json([
+      status("note", "English note", "en"),
+      status("german", "# German article\n\nArticle body", "de"),
+    ], { headers: { Link: '<https://example.org/api/v1/accounts/me/statuses?max_id=older>; rel="next"' } });
+  });
+  app.setDiscoveryLanguages(["en"]);
+  context.location.hash = "#profile";
+  await app.route();
+  assert.deepEqual(pages, [null, "older"]);
+  assert.match(get("app").innerHTML, /aria-current="page">Articles<\/a>/);
+  assert.match(get("app").innerHTML, /English article/);
+  assert.doesNotMatch(get("app").innerHTML, /English note|German article/);
+
+  context.location.hash = "#profile?tab=posts";
+  await app.route();
+  assert.deepEqual(pages, [null, "older", null]);
+  assert.match(get("app").innerHTML, /aria-current="page">Notes<\/a>/);
+  assert.match(get("app").innerHTML, /English note/);
+  assert.doesNotMatch(get("app").innerHTML, /English article|German article/);
+});
+
 for (const tab of ["likes", "saved"]) test(`another account cannot expose the private ${tab} tab or owner controls`, async () => {
   const paths = [];
   const { app, context, get } = await profileFixture(async (url) => {
@@ -5614,14 +5661,14 @@ for (const tab of ["likes", "saved"]) test(`another account cannot expose the pr
   context.location.hash = `#profile/other?tab=${tab}`;
   await app.route();
   assert.equal(app.state.profile.owner, false);
-  assert.equal(app.state.profile.tab, "posts");
+  assert.equal(app.state.profile.tab, "articles");
   assert.equal(paths.includes("/api/v1/favourites"), false);
   assert.equal(paths.includes("/api/v1/bookmarks"), false);
   await new Promise(setImmediate); // Optional metadata resolves after readable activity.
   assert.match(get("app").innerHTML, /Follows you/);
   assert.match(get("app").innerHTML, /data-action="message-account" data-id="other"/);
   assert.doesNotMatch(get("app").innerHTML, /tab=likes|tab=saved|profile-engagement|data-action="profile-image"/);
-  assert.doesNotMatch(app.profileView(), /href="#settings"|href="#bookmarks"|class="page-top"|data-action="profile-refresh"/);
+  assert.doesNotMatch(app.profileView(), /href="#messages"|href="#settings"|href="#bookmarks"|class="page-top"|data-action="profile-refresh"/);
   assert.equal(app.state.session.account.id, "me");
 });
 
@@ -5792,7 +5839,7 @@ for (const tab of ["likes", "saved"]) test(`public profiles reject private ${tab
   context.location.hash = `#profile/me?server=https%3A%2F%2Fremote.example&tab=${tab}`;
   await app.route();
   assert.equal(app.state.profile.owner, false);
-  assert.equal(app.state.profile.tab, "posts");
+  assert.equal(app.state.profile.tab, "articles");
   assert.equal(app.state.readerServer, "https://remote.example");
   assert.equal(app.state.profile.posts.length, 1);
   assert.ok(calls.every(({ url, options }) => url.startsWith("https://remote.example/") && !options.headers.Authorization));
@@ -6117,7 +6164,7 @@ test("profile caches reuse fresh activity and retain it through failed refreshes
     if (new URL(url).pathname.endsWith("/statuses")) return Response.json([sharedStatus({ id: "saved", content: "Profile cached content", account: profileAccount() })]);
     return Response.json(profileAccount());
   });
-  context.location.hash = "#profile";
+  context.location.hash = "#profile?tab=posts";
   await app.route();
   const initial = calls;
   await app.route();
@@ -7459,7 +7506,7 @@ test("Home Replies combines received and following replies and paginates each so
   const makeNotification = (id, type, status) => ({
     id, type, status, created_at: "2026-11-12T10:00:00Z", account: sharedStatus().account,
   });
-  const reply = sharedStatus({ id: "nested", in_reply_to_id: "my-reply", title: null, content: "A reply to my reply", replies_count: 0 });
+  const reply = sharedStatus({ id: "nested", in_reply_to_id: "my-reply", title: null, content: "A reply to my reply", replies_count: 0, language: "en" });
   const hidden = sharedStatus({ id: "hidden", in_reply_to_id: "my-reply", content: "Filtered content",
     filtered: [{ filter: { filter_action: "hide" } }] });
   const replies = [
@@ -7469,7 +7516,7 @@ test("Home Replies combines received and following replies and paginates each so
     makeNotification("3", "mention", hidden),
   ];
   const homeOnly = sharedStatus({ id: "following-only", is_reply: true, title: null,
-    content: "A reply from someone I follow", created_at: "2026-11-12T11:00:00Z" });
+    content: "A reply from someone I follow", language: "de", created_at: "2026-11-12T11:00:00Z" });
   const requests = [];
   const homeRequests = [];
   const { app, context, get, click } = await postActionFixture(async (url) => {
@@ -7527,6 +7574,11 @@ test("Home Replies combines received and following replies and paginates each so
   assert.equal(requests.length, 2);
   assert.match(html, /href="#read\/oldest-following">Oldest following reply/);
   assert.doesNotMatch(html, /Load older replies/);
+  app.setDiscoveryLanguages(["en"]);
+  assert.match(get("app").innerHTML, /A reply to my reply/);
+  assert.doesNotMatch(get("app").innerHTML, /A reply from someone I follow|Oldest following reply/);
+  app.setFeedFilter("article");
+  assert.doesNotMatch(get("app").innerHTML, /A reply to my reply/);
 
   context.location.hash = "#read/nested";
   await app.route();
@@ -7537,7 +7589,8 @@ test("Home Replies combines received and following replies and paginates each so
   assert.match(html, /<h1>Notifications<\/h1>/);
   assert.equal(html.match(/href="#notifications"[^>]+aria-current="page"/g).length, 2);
   assert.match(html, /followed you/);
-  assert.match(html, /A plain mention/);
+  assert.match(html, /A reply to my reply/);
+  assert.doesNotMatch(html, /A plain mention/);
   assert.doesNotMatch(html, /Private DM|Filtered content|A reply from someone I follow/);
   assert.equal(JSON.parse(context.localStorage.getItem("fedistack:notifications-seen:https://account.example:you")).id, "7");
 });

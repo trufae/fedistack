@@ -586,8 +586,11 @@ main {
   box-shadow: 0 1px 3px #0000000b;
   font-weight: 600;
 }
-.post-card {
+.post-card,
+.notification-row {
   margin: 0 34px;
+}
+.post-card {
   padding: 26px 0 19px;
   border-bottom: 1px solid var(--line);
 }
@@ -1955,9 +1958,6 @@ body.conversation-open {
   min-height: 0;
   border-top: 0;
 }
-.conversation-open .notification-list {
-  margin-inline: clamp(22px, 4vw, 34px);
-}
 .notification-row {
   display: flex;
   align-items: flex-start;
@@ -2886,7 +2886,8 @@ summary {
   .discover-section {
     margin-inline: 25px;
   }
-  .post-card {
+  .post-card,
+  .notification-row {
     margin: 0 25px;
   }
   .feed-controls {
@@ -3104,8 +3105,11 @@ summary {
   .home-intro .filter-pills button {
     padding-inline: 8px;
   }
-  .post-card {
+  .post-card,
+  .notification-row {
     margin: 0 22px;
+  }
+  .post-card {
     padding-top: 23px;
   }
   .post-content h2 {

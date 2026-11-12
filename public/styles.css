@@ -1274,6 +1274,7 @@ footer p {
   margin: 20px auto;
 }
 .custom-emoji, .prose img.custom-emoji {
+  display: inline-block;
   width: 1.2em;
   height: 1.2em;
   margin: 0;

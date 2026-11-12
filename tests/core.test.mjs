@@ -3618,7 +3618,7 @@ test("remote emoji use the status and account mappings independently across feed
   });
   const card = app.postCard(article);
   assert.match(card, /<h2>A title <img class="custom-emoji"/);
-  const link = /href="https:\/\/remote\.example\/users\/reader"[^>]*>reader<\/a>/;
+  const link = /href="https:\/\/remote\.example\/users\/reader"[^>]*>@reader<\/a>/;
   assert.match(card.match(/<p class="excerpt">([^]*?)<\/p>/)?.[1] ?? "", link);
   assert.match(card, /class="excerpt">A subtitle <img class="custom-emoji"/);
   app.state.view = "reader";
@@ -4053,7 +4053,7 @@ test("notes show their complete body and inline links in the feed and reader", (
   const reader = get("app").innerHTML;
   assert.doesNotMatch(reader, /A note from|reader-subtitle|reader-end|min read/);
   for (const html of [card, reader]) {
-    assert.match(html, /class="prose note-body[^>]*><p><a href="https:\/\/social\.example\/@friend"[^>]*>friend<\/a><br><strong>A small discovery\.<\/strong>/);
+    assert.match(html, /class="prose note-body[^>]*><p><a href="https:\/\/social\.example\/@friend"[^>]*>@friend<\/a><br><strong>A small discovery\.<\/strong>/);
     assert.match(html, /href="https:\/\/example\.org\/quiet"[^>]*>quiet corner<\/a>/);
     assert.match(html, /<p>Here is the ending\. <a [^>]*>#Nature<\/a><\/p>/);
     assert.equal(html.split("A small discovery.").length, 2);
@@ -4090,14 +4090,14 @@ test("untitled article previews skip opening URLs and move leading mentions into
     assert.ok(card.includes(`class="link-preview" href="${url}"`));
   }
   const withMentions = { ...article, markdown: `[@flying_penguin](https://social.example/@flying_penguin), ${url}\n\n**@joxean@mastodon.social**\n\nA melting statue. It's a cute hack.` };
-  assert.match(app.postCard(withMentions), /<h2>A melting statue\.<\/h2><\/a><p class="excerpt"><a href="https:\/\/social\.example\/@flying_penguin"[^>]*>flying_penguin<\/a> <a href="https:\/\/mastodon\.social\/@joxean"[^>]*>joxean<\/a> It&#39;s a cute hack\.<\/p>/);
+  assert.match(app.postCard(withMentions), /<h2>A melting statue\.<\/h2><\/a><p class="excerpt"><a href="https:\/\/social\.example\/@flying_penguin"[^>]*>@flying_penguin<\/a> <a href="https:\/\/mastodon\.social\/@joxean"[^>]*>@joxean<\/a> It&#39;s a cute hack\.<\/p>/);
   assert.match(app.postCard({ ...article, markdown: "@flyingpenguin" }), /<h2>Untitled article<\/h2><\/a><p class="excerpt">@flyingpenguin<\/p>/);
   assert.match(app.postCard({ ...article, title: "An authored title", markdown: withMentions.markdown }), /<h2>An authored title<\/h2>/);
   app.state.view = "reader";
   app.state.reading = withMentions;
   app.render();
-  assert.match(get("app").innerHTML, /<a href="https:\/\/social\.example\/@flying_penguin"[^>]*>flying_penguin<\/a>, <a /);
-  assert.match(get("app").innerHTML, /<p><strong><a href="https:\/\/mastodon\.social\/@joxean"[^>]*>joxean<\/a><\/strong><\/p>\s*<p>A melting statue/);
+  assert.match(get("app").innerHTML, /<a href="https:\/\/social\.example\/@flying_penguin"[^>]*>@flying_penguin<\/a>, <a /);
+  assert.match(get("app").innerHTML, /<p><strong><a href="https:\/\/mastodon\.social\/@joxean"[^>]*>@joxean<\/a><\/strong><\/p>\s*<p>A melting statue/);
   app.state.linkPreviews = false;
   const linkNote = app.postCard({ ...article, kind: "post", markdown: `[${url}](${url})` });
   assert.ok(linkNote.includes(`href="${url}"`));
@@ -4121,15 +4121,15 @@ test("thread comments hide a leading direct addressee and link other mentions", 
   app.state.reading = parent;
   app.state.comments = [reply];
   app.render();
-  assert.match(get("app").innerHTML, /class="comment"[^]*<p><a href="https:\/\/elsewhere\.example\/users\/friend"[^>]*>friend<\/a>, see <code>@literal@source\.example<\/code> and mail@example\.org\.<\/p>/);
+  assert.match(get("app").innerHTML, /class="comment"[^]*<p><a href="https:\/\/elsewhere\.example\/users\/friend"[^>]*>@friend<\/a>, see <code>@literal@source\.example<\/code> and mail@example\.org\.<\/p>/);
   assert.equal(reply.markdown, content);
   assert.ok(app.postCard(reply).includes('href="https://source.example/@writer"'));
   assert.match(app.commentCard({ ...reply, markdown: "[@writer](https://source.example/@writer/) Thanks", warning: "Spoiler" }, parent),
     /<details><summary>Spoiler<\/summary><div class="prose"><p>Thanks<\/p>/);
   for (const markdown of ["@writer@other.example Thanks", "Thanks @writer@source.example", "@writer@source.example"]) {
-    assert.match(app.commentCard({ ...reply, markdown }, parent), /href="https:\/\/(?:source|other)\.example\/@writer"[^>]*>writer<\/a>/);
+    assert.match(app.commentCard({ ...reply, markdown }, parent), /href="https:\/\/(?:source|other)\.example\/@writer"[^>]*>@writer<\/a>/);
   }
-  assert.match(app.commentCard({ ...reply, replyTo: "another-post" }, parent), /href="https:\/\/source\.example\/@writer"[^>]*>writer<\/a>/);
+  assert.match(app.commentCard({ ...reply, replyTo: "another-post" }, parent), /href="https:\/\/source\.example\/@writer"[^>]*>@writer<\/a>/);
 });
 
 function feedFixture() {

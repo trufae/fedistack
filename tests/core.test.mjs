@@ -158,6 +158,7 @@ function staleCapabilityClient({ formats = ["text/plain", "text/html", "text/mar
 for (const remember of [false, true]) test(`restoring a ${remember ? "remembered" : "tab"} session refreshes stale publishing capabilities`, async () => {
   const { app, context, get, requests } = staleCapabilityClient({ remember });
   const draft = app.state.draft;
+  context.document.hidden = true;
   context.document.addEventListener = () => {};
   context.window = { addEventListener() {} };
   context.matchMedia = () => ({ matches: false, addEventListener() {} });
@@ -3532,6 +3533,107 @@ test("remote Article metadata preserves short and untitled articles", () => {
   assert.equal(app.mapStatus({ ...status, title: null }).kind, "article");
   assert.equal(app.mapStatus({ ...status, object_type: "Note", title: null }).kind, "post");
   assert.equal(app.mapStatus({ ...status, reblog: status }).kind, "article");
+});
+
+test("remote emoji use the status and account mappings independently across feeds and the reader", () => {
+  const { app, context } = setup();
+  const { get } = elements(context);
+  app.htmlToMarkdown = (text) => text;
+  const emoji = (host, extra = {}) => ({
+    shortcode: "blob_happy_cat", url: `https://${host}/animated.gif`,
+    static_url: `https://${host}/still.png`, ...extra,
+  });
+  const original = sharedStatus({
+    account: { ...sharedStatus().account, display_name: "Remote :blob_happy_cat: <writer>", emojis: [emoji("author.example")] },
+    content: "Hello :blob_happy_cat: _:blob_happy_cat:_ `:blob_happy_cat:` :missing: :unsafe:",
+    emojis: [emoji("post.example", { visible_in_picker: false }), { shortcode: "unsafe", url: "javascript:alert(1)" }],
+  });
+  const boost = { ...original, account: { ...original.account, emojis: [emoji("boost.example")] }, emojis: [emoji("wrapper.example")], reblog: original };
+  const note = app.mapStatus(boost);
+  const output = app.postCard(note);
+  assert.match(output, /Shared by .*src="https:\/\/boost\.example\/still\.png"/);
+  assert.match(output, /src="https:\/\/author\.example\/still\.png"[^>]+> &lt;writer&gt;/);
+  assert.match(output, /Hello <img class="custom-emoji" src="https:\/\/post\.example\/still\.png"[^>]+> <em><img[^>]+><\/em> <code>:blob_happy_cat:<\/code> :missing: :unsafe:/);
+  assert.doesNotMatch(output, /wrapper\.example|animated\.gif|javascript:/);
+  assert.match(app.commentCard(note), /Hello <img class="custom-emoji"/);
+
+  const article = app.mapStatus({
+    ...original,
+    content: "# A title :blob_happy_cat:\n\nA subtitle :blob_happy_cat: with @reader@remote.example\n\nThe body :blob_happy_cat: with @reader@remote.example",
+    mentions: [{ id: "reader", acct: "reader@remote.example", url: "https://remote.example/users/reader" }],
+  });
+  const card = app.postCard(article);
+  assert.match(card, /<h2>A title <img class="custom-emoji"/);
+  const link = /href="https:\/\/remote\.example\/users\/reader"[^>]*>reader<\/a>/;
+  assert.match(card.match(/<p class="excerpt">([^]*?)<\/p>/)?.[1] ?? "", link);
+  assert.match(card, /class="excerpt">A subtitle <img class="custom-emoji"/);
+  app.state.view = "reader";
+  app.state.reading = article;
+  app.render();
+  assert.match(get("app").innerHTML, /<h1>A title <img class="custom-emoji"/);
+  assert.match(get("app").innerHTML, /class="reader-subtitle">A subtitle <img class="custom-emoji"/);
+  assert.match(get("app").innerHTML, /The body <img class="custom-emoji"/);
+  assert.equal(get("app").innerHTML.match(new RegExp(link.source, "g"))?.length, 2);
+});
+
+test("the custom emoji picker retries, uses the signed-in instance, and inserts a shortcode into the draft", async () => {
+  const requests = [];
+  let unavailable = true;
+  const { app, get } = await postActionFixture(async (url) => {
+    requests.push(url);
+    if (unavailable) return Response.json({}, { status: 503 });
+    return Response.json([
+      { shortcode: "blob_happy_cat", url: `${new URL(url).origin}/happy.png`, visible_in_picker: true },
+      { shortcode: "hidden", url: "https://cdn.example/hidden.png", visible_in_picker: false },
+      { shortcode: "remote@other.example", url: "https://other.example/remote.png", visible_in_picker: true },
+    ]);
+  });
+  const modal = get("modal");
+  modal.querySelector = () => null;
+  modal.showModal = () => { modal.open = true; };
+  modal.close = () => { modal.open = false; };
+  const field = get("draft-body");
+  Object.assign(field, {
+    id: "draft-body", value: "Hello world!", selectionStart: 6, selectionEnd: 11, maxLength: -1,
+    setSelectionRange() {},
+    setRangeText(text, start, end) { this.value = this.value.slice(0, start) + text + this.value.slice(end); },
+  });
+  app.state.view = "editor";
+  app.state.draft = { ...article, body: field.value };
+  app.state.api = new app.API("https://first.example", "token");
+  assert.match(app.editorView(), /data-action="pick-emoji"/);
+  const search = get("emoji-search");
+  search.value = "";
+  search.addEventListener = (_, listener) => { search.filter = listener; };
+  const results = get("emoji-results");
+  await app.openEmojiPicker("draft-body");
+  assert.match(results.innerHTML, /Could not load/);
+  unavailable = false;
+  await app.openEmojiPicker("draft-body");
+  assert.match(results.innerHTML, /first\.example\/happy\.png/);
+  assert.doesNotMatch(results.innerHTML, /hidden|other\.example/);
+  search.value = "nothing";
+  search.filter();
+  assert.match(results.innerHTML, /No matching emoji/);
+  search.value = ":HAPPY";
+  search.filter();
+  assert.match(results.innerHTML, /Insert :blob_happy_cat:/);
+  app.insertPickedEmoji(":blob_happy_cat:");
+  assert.equal(app.state.draft.body, "Hello :blob_happy_cat:!");
+  for (const format of ["text/plain", "text/markdown", "text/html"])
+    assert.match(app.publicationPayload(app.state.draft, format), /Hello :blob_happy_cat:!/);
+
+  await app.openEmojiPicker("draft-body");
+  app.state.api = new app.API("https://second.example", "token");
+  app.insertPickedEmoji(":blob_happy_cat:");
+  assert.equal(app.state.draft.body, "Hello :blob_happy_cat:!");
+  await app.openEmojiPicker("draft-body");
+  assert.match(results.innerHTML, /second\.example\/happy\.png/);
+  assert.deepEqual(requests, [
+    "https://first.example/api/v1/custom_emojis",
+    "https://first.example/api/v1/custom_emojis",
+    "https://second.example/api/v1/custom_emojis",
+  ]);
 });
 
 test("link cards preserve video metadata without replacing publication covers or titles", () => {

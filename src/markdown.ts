@@ -32,6 +32,41 @@ namespace Fedi {
     return image && /^assets\/[a-z-]+\.svg$/.test(value) ? value : "";
   }
 
+  const shortcode = /:[\w+-]+(?:@[\w.-]+)?:/;
+  const exactShortcode = new RegExp("^" + shortcode.source + "$");
+  const emojiPattern = `(?<emoji>${shortcode.source})`;
+  const emojiToken = new RegExp(shortcode.source, "g");
+  export function emojiImages(entries?: MastodonEmoji[], picker = false): EmojiImages | undefined {
+    if (!Array.isArray(entries)) return;
+    const images: Record<string, string> = {};
+    for (const emoji of entries) {
+      if (typeof emoji?.shortcode !== "string" || (picker && (emoji.visible_in_picker === false || emoji.shortcode.includes("@")))) continue;
+      const token = ":" + emoji.shortcode + ":";
+      if (!exactShortcode.test(token)) continue;
+      const staticUrl = safeURL(emoji.static_url || "", true);
+      const url = staticUrl.startsWith("https:") ? staticUrl : safeURL(emoji.url || "", true);
+      if (url.startsWith("https:")) images[token] = url;
+    }
+    if (Object.keys(images).length) return images;
+  }
+
+  function emojiHTML(token: string, emojis?: EmojiImages): string {
+    const url = emojis?.[token];
+    return url
+      ? `<img class="custom-emoji" src="${escapeHTML(url)}" alt="${escapeHTML(token)}" title="${escapeHTML(token)}" loading="lazy" referrerpolicy="no-referrer">`
+      : escapeHTML(token);
+  }
+
+  export function emojiText(text: string, emojis?: EmojiImages): string {
+    if (!emojis) return escapeHTML(text);
+    let result = "", cursor = 0;
+    for (const match of text.matchAll(emojiToken)) {
+      result += escapeHTML(text.slice(cursor, match.index)) + emojiHTML(match[0], emojis);
+      cursor = match.index! + match[0].length;
+    }
+    return result + escapeHTML(text.slice(cursor));
+  }
+
   const hashtag = /#([\p{L}\p{M}\p{N}_-]+)/u;
   const exactHashtag = new RegExp(`^${hashtag.source}$`, "u");
 
@@ -43,17 +78,23 @@ namespace Fedi {
     return `<a href="#${searchPath(`#${tag}`)}"${classes ? ` class="${classes}"` : ""}>#${escapeHTML(tag)}</a>`;
   }
 
-  const inlineToken =
-    /`([^`\n]+)`|(!?)\[((?:\\.|[^\]\\\n])*)\]\(([^\s)]+)\)|\*\*([^*\n]+)\*\*|__([^_\n]+)__|~~([^~\n]+)~~|\*([^*\n]+)\*|_([^_\n]+)_|(https?:\/\/[^\s<>]+)|\\([\\\[\]*_`~])/g;
   const username = /[\p{L}\p{M}\p{N}_-]+(?:\.[\p{L}\p{M}\p{N}_-]+)*/u;
   const hostname = /[a-z\d-]+(?:\.[a-z\d-]+)*/i;
   const handle = String.raw`@(?<mention>${username.source}(?:@${hostname.source})?)`;
   const exactMention = new RegExp(`^${handle}$`, "iu");
   const rawMention = String.raw`(?<![\p{L}\p{M}\p{N}_.@/\\#-])${handle}(?![\p{L}\p{M}\p{N}_@-]|\.[\p{L}\p{M}\p{N}_-])`;
+  // An underscore inside a shortcode cannot end an emphasis span.
+  const underscoreText = `(?:${shortcode.source}|(?!${shortcode.source})[^_\\n])+?`;
+  const inlineToken = new RegExp(
+    /`([^`\n]+)`|(!?)\[((?:\\.|[^\]\\\n])*)\]\(([^\s)]+)\)|\*\*([^*\n]+)\*\*/.source +
+    `|__(${underscoreText})__|` + /~~([^~\n]+)~~|\*([^*\n]+)\*/.source +
+    `|_(${underscoreText})_|` + /(https?:\/\/[^\s<>]+)|\\([\\\[\]*_`~])/.source +
+    `|${emojiPattern}`, "g",
+  );
   const publicationToken = new RegExp(
     String.raw`${inlineToken.source}|(^|[^\p{L}\p{M}\p{N}_#/@\\])${hashtag.source}|${rawMention}`, "giu",
   );
-  const mentionTextToken = new RegExp(String.raw`https?://[^\s<>]+|${rawMention}`, "giu");
+  const mentionTextToken = new RegExp(String.raw`https?://[^\s<>]+|${emojiPattern}|${rawMention}`, "giu");
 
   interface PublicationMarkdown {
     mentions?: Mention[];
@@ -85,12 +126,13 @@ namespace Fedi {
       : escapeHTML(`@${handle}`);
   }
 
-  export function mentionText(source: string, publication: PublicationMarkdown): string {
+  export function mentionText(source: string, publication: PublicationMarkdown, emojis?: EmojiImages): string {
     let result = "", cursor = 0;
     for (const match of source.matchAll(mentionTextToken)) {
-      const handle = match.groups?.mention;
-      if (!handle) continue;
-      result += escapeHTML(source.slice(cursor, match.index)) + mentionLink(handle, publication);
+      const { mention, emoji } = match.groups!;
+      if (!mention && !emoji) continue;
+      result += escapeHTML(source.slice(cursor, match.index)) +
+        (mention ? mentionLink(mention, publication) : emojiHTML(emoji, emojis));
       cursor = match.index! + match[0].length;
     }
     return result + escapeHTML(source.slice(cursor));
@@ -121,7 +163,7 @@ namespace Fedi {
       return !fenced;
     }).join("\n");
     for (const match of text.matchAll(inlineToken)) {
-      if (match[1] || match[2] || /^@/.test(match[3] || "")) continue;
+      if (match[1] || match[2] || match.groups?.emoji || /^@/.test(match[3] || "")) continue;
       const emphasis = match[5] || match[6] || match[7] || match[8] || match[9];
       if (emphasis) { markdownLinks(emphasis, depth + 1).forEach((url) => links.add(url)); continue; }
       let value = match[4] || match[10] || "";
@@ -135,7 +177,7 @@ namespace Fedi {
     return [...links];
   }
 
-  function inline(source: string, publication?: PublicationMarkdown, depth = 0): string {
+  function inline(source: string, publication?: PublicationMarkdown, emojis?: EmojiImages, depth = 0): string {
     if (depth > 8) return escapeHTML(source);
     // Parse from source, then escape each text node. Generated HTML is never parsed again.
     let result = "",
@@ -152,18 +194,19 @@ namespace Fedi {
           result += hashtagLink(tag);
         else
           result += !url
-            ? escapeHTML(match[3])
+            ? emojiText(match[3], emojis)
             : match[2]
               ? `<img src="${escapeHTML(url)}" alt="${escapeHTML(match[3].replace(/\\([\\\[\]])/g, "$1"))}" loading="lazy" referrerpolicy="no-referrer">`
-              : `<a href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer">${inline(match[3], undefined, depth + 1)}</a>`;
+              : `<a href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer">${inline(match[3], undefined, emojis, depth + 1)}</a>`;
       } else if (match[5] || match[6])
-        result += `<strong>${inline(match[5] || match[6], publication, depth + 1)}</strong>`;
-      else if (match[7]) result += `<del>${inline(match[7], publication, depth + 1)}</del>`;
+        result += `<strong>${inline(match[5] || match[6], publication, emojis, depth + 1)}</strong>`;
+      else if (match[7]) result += `<del>${inline(match[7], publication, emojis, depth + 1)}</del>`;
       else if (match[8] || match[9])
-        result += `<em>${inline(match[8] || match[9], publication, depth + 1)}</em>`;
+        result += `<em>${inline(match[8] || match[9], publication, emojis, depth + 1)}</em>`;
       else if (match[11]) result += escapeHTML(match[11]);
       else if (match.groups?.mention && publication) result += mentionLink(match.groups.mention, publication);
-      else if (match[13]) result += escapeHTML(match[12]) + hashtagLink(match[13]);
+      else if (match.groups?.emoji) result += emojiHTML(match.groups.emoji, emojis);
+      else if (match[14]) result += escapeHTML(match[13]) + hashtagLink(match[14]);
       else {
         const url = safeURL(match[10]);
         result += `<a href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer">${escapeHTML(match[10])}</a>`;
@@ -189,7 +232,7 @@ namespace Fedi {
     return `<pre><code${classes}>${content}</code></pre>`;
   }
 
-  export function markdown(source: string, publication?: PublicationMarkdown, depth = 0): string {
+  export function markdown(source: string, publication?: PublicationMarkdown, emojis?: EmojiImages, depth = 0): string {
     if (depth > 32) return escapeHTML(source);
     if (!depth && publication?.replyTo) source = withoutReplyMention(source, publication.replyTo);
     const lines = source.replace(/\r\n?/g, "\n").split("\n");
@@ -215,7 +258,7 @@ namespace Fedi {
       const heading = /^(#{1,6})\s+(.+)$/.exec(line);
       if (heading) {
         const n = heading[1].length;
-        output.push(`<h${n}>${inline(heading[2], publication)}</h${n}>`);
+        output.push(`<h${n}>${inline(heading[2], publication, emojis)}</h${n}>`);
         i++;
         continue;
       }
@@ -229,7 +272,7 @@ namespace Fedi {
         while (i < lines.length && /^>/.test(lines[i]))
           quote.push(lines[i++].replace(/^>\s?/, ""));
         output.push(
-          `<blockquote>${inline(quote.join("\n"), publication).replace(/\n/g, "<br>")}</blockquote>`,
+          `<blockquote>${inline(quote.join("\n"), publication, emojis).replace(/\n/g, "<br>")}</blockquote>`,
         );
         continue;
       }
@@ -244,7 +287,7 @@ namespace Fedi {
           const nested: string[] = [];
           while (i < lines.length && /^( {2,}|\t)/.test(lines[i]))
             nested.push(lines[i++].replace(/^( {2}|\t)/, ""));
-          items.push(`<li${task ? ' class="task-item"' : ""}>${task ? `<input type="checkbox" disabled${task[1] !== " " ? " checked" : ""} aria-label="${task[1] !== " " ? "Completed task" : "Incomplete task"}"> ` : ""}${inline(task ? task[2] : text, publication)}${nested.length ? markdown(nested.join("\n"), publication, depth + 1) : ""}</li>`);
+          items.push(`<li${task ? ' class="task-item"' : ""}>${task ? `<input type="checkbox" disabled${task[1] !== " " ? " checked" : ""} aria-label="${task[1] !== " " ? "Completed task" : "Incomplete task"}"> ` : ""}${inline(task ? task[2] : text, publication, emojis)}${nested.length ? markdown(nested.join("\n"), publication, emojis, depth + 1) : ""}</li>`);
         }
         const first = ordered ? parseInt(line, 10) : 1;
         output.push(`<${tag}${ordered && first !== 1 ? ` start="${first}"` : ""}>${items.join("")}</${tag}>`);
@@ -255,13 +298,13 @@ namespace Fedi {
       while (i < lines.length && lines[i].trim() && !boundary(lines[i]))
         paragraph.push(lines[i++]);
       output.push(
-        `<p>${inline(paragraph.join("\n"), publication).replace(/\n/g, "<br>")}</p>`,
+        `<p>${inline(paragraph.join("\n"), publication, emojis).replace(/\n/g, "<br>")}</p>`,
       );
     }
     return output.join("\n");
   }
 
-  export function htmlToMarkdown(html: string): string {
+  export function htmlToMarkdown(html: string, emojis?: EmojiImages): string {
     // Remote HTML is parsed inertly and reconstructed as our small Markdown subset.
     const doc = new DOMParser().parseFromString(html, "text/html");
     const walk = (node: Node): string => {
@@ -292,6 +335,7 @@ namespace Fedi {
       if (tag === "img") {
         const src = safeURL(node.getAttribute("src") || "", true);
         const alt = (node.getAttribute("alt") || "").replace(/[\[\]]/g, "");
+        if (emojis?.[alt] && /(?:^|\s)emoji(?:\s|$)/.test(node.getAttribute("class") || "")) return alt;
         return src ? `![${alt}](${src.replace(/\)/g, "%29")})` : alt;
       }
       if (tag === "strong" || tag === "b") return `**${text}**`;
@@ -349,14 +393,16 @@ namespace Fedi {
     return { subtitle, body };
   }
 
+  const plainBold = new RegExp(`\\*\\*([^*]+)\\*\\*|__(${underscoreText})__|(${shortcode.source})`, "g");
+  const plainEmphasis = new RegExp(`([*\\x60~])([^\\n]*?)\\1|_(${underscoreText})_|(${shortcode.source})`, "g");
   export function plainText(source: string): string {
     return source
       .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, "$1 ($2)")
       .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1 ($2)")
       .replace(/^#{1,6}\s+/gm, "")
       .replace(/^```[^\n]*\n?/gm, "")
-      .replace(/\*\*([^*]+)\*\*|__([^_]+)__/g, (_m, a, b) => a || b)
-      .replace(/([*_`~])([^\n]*?)\1/g, "$2")
+      .replace(plainBold, (_m, a, b, emoji) => a || b || emoji)
+      .replace(plainEmphasis, (_m, _marker, a, b, emoji) => a ?? b ?? emoji)
       .trim();
   }
 }

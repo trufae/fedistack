@@ -137,7 +137,7 @@ namespace Fedi {
   export function accountRow(account: Account, key = "account"): string {
     const r = state.readerServer ? undefined : state.relationships.get(account.id);
     const direction = r?.following && r.followed_by ? "Mutual follow" : r?.followed_by ? "Follows you" : r?.following ? "You follow" : "";
-    return `<div class="recommended">${profileAvatar(account, false, `${key}:${account.id}`)}<div><a class="author-link" href="#${escapeHTML(profilePath(account.id))}">${escapeHTML(account.name)}</a><p>@${escapeHTML(account.acct)}</p>${direction ? `<p class="muted">${direction}</p>` : ""}${account.bio ? `<p class="account-bio">${escapeHTML(account.bio)}</p>` : ""}</div>${followButton(account)}</div>`;
+    return `<div class="recommended">${profileAvatar(account, false, `${key}:${account.id}`)}<div><a class="author-link" href="#${escapeHTML(profilePath(account.id))}">${emojiText(account.name, account.emojis)}</a><p>@${escapeHTML(account.acct)}</p>${direction ? `<p class="muted">${direction}</p>` : ""}${account.bio ? `<p class="account-bio">${escapeHTML(account.bio)}</p>` : ""}</div>${followButton(account)}</div>`;
   }
   function currentProfile(profile: ProfileState, api: API | null): boolean {
     return state.profile === profile && state.view === "profile" && state.api === api && !profile.controller?.signal.aborted;
@@ -351,7 +351,7 @@ namespace Fedi {
       <div class="profile-details"><div class="profile-identity"><div class="profile-avatar">${avatar(a, false, `profile:${a.id}`)}${imageButton("avatar")}</div><div class="profile-buttons">${p.owner ? '<a href="#drafts" class="button subtle">' + icon("edit") + ' Your writing</a><a href="#settings" class="button subtle">' + icon("settings") + ' Settings</a>' : p.server ? "" : `${followButton(a, false)}${action("message-account", `${icon("mail")} Message`, a.id, "button subtle")}`}</div></div>
       ${uploading ? `<p class="profile-image-status" role="status">Updating ${uploading === "avatar" ? "profile picture" : "background image"}…</p>` : ""}
       ${imageError ? `<p class="error-panel" role="alert">${escapeHTML(imageError)}</p>` : ""}
-      <h1>${escapeHTML(a.name)}</h1><p class="profile-handle">@${escapeHTML(a.acct)} ${a.locked ? `<span title="Approves follow requests">${icon("lock")}</span>` : ""}</p>
+      <h1>${emojiText(a.name, a.emojis)}</h1><p class="profile-handle">@${escapeHTML(a.acct)} ${a.locked ? `<span title="Approves follow requests">${icon("lock")}</span>` : ""}</p>
       ${state.relationships.get(a.id)?.followed_by && !p.server && !p.owner ? '<span class="profile-badge">Follows you</span>' : ""}
       ${a.bio ? `<p class="profile-bio">${escapeHTML(a.bio)}</p>` : ""}
       ${a.fields?.length ? `<dl class="profile-fields">${a.fields.map((f) => `<div><dt>${escapeHTML(f.name)}</dt><dd>${escapeHTML(f.value)}</dd></div>`).join("")}</dl>` : ""}
@@ -397,7 +397,7 @@ namespace Fedi {
     const subtitle = account.publication || `@${account.acct}`;
     return `<li class="${card ? "suggestion-card" : "suggestion-row"}">
       ${profileAvatar(account, false, `${key}:${account.id}`)}
-      <div class="suggestion-identity"><a class="author-link" href="#${escapeHTML(profilePath(account.id))}" title="${escapeHTML(account.name)}">${escapeHTML(account.name)}</a><p title="${escapeHTML(subtitle)}">${escapeHTML(subtitle)}</p></div>
+      <div class="suggestion-identity"><a class="author-link" href="#${escapeHTML(profilePath(account.id))}" title="${escapeHTML(account.name)}">${emojiText(account.name, account.emojis)}</a><p title="${escapeHTML(subtitle)}">${escapeHTML(subtitle)}</p></div>
       ${followButton(account)}
       <button type="button" class="suggestion-dismiss" data-action="dismiss-suggestion" data-id="${escapeHTML(account.id)}" aria-label="Dismiss ${escapeHTML(account.name)}" title="Dismiss suggestion">${icon("close")}</button>
     </li>`;

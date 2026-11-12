@@ -805,8 +805,7 @@ namespace Fedi {
     }
     if (state.view === "drafts") {
       render();
-      await Promise.all([loadOwnPosts(), loadServerDrafts()]);
-      if (state.view === "drafts") render();
+      await loadWriting();
       return;
     }
     if (state.view === "settings") {
@@ -882,16 +881,22 @@ namespace Fedi {
       ${state.error ? `<p class="error-panel">${escapeHTML(state.error)}</p>` : ""}${state.loading ? `<p class="loading">Loading your ${showingReplies ? "replies" : "publications"}…</p>` : ["published", "replies"].includes(state.libraryTab) && state.ownNext ? `<div class="load-more">${action("own-more", showingReplies ? "Load older replies" : "Load older publications", "", "button subtle")}</div>` : ""}${state.serverDraftError ? `<p class="error-panel">${escapeHTML(state.serverDraftError)}</p>` : ""}<p class="library-note">${state.session ? "Drafts save locally, then on your server as posts scheduled for year 9999. Other clients can find them in scheduled posts." : "Offline drafts stay in this browser."} Export Markdown to keep a backup.</p>`;
   }
 
-  export async function loadOwnPosts(append = false): Promise<void> {
+  export async function loadWriting(quiet = false): Promise<void> {
+    const api = state.api;
+    await Promise.all([loadOwnPosts(false, quiet), loadServerDrafts()]);
+    if (state.view === "drafts" && state.api === api) render();
+  }
+
+  export async function loadOwnPosts(append = false, quiet = false): Promise<void> {
     if (!state.api || !state.session) {
-      render();
+      if (!quiet) render();
       return;
     }
     const version = ++loadVersion,
       api = state.api;
     state.loading = true;
     state.error = "";
-    render();
+    if (!quiet) render();
     try {
       const result = await api.accountPosts(state.session.account.id, "writing", append ? state.ownNext : undefined);
       if (version !== loadVersion) return;
@@ -904,7 +909,7 @@ namespace Fedi {
     } finally {
       if (version === loadVersion) {
         state.loading = false;
-        render();
+        if (!quiet) render();
       }
     }
   }

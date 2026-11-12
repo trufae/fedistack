@@ -622,6 +622,17 @@ namespace Fedi {
         next: Object.keys(more).length ? JSON.stringify(more) : undefined,
       };
     }
+    async notifications(replies: boolean, next?: string): Promise<{ items: AccountNotification[]; next?: string }> {
+      const path = `/api/v1/notifications?limit=30${replies ? "&types%5B%5D=mention" : ""}`;
+      const { data, next: cursor } = await this.request<MastodonNotification[]>(next || path);
+      const items = data.filter(({ type, status }) =>
+        status?.visibility !== "direct" && !status?.filtered?.some((f) => f.filter.filter_action === "hide") &&
+        (!replies || (type === "mention" && !!(status?.in_reply_to_id || status?.is_reply))),
+      ).map(({ id, type, created_at, account, status }) => ({
+        id, type, created: created_at, account: mapAccount(account), post: status ? mapStatus(status) : undefined,
+      }));
+      return { items, next: cursor };
+    }
     async conversations(
       next?: string,
     ): Promise<{ conversations: Conversation[]; next?: string }> {

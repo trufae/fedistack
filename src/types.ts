@@ -16,6 +16,8 @@ namespace Fedi {
     | "drafts"
     | "editor"
     | "messages"
+    | "notifications"
+    | "replies"
     | "settings"
     | "profile"
     | "reader";
@@ -74,6 +76,13 @@ namespace Fedi {
     local?: boolean;
     audience?: string[];
     language?: string | null;
+  }
+  export interface AccountNotification {
+    id: string;
+    type: string;
+    created: string;
+    account: Account;
+    post?: Post;
   }
   export interface Conversation {
     id: string;
@@ -235,6 +244,13 @@ namespace Fedi {
       provider_name?: string;
       image_description?: string;
     } | null;
+  }
+  export interface MastodonNotification {
+    id: string;
+    type: string;
+    created_at: string;
+    account: MastodonAccount;
+    status?: MastodonStatus | null;
   }
   export interface MastodonConversation {
     id: string;

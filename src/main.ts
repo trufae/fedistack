@@ -191,6 +191,7 @@ namespace Fedi {
         state.replyDrafts.clear();
         state.revealed.clear();
         clearMessageDrafts();
+        resetNotifications();
         state.query = "";
         state.homeTimeline = state.timeline = "home";
         homeScroll = 0;
@@ -215,6 +216,10 @@ namespace Fedi {
         document.getElementById("link-previews-toggle")?.focus();
         break;
       case "timeline":
+        if (id === "replies") {
+          if (state.view !== "replies") navigate("home?tab=replies");
+          break;
+        }
         if (id === "bookmarks") {
           if (state.view !== "bookmarks") navigate("bookmarks");
           break;
@@ -431,6 +436,12 @@ namespace Fedi {
         break;
       case "more-conversations":
         await loadConversations(true);
+        break;
+      case "refresh-notifications":
+        await loadNotifications();
+        break;
+      case "more-notifications":
+        await loadNotifications(true);
         break;
       case "refresh-messages":
         await loadConversations();
@@ -680,10 +691,14 @@ namespace Fedi {
     });
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) saveEditorOnExit();
-      else void refreshReading();
+      else {
+        void refreshReading();
+        void refreshActivityBadges();
+      }
     });
     window.addEventListener("online", () => { void refreshReading(); });
     const pollReading = async () => {
+      void refreshActivityBadges();
       try { await refreshReading(); }
       finally { setTimeout(pollReading, 5000); }
     };

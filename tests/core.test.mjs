@@ -7237,3 +7237,97 @@ test("search renders clickable tags and appends deduplicated people and posts", 
   assert.equal(app.state.searchTags.length, 0);
   assert.doesNotMatch(get("app").innerHTML, /Matching hashtags/);
 });
+
+test("Home Replies lists received replies and paginates past mentions and private messages", async () => {
+  const makeNotification = (id, type, status) => ({
+    id, type, status, created_at: "2026-11-12T10:00:00Z", account: sharedStatus().account,
+  });
+  const reply = sharedStatus({ id: "nested", in_reply_to_id: "my-reply", title: null, content: "A reply to my reply", replies_count: 0 });
+  const hidden = sharedStatus({ id: "hidden", in_reply_to_id: "my-reply", content: "Filtered content",
+    filtered: [{ filter: { filter_action: "hide" } }] });
+  const replies = [
+    makeNotification("6", "mention", reply),
+    makeNotification("5", "mention", sharedStatus({ content: "A plain mention", title: null })),
+    makeNotification("4", "mention", { ...reply, visibility: "direct", content: "Private DM" }),
+    makeNotification("3", "mention", hidden),
+  ];
+  const requests = [];
+  const { app, context, get, click } = await postActionFixture(async (url) => {
+    const u = new URL(url);
+    if (u.pathname.endsWith("/context")) return Response.json({ ancestors: [], descendants: [] });
+    if (u.pathname.endsWith("/nested")) return Response.json(reply);
+    requests.push(u);
+    if (u.searchParams.has("max_id")) {
+      return Response.json([replies[0], makeNotification("1", "mention", { ...reply, id: "older", content: "Older reply" })]);
+    }
+    if (u.searchParams.has("types[]")) {
+      return Response.json(replies, {
+        headers: { Link: '<https://account.example/api/v1/notifications?types%5B%5D=mention&max_id=3>; rel="next"' },
+      });
+    }
+    return Response.json([makeNotification("7", "follow"), ...replies]);
+  });
+  app.state.session = { ...longServer, server: "https://account.example", account: app.demoMe, remember: true };
+  app.state.api = new app.API(app.state.session.server, "token");
+  context.location.hash = "#home?tab=replies";
+  await app.route();
+  assert.equal(app.state.view, "replies");
+  assert.equal(requests[0].searchParams.get("types[]"), "mention");
+  let html = get("app").innerHTML;
+  assert.match(html, /data-id="replies" class="active" aria-pressed="true">Replies/);
+  assert.match(html, /href="#read\/nested">A reply to my reply/);
+  assert.match(html, /data-action="more-notifications"[^>]*>Load older replies/);
+  assert.doesNotMatch(html, /A plain mention|Private DM|Filtered content/);
+
+  click("", "more-notifications");
+  await new Promise(setImmediate);
+  html = get("app").innerHTML;
+  assert.equal(requests[1].searchParams.get("max_id"), "3");
+  assert.equal(html.match(/A reply to my reply/g).length, 1);
+  assert.match(html, /href="#read\/older">Older reply/);
+
+  context.location.hash = "#read/nested";
+  await app.route();
+  assert.match(get("app").innerHTML, /href="#home\?tab=replies" aria-label="Back to reading"/);
+  context.location.hash = "#notifications";
+  await app.route();
+  html = get("app").innerHTML;
+  assert.match(html, /<h1>Notifications<\/h1>/);
+  assert.equal(html.match(/href="#notifications"[^>]+aria-current="page"/g).length, 2);
+  assert.match(html, /followed you/);
+  assert.match(html, /A plain mention/);
+  assert.doesNotMatch(html, /Private DM|Filtered content/);
+  assert.equal(JSON.parse(context.localStorage.getItem("fedistack:notifications-seen:https://account.example:you")).id, "7");
+});
+
+test("the bell badge detects new activity without rerendering and clears when opened", async () => {
+  const { app, context } = setup();
+  const { get } = elements(context);
+  const dot = { hidden: true };
+  const link = get("bell");
+  link.querySelector = () => dot;
+  context.document.querySelectorAll = (selector) => selector === '[data-nav-badge="notifications"]' ? [link] : [];
+  context.navigator = { onLine: true };
+  app.state.session = { ...longServer, server: "https://account.example", account: app.demoMe, remember: true };
+  const newest = { id: "9007199254740994", type: "follow", account: app.demoMe, created: "2026-11-12T10:00:00Z" };
+  let calls = 0;
+  app.state.api = { notifications: async () => { calls++; return { items: [newest] }; } };
+  app.writeStore("notifications-seen:https://account.example:you", { ...newest, id: "9007199254740993" });
+  get("app").innerHTML = "Keep the editor mounted";
+
+  await app.refreshActivityBadges(1000);
+  assert.equal(app.hasNewNotifications(), true);
+  assert.equal(dot.hidden, false);
+  assert.equal(link.getAttribute("aria-label"), "Notifications, new activity");
+  assert.equal(get("app").innerHTML, "Keep the editor mounted");
+  await app.refreshActivityBadges(2000);
+  assert.equal(calls, 1);
+
+  context.location.hash = "#notifications";
+  await app.route();
+  assert.equal(app.hasNewNotifications(), false);
+  assert.doesNotMatch(get("app").innerHTML, /Notifications, new activity/);
+  await app.refreshActivityBadges(61000);
+  assert.equal(dot.hidden, true);
+  assert.equal(link.getAttribute("aria-label"), "Notifications");
+});

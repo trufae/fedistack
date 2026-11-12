@@ -324,8 +324,10 @@ namespace Fedi {
     else render();
   }
   function visibleFeedPosts(source = state.posts): Post[] {
+    const following = state.view === "home" && state.timeline === "home";
     let posts = source.filter(
-      (p) => state.filter === "all" || p.kind === state.filter,
+      (p) => (!following || !(p.replyTo || p.isReply)) &&
+        (state.filter === "all" || p.kind === state.filter),
     );
     if (state.view === "discover") posts = filterByLanguages(undiscoveredPosts(posts), state.discoveryLanguages);
     if (state.query && !state.session)

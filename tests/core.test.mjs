@@ -4147,6 +4147,28 @@ function feedFixture() {
   return { app, context, get, post, requests };
 }
 
+test("Following skips replies when filling the feed and leaves list timelines alone", async () => {
+  const { app, context, get, post, requests } = feedFixture();
+  const replies = Array.from({ length: 10 }, (_, i) => post(`reply-${i}`, {
+    title: "A conversation reply", ...(i % 2 ? { replyTo: "parent" } : { isReply: true }),
+  }));
+  app.state.api.timeline = async (timeline, next) => {
+    requests.push({ timeline, next });
+    if (timeline === "home" && next) return { posts: [post("root", { title: "A standalone post" })] };
+    return { posts: replies, next: timeline === "home" ? "older" : undefined };
+  };
+  await app.route();
+  assert.deepEqual(requests, [{ timeline: "home", next: undefined }, { timeline: "home", next: "older" }]);
+  assert.match(get("app").innerHTML, /A standalone post/);
+  assert.doesNotMatch(get("app").innerHTML, /A conversation reply/);
+
+  app.state.session = { ...longServer, server: "https://account.example", account: app.demoMe };
+  app.state.homeTimeline = "list:friends";
+  context.location.hash = "#home";
+  await app.route();
+  assert.match(get("app").innerHTML, /A conversation reply/);
+});
+
 test("Discover browses public articles and topics while Home keeps its own feed and filter", async () => {
   const { app, context, get, post, requests } = feedFixture();
   const article = post("guide", { title: "A public guide", tags: ["Café", "café"] });
@@ -7323,7 +7345,7 @@ test("search renders clickable tags and appends deduplicated people and posts", 
   assert.doesNotMatch(get("app").innerHTML, /Matching hashtags/);
 });
 
-test("Home Replies lists received replies and paginates past mentions and private messages", async () => {
+test("Home Replies combines received and following replies and paginates each source", async () => {
   const makeNotification = (id, type, status) => ({
     id, type, status, created_at: "2026-11-12T10:00:00Z", account: sharedStatus().account,
   });
@@ -7336,11 +7358,25 @@ test("Home Replies lists received replies and paginates past mentions and privat
     makeNotification("4", "mention", { ...reply, visibility: "direct", content: "Private DM" }),
     makeNotification("3", "mention", hidden),
   ];
+  const homeOnly = sharedStatus({ id: "following-only", is_reply: true, title: null,
+    content: "A reply from someone I follow", created_at: "2026-11-12T11:00:00Z" });
   const requests = [];
+  const homeRequests = [];
   const { app, context, get, click } = await postActionFixture(async (url) => {
     const u = new URL(url);
     if (u.pathname.endsWith("/context")) return Response.json({ ancestors: [], descendants: [] });
     if (u.pathname.endsWith("/nested")) return Response.json(reply);
+    if (u.pathname.endsWith("/timelines/home")) {
+      const max = u.searchParams.get("max_id");
+      homeRequests.push(max);
+      if (max === "older-following") return Response.json([{ ...homeOnly, id: "oldest-following", content: "Oldest following reply" }]);
+      return Response.json(max ? [homeOnly] : [
+        reply, homeOnly, sharedStatus({ id: "root", title: null, content: "A top-level post" }),
+        { ...homeOnly, id: "private", visibility: "direct", content: "Private timeline reply" },
+      ], {
+        headers: { Link: `<https://account.example/api/v1/timelines/home?max_id=${max ? "older-following" : "following"}>; rel="next"` },
+      });
+    }
     requests.push(u);
     if (u.searchParams.has("max_id")) {
       return Response.json([replies[0], makeNotification("1", "mention", { ...reply, id: "older", content: "Older reply" })]);
@@ -7360,16 +7396,27 @@ test("Home Replies lists received replies and paginates past mentions and privat
   assert.equal(requests[0].searchParams.get("types[]"), "mention");
   let html = get("app").innerHTML;
   assert.match(html, /data-id="replies" class="active" aria-pressed="true">Replies/);
+  assert.match(html, /href="#read\/following-only">A reply from someone I follow/);
   assert.match(html, /href="#read\/nested">A reply to my reply/);
+  assert.ok(html.indexOf("A reply from someone I follow") < html.indexOf("A reply to my reply"));
   assert.match(html, /data-action="more-notifications"[^>]*>Load older replies/);
-  assert.doesNotMatch(html, /A plain mention|Private DM|Filtered content/);
+  assert.doesNotMatch(html, /A plain mention|Private DM|Filtered content|A top-level post|Private timeline reply/);
 
   click("", "more-notifications");
   await new Promise(setImmediate);
   html = get("app").innerHTML;
   assert.equal(requests[1].searchParams.get("max_id"), "3");
   assert.equal(html.match(/A reply to my reply/g).length, 1);
+  assert.equal(html.match(/A reply from someone I follow/g).length, 1);
   assert.match(html, /href="#read\/older">Older reply/);
+
+  click("", "more-notifications");
+  await new Promise(setImmediate);
+  html = get("app").innerHTML;
+  assert.deepEqual(homeRequests, [null, "following", "older-following"]);
+  assert.equal(requests.length, 2);
+  assert.match(html, /href="#read\/oldest-following">Oldest following reply/);
+  assert.doesNotMatch(html, /Load older replies/);
 
   context.location.hash = "#read/nested";
   await app.route();
@@ -7381,7 +7428,7 @@ test("Home Replies lists received replies and paginates past mentions and privat
   assert.equal(html.match(/href="#notifications"[^>]+aria-current="page"/g).length, 2);
   assert.match(html, /followed you/);
   assert.match(html, /A plain mention/);
-  assert.doesNotMatch(html, /Private DM|Filtered content/);
+  assert.doesNotMatch(html, /Private DM|Filtered content|A reply from someone I follow/);
   assert.equal(JSON.parse(context.localStorage.getItem("fedistack:notifications-seen:https://account.example:you")).id, "7");
 });
 

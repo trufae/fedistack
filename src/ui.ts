@@ -237,17 +237,26 @@ namespace Fedi {
     return `${excerpt.trimEnd()}…`;
   }
 
+  export function postMentionContext(post: Post) {
+    return { mentions: post.mentions, server: safeURL(post.author.url || "") || state.readerServer || state.session?.server };
+  }
+
   function postPreview(post: Post): { title: string; excerpt: string } {
     // Preview headings are display-only; the reader keeps the original post.
     const content = articleContent(post);
     const authoredTitle = post.title.trim();
-    const text = content.body.replace(/!?\[([^\]]*)\]\([^)]+\)/g, "$1").trimStart();
-    const mentions: string[] = [];
+    const mentions = [...(post.mentions || [])];
+    const text = content.body.replace(/(!?)\[([^\]]*)\]\(([^)]+)\)/g, (_link, image, label, url) => {
+      const acct = !image && mentionHandle(label);
+      if (acct) mentions.unshift({ acct, url });
+      return label;
+    }).trimStart();
+    const openingMentions: string[] = [];
     let start = 0;
     if (!authoredTitle) {
-      const openingToken = /[*_`~]*(?:<?https?:\/\/\S+|(@[\p{L}\p{M}\p{N}_-]+(?:@[\w.-]+)?)[*_`~]*[,.:;!?]*)(?:\s+|$)/iyu;
+      const openingToken = /[*_`~]*(?:<?https?:\/\/\S+|(@[\p{L}\p{M}\p{N}_-]+(?:\.[\p{L}\p{M}\p{N}_-]+)*(?:@[\w-]+(?:\.[\w-]+)*)?)[*_`~]*[,.:;!?]*)(?:\s+|$)/iyu;
       for (let token; (token = openingToken.exec(text)); ) {
-        if (token[1]) mentions.push(token[1]);
+        if (token[1]) openingMentions.push(token[1]);
         start = openingToken.lastIndex;
       }
     }
@@ -259,14 +268,15 @@ namespace Fedi {
     const consumed = Array.from(opening).length > 100 ? headline.slice(0, -1) : headline;
     const title = authoredTitle || headline || "Untitled article";
     const excerpt = content.subtitle.trim() || (authoredTitle ? body : body.slice(consumed.length));
-    return { title, excerpt: previewExcerpt([...mentions, excerpt].join(" "), 180) };
+    const summary = previewExcerpt([...openingMentions, excerpt].join(" "), 180);
+    return { title, excerpt: mentionText(summary, { ...postMentionContext(post), mentions }) };
   }
 
   function articleCardContent(post: Post, href: string, featured: boolean): string {
     const preview = postPreview(post);
     return `${featured && post.image ? `<a href="${href}" class="cover-link"><img class="feature-cover" data-image-key="cover:${escapeHTML(post.id)}" src="${escapeHTML(post.image)}" alt="${escapeHTML(post.imageAlt || "")}"></a>` : ""}
       <div class="post-content ${!featured && post.image ? "with-thumbnail" : ""}"><div>
-      <a href="${href}" class="article-link"><h2>${escapeHTML(preview.title)}</h2>${preview.excerpt ? `<p class="excerpt">${escapeHTML(preview.excerpt)}</p>` : ""}<span class="continue-reading">Continue reading ${icon("arrow")}</span></a>
+      <a href="${href}" class="article-link"><h2>${escapeHTML(preview.title)}</h2></a>${preview.excerpt ? `<p class="excerpt">${preview.excerpt}</p>` : ""}<a href="${href}" class="continue-reading">Continue reading ${icon("arrow")}</a>
       <div class="article-meta"><span>Article</span>${post.tags[0] ? `<span>·</span><span>${hashtagLink(post.tags[0])}</span>` : ""}<span>·</span><span>${readingTime(post.markdown)} min read</span></div>
       </div>${!featured && post.image ? `<a href="${href}"><img class="thumbnail" data-image-key="cover:${escapeHTML(post.id)}" src="${escapeHTML(post.image)}" alt="${escapeHTML(post.imageAlt || "")}" loading="lazy"></a>` : ""}</div>`;
   }
@@ -275,7 +285,7 @@ namespace Fedi {
     const media = post.media?.length ? post.media : post.image
       ? [{ id: post.id, type: "image", url: post.image, previewUrl: post.image, description: post.imageAlt || "" }]
       : [];
-    const body = post.markdown.trim() ? `<div class="prose note-body${reading ? " reading-prose" : ""}"${reading ? ` style="--reader-font-size: ${state.readerFontSize}px"` : ""}>${markdown(post.markdown, true)}</div>` : "";
+    const body = post.markdown.trim() ? `<div class="prose note-body${reading ? " reading-prose" : ""}"${reading ? ` style="--reader-font-size: ${state.readerFontSize}px"` : ""}>${markdown(post.markdown, postMentionContext(post))}</div>` : "";
     return body + attachmentGallery(media, post.markdown, !reading) + postLinkPreview(post);
   }
 
@@ -295,8 +305,12 @@ namespace Fedi {
       ${postActions(post)}</article>`;
   }
 
-  export function commentCard(post: Post): string {
-    return `<div class="comment">${profileAvatar(post.author, true, `post:${post.id}`)}<div><div class="comment-header"><div><a class="author-link" href="#${escapeHTML(profilePath(post.author.id))}">${escapeHTML(post.author.name)}</a><span class="byline-sub"> · ${relativeDate(post.created)}</span></div>${canManagePublication(post) ? action("delete-publication", "Delete comment", post.id, "text-button delete-link") : ""}</div>${post.warning ? `<details><summary>${escapeHTML(post.warning)}</summary><div class="prose">${markdown(post.markdown, true)}</div></details>` : `<div class="prose">${markdown(post.markdown, true)}</div>`}</div></div>`;
+  export function commentCard(post: Post, parent?: Post): string {
+    const replyTo = parent && post.replyTo === parent.id && post.author.id !== parent.author.id ? parent.author : undefined;
+    const body = `<div class="prose">${markdown(post.markdown, {
+      ...postMentionContext(post), replyTo,
+    })}</div>`;
+    return `<div class="comment">${profileAvatar(post.author, true, `post:${post.id}`)}<div><div class="comment-header"><div><a class="author-link" href="#${escapeHTML(profilePath(post.author.id))}">${escapeHTML(post.author.name)}</a><span class="byline-sub"> · ${relativeDate(post.created)}</span></div>${canManagePublication(post) ? action("delete-publication", "Delete comment", post.id, "text-button delete-link") : ""}</div>${post.warning ? `<details><summary>${escapeHTML(post.warning)}</summary>${body}</details>` : body}</div></div>`;
   }
 
   export function emptyState(

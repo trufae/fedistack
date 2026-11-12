@@ -760,6 +760,7 @@ namespace Fedi {
         ? input.account.display_name || input.account.username
         : undefined,
       tags,
+      mentions: s.mentions,
       language: s.language || null,
       audience: [
         ...new Set([s.account.id, ...(s.mentions || []).map((a) => a.id)]),

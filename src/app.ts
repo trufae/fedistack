@@ -1,7 +1,9 @@
 namespace Fedi {
-  type FeedFilter = "all" | "article" | "post";
+  export type FeedFilter = "all" | "article" | "post";
   const storedFilter = readStore<unknown>("home-filter", "all");
-  let homeFilter: FeedFilter = storedFilter === "article" || storedFilter === "post" ? storedFilter : "all";
+  const homeFilter: FeedFilter = storedFilter === "article" || storedFilter === "post" ? storedFilter : "all";
+  const listingFilters = new Map<View, FeedFilter>([["home", homeFilter]]);
+  let discoverFilterSource = "";
   const readerFontMin = 12, readerFontMax = 32;
   const storedReaderFontSize = readStore<unknown>("reader-font-size", 16);
   export const state = {
@@ -312,28 +314,25 @@ namespace Fedi {
       discoveryLanguages.some(([code]) => code === language),
     ))];
   }
-  export function filterByLanguages(posts: Post[], languages: string[]): Post[] {
-    if (!languages.length) return posts;
-    const selected = languages.map((language) => language.toLowerCase().replace(/_/g, "-"));
-    return posts.filter((post) => {
-      const code = post.language?.toLowerCase().replace(/_/g, "-");
-      return selected.some((language) => code === language || !!code?.startsWith(`${language}-`));
-    });
+  export function matchesPublication(post: Post, filter = state.filter): boolean {
+    if (filter !== "all" && post.kind !== filter) return false;
+    if (!state.discoveryLanguages.length) return true;
+    const language = post.language?.trim().toLowerCase().split(/[-_]/, 1)[0];
+    return !!language && state.discoveryLanguages.includes(language);
   }
   export function setDiscoveryLanguages(languages: string[]): void {
     state.discoveryLanguages = normalizeDiscoveryLanguages(languages);
     if (!writeStore("discovery-languages", state.discoveryLanguages))
       toast("Language preferences are only saved for this tab.");
-    if (state.view === "discover") updateFeedFilters();
-    else render();
+    updateFeedFilters();
   }
   function visibleFeedPosts(source = state.posts): Post[] {
     const following = state.view === "home" && state.timeline === "home";
     let posts = source.filter(
       (p) => (!following || !(p.replyTo || p.isReply)) &&
-        (state.filter === "all" || p.kind === state.filter),
+        matchesPublication(p),
     );
-    if (state.view === "discover") posts = filterByLanguages(undiscoveredPosts(posts), state.discoveryLanguages);
+    if (state.view === "discover") posts = undiscoveredPosts(posts);
     if (state.query && !state.session)
       posts = posts.filter((p) =>
         `${p.title} ${p.markdown} ${p.author.name} ${p.tags.join(" ")}`
@@ -342,9 +341,15 @@ namespace Fedi {
       );
     return posts;
   }
-  export function updateFeedFilters(): void {
+  function updateFeedFilters(): void {
+    const exploring = state.view === "discover" && state.exploring && !state.query;
+    if (exploring) {
+      state.next = discoveryNext();
+      discovery.autoLoad = true;
+    }
     render();
-    const missing = feedTarget - visibleFeedPosts().length;
+    if (!["home", "discover", "bookmarks"].includes(state.view) || state.view === "home" && state.timeline === "lists") return;
+    const missing = feedTarget - (exploring ? visibleDiscoveryPosts().length : visibleFeedPosts().length);
     if (state.api && !state.query && state.next && !state.loading && missing > 0)
       void loadFeed(true, missing);
   }
@@ -354,23 +359,21 @@ namespace Fedi {
   }
   export function setFeedFilter(filter: FeedFilter): void {
     state.filter = filter;
-    if (state.view === "home") {
-      homeFilter = filter;
-      writeStore("home-filter", filter);
-    }
+    listingFilters.set(state.view, filter);
+    if (state.view === "home") writeStore("home-filter", filter);
     updateFeedFilters();
   }
 
-  function feedFilters(): string {
+  export function feedFilters(): string {
     const filters = [["all", "All"], ["article", "Articles"], ["post", "Notes"]];
-    return `<div class="feed-controls"><div class="filter-pills" aria-label="Content type">${filters.map(([type, label]) => `<button data-action="filter" data-id="${type}" class="${state.filter === type ? "selected" : ""}" aria-pressed="${state.filter === type}">${label}</button>`).join("")}</div></div>`;
+    return `<div class="feed-controls"><div class="filter-pills" role="group" aria-label="Content type">${filters.map(([type, label]) => `<button type="button" data-action="filter" data-id="${type}" class="${state.filter === type ? "selected" : ""}" aria-pressed="${state.filter === type}">${label}</button>`).join("")}</div></div>`;
   }
 
   function homeView(): string {
     const saved = state.view === "bookmarks", replies = state.view === "replies";
     const lists = !!state.session && !saved && !replies && state.timeline !== "home";
     const tabs = [["home", "Following"], ...(state.session ? [["lists", "Lists"], ["replies", "Replies"]] : []), ["bookmarks", "Saved"]];
-    const heading = `<header class="page-intro feed-intro home-intro"><h1>Home</h1>${replies || saved || (lists && state.timeline === "lists") ? "" : feedFilters()}</header>
+    const heading = `<header class="page-intro feed-intro home-intro"><h1>Home</h1>${lists && state.timeline === "lists" ? "" : feedFilters()}</header>
       <div class="timeline-tabs" aria-label="Personal timelines">${tabs.map(([type, label]) => {
         const active = type === (saved ? "bookmarks" : replies ? "replies" : lists ? "lists" : "home");
         return `<button data-action="timeline" data-id="${type}" class="${active ? "active" : ""}" aria-pressed="${active}">${label}</button>`;
@@ -395,7 +398,7 @@ namespace Fedi {
         ${feedFilters()}${feedView()}`;
     }
 
-    const posts = visibleFeedPosts();
+    const posts = visibleDiscoveryPosts();
     const topics = new Map<string, string>();
     for (const post of posts) {
       for (const tag of post.tags) {
@@ -408,7 +411,7 @@ namespace Fedi {
     const articles = discoveryArticles(posts);
     rememberDiscoveryArticles(articles);
     return `${topics.size ? `<section class="discover-section"><h2>Topics</h2><div class="discover-links">${Array.from(topics.values(), (tag) => hashtagLink(tag, "topic")).join("")}</div></section>` : ""}
-      ${discoveryTimelineView()}`;
+      ${discoveryTimelineView(posts)}`;
   }
 
   function feedError(): string {
@@ -417,7 +420,7 @@ namespace Fedi {
 
   function feedView(): string {
     const posts = visibleFeedPosts();
-    const hasLanguages = state.view === "discover" && state.discoveryLanguages.length > 0;
+    const hasLanguages = state.discoveryLanguages.length > 0;
     const searching = !!state.query;
     const empty = hasLanguages ? "No posts in the selected languages match the loaded results. Load older posts or change your languages in Settings."
       : state.filter !== "all" ? "No matching writing in the loaded posts. Try another filter or load older posts."
@@ -818,6 +821,7 @@ namespace Fedi {
       state.comments = [];
     }
     state.readerServer = "";
+    const previousProfile = state.view === "profile" ? state.profile : null;
     state.profile = null;
     // Demo reader URLs can survive sign-in or be restored with a saved session.
     // Only bare, uncached demo links should leave the reader; shared IDs are real.
@@ -828,6 +832,7 @@ namespace Fedi {
       history.replaceState(null, "", "#home");
     }
     if (page === "profile") {
+      state.filter = listingFilters.get("profile") || "all";
       await openProfile(id || state.session?.account.id || demoMe.id, query, force);
       return;
     }
@@ -859,6 +864,7 @@ namespace Fedi {
         (sharedPublication ? location.origin : "");
       if (!fromReader) state.readerBack = state.view === "discover"
         ? state.query ? searchPath(state.query) : state.exploring ? "discover" : `discover?timeline=${state.timeline}`
+        : previousProfile ? profilePath(previousProfile.id, previousProfile.tab, previousProfile.server)
         : state.view === "replies" ? "home?tab=replies" : state.view === "notifications" ? "notifications" : "home";
       state.view = "reader";
       state.reading = source ? null : findPost(id) ||
@@ -931,6 +937,11 @@ namespace Fedi {
         ? page
         : "home"
     ) as View;
+    if (state.view === "discover" && query !== discoverFilterSource) {
+      discoverFilterSource = query;
+      listingFilters.delete("discover");
+    }
+    state.filter = listingFilters.get(state.view) || "all";
     if (state.view === "people") {
       const api = state.api;
       state.loading = !!api && !state.suggestionsLoaded;
@@ -970,7 +981,6 @@ namespace Fedi {
       state.exploring = false;
       state.timeline = state.homeTimeline;
     }
-    state.filter = state.view === "home" ? homeFilter : "all";
     if (!force && fromReader && state.view === "discover" && state.exploring && restoreDiscovery()) return;
     await loadFeed(false, feedTarget, false);
   }
@@ -1047,7 +1057,19 @@ namespace Fedi {
       replies = writing.filter((p) => !!p.replyTo),
       showingReplies = state.libraryTab === "replies",
       engagement = state.libraryTab === "liked" ? "likes" : state.libraryTab === "discussed" ? "replies" : "",
-      visiblePosts = showingReplies ? replies : engagement ? posts.filter((p) => p[engagement] > 0) : posts;
+      showingPublications = state.libraryTab !== "drafts" && state.libraryTab !== "scheduled",
+      visiblePosts = (showingReplies ? replies : engagement ? posts.filter((p) => p[engagement] > 0) : posts)
+        .filter((post) => matchesPublication(post));
+    const publicationList = visiblePosts.length ? visiblePosts.map((post) => postCard(post)).join("")
+      : state.loading ? ""
+      : state.filter !== "all" || state.discoveryLanguages.length
+        ? emptyState("No matching publications", state.ownNext ? "Load older publications or change your filters." : "Try changing your filters or language settings.")
+        : engagement ? emptyState(`No ${engagement} on these posts yet`, state.ownNext
+          ? `No loaded publications have ${engagement} yet. Load older publications to keep looking.`
+          : `Publications with ${engagement} will appear here.`)
+        : emptyState(showingReplies ? "Your replies and comments" : "Your words will find a home",
+          state.ownNext ? `No ${showingReplies ? "replies" : "publications"} in the loaded posts. Load older ${showingReplies ? "replies" : "publications"} to keep looking.`
+            : showingReplies ? "Your replies and comments on posts will appear here." : "Published articles and notes will appear here.");
     const stat = (tab: string, count: number | string, label: string): string =>
       `<button type="button" data-action="library-stat" data-id="${tab}" aria-pressed="${state.libraryTab === tab}"><strong>${count}</strong><span>${label}</span></button>`;
     const resume = drafts.find((d) => d.id === readStore<string>(`${draftKey()}:resume`, "")) || drafts[0];
@@ -1055,8 +1077,8 @@ namespace Fedi {
     return `<header class="page-top"><span>A SPACE FOR YOUR IDEAS</span><div><a href="#note" class="button subtle small-button">Note</a><a href="#write" class="button primary small-button">${icon("plus")} Article</a></div></header><div class="page-intro"><h1>Your writing<span class="accent">.</span></h1><p>A passing thought today. Someone’s favorite read tomorrow.</p></div>
       ${state.session ? `<p class="account-stats">${(state.session.account.followers ?? 0).toLocaleString()} followers <span>·</span> ${(state.session.account.following ?? 0).toLocaleString()} following <span>·</span> ${(state.session.account.statuses ?? 0).toLocaleString()} total posts</p>` : ""}<div class="stats-grid">${stat("drafts", drafts.length, "Saved drafts")}${stat("published", `${posts.length}${state.ownNext ? "+" : ""}`, "Publications loaded")}${stat("liked", posts.reduce((n, p) => n + p.likes, 0), "Likes on these posts")}${stat("discussed", posts.reduce((n, p) => n + p.replies, 0), "Replies on these posts")}</div>
       ${continueEditing}<div class="timeline-tabs">${(state.session ? ["drafts", "scheduled", "published", "replies"] : ["drafts", "published", "replies"]).map((t) => `<button data-action="library-tab" data-id="${t}" class="${state.libraryTab === t || t === "published" && engagement ? "active" : ""}">${t === "drafts" ? `Drafts (${drafts.length})` : t === "replies" ? "Replies" : t === "scheduled" ? `Scheduled (${state.scheduledPosts.length})` : "Published"}</button>`).join("")}</div>
-      <div class="draft-list">${engagement ? `<div class="section-heading"><p role="status">Publications with ${engagement}</p>${action("library-stat", "Show all", "published", "text-button")}</div>` : ""}${state.libraryTab === "drafts" ? drafts.map((d) => `<article class="draft-card"><div><span class="eyebrow">${d.editingId ? "Unpublished changes" : d.kind === "post" ? "Note · work in progress" : "Article · work in progress"} · ${relativeDate(d.updated)}</span><a href="#write/${encodeURIComponent(d.id)}"><h2>${escapeHTML(d.kind === "post" ? d.body.trim().slice(0, 60) || "Untitled note" : d.title || "Untitled article")}</h2></a><p>${escapeHTML(plainText(d.body).slice(0, 120) || "A blank page, full of possibility.")}</p><small>${d.body.trim() ? d.body.trim().split(/\s+/).length : 0} words · Saved on this device${state.session ? ` · ${escapeHTML(serverDraftLabel(d))}` : ""}</small></div><div class="draft-actions"><a class="button subtle" href="#write/${encodeURIComponent(d.id)}">Continue editing ${icon("arrow")}</a>${action("export-draft", "Export .md", d.id, "text-button")}${action("delete-draft", "Delete", d.id, "text-button muted")}</div></article>`).join("") || emptyState("Every good story starts here", "Your drafts autosave as you write. Start something new.", '<a href="#write" class="button primary">Start writing</a>') : state.libraryTab === "scheduled" ? scheduledPostsView() : visiblePosts.map((p) => postCard(p)).join("") || (state.loading ? "" : engagement ? emptyState(`No ${engagement} on these posts yet`, state.ownNext ? `No loaded publications have ${engagement} yet. Load older publications to keep looking.` : `Publications with ${engagement} will appear here.`) : emptyState(showingReplies ? "Your replies and comments" : "Your words will find a home", state.ownNext ? `No ${showingReplies ? "replies" : "publications"} in the loaded posts. Load older ${showingReplies ? "replies" : "publications"} to keep looking.` : showingReplies ? "Your replies and comments on posts will appear here." : "Published articles and notes will appear here."))}</div>
-      ${state.error ? `<p class="error-panel">${escapeHTML(state.error)}</p>` : ""}${state.loading ? `<p class="loading">Loading your ${showingReplies ? "replies" : "publications"}…</p>` : ["published", "replies", "liked", "discussed"].includes(state.libraryTab) && state.ownNext ? `<div class="load-more">${action("own-more", showingReplies ? "Load older replies" : "Load older publications", "", "button subtle")}</div>` : ""}${state.serverDraftError ? `<p class="error-panel">${escapeHTML(state.serverDraftError)}</p>` : ""}<p class="library-note">${state.session ? "Drafts save locally, then on your server as posts scheduled for year 9999. Other clients can find them in scheduled posts." : "Offline drafts stay in this browser."} Export Markdown to keep a backup.</p>`;
+      ${showingPublications ? feedFilters() : ""}<div class="draft-list">${engagement ? `<div class="section-heading"><p role="status">Publications with ${engagement}</p>${action("library-stat", "Show all", "published", "text-button")}</div>` : ""}${state.libraryTab === "drafts" ? drafts.map((d) => `<article class="draft-card"><div><span class="eyebrow">${d.editingId ? "Unpublished changes" : d.kind === "post" ? "Note · work in progress" : "Article · work in progress"} · ${relativeDate(d.updated)}</span><a href="#write/${encodeURIComponent(d.id)}"><h2>${escapeHTML(d.kind === "post" ? d.body.trim().slice(0, 60) || "Untitled note" : d.title || "Untitled article")}</h2></a><p>${escapeHTML(plainText(d.body).slice(0, 120) || "A blank page, full of possibility.")}</p><small>${d.body.trim() ? d.body.trim().split(/\s+/).length : 0} words · Saved on this device${state.session ? ` · ${escapeHTML(serverDraftLabel(d))}` : ""}</small></div><div class="draft-actions"><a class="button subtle" href="#write/${encodeURIComponent(d.id)}">Continue editing ${icon("arrow")}</a>${action("export-draft", "Export .md", d.id, "text-button")}${action("delete-draft", "Delete", d.id, "text-button muted")}</div></article>`).join("") || emptyState("Every good story starts here", "Your drafts autosave as you write. Start something new.", '<a href="#write" class="button primary">Start writing</a>') : state.libraryTab === "scheduled" ? scheduledPostsView() : publicationList}</div>
+      ${state.error ? `<p class="error-panel">${escapeHTML(state.error)}</p>` : ""}${state.loading ? `<p class="loading">Loading your ${showingReplies ? "replies" : "publications"}…</p>` : showingPublications && state.ownNext ? `<div class="load-more">${action("own-more", showingReplies ? "Load older replies" : "Load older publications", "", "button subtle")}</div>` : ""}${state.serverDraftError ? `<p class="error-panel">${escapeHTML(state.serverDraftError)}</p>` : ""}<p class="library-note">${state.session ? "Drafts save locally, then on your server as posts scheduled for year 9999. Other clients can find them in scheduled posts." : "Offline drafts stay in this browser."} Export Markdown to keep a backup.</p>`;
   }
 
   export async function loadWriting(quiet = false): Promise<void> {
@@ -1096,7 +1118,7 @@ namespace Fedi {
     const session = state.session;
     return `<header class="page-top"><span>MAKE YOURSELF AT HOME</span><a href="#profile" class="text-button">Your profile ${icon("arrow")}</a></header><div class="page-intro"><h1>The little details<span class="accent">.</span></h1><p>Your reading room, your way.</p></div><div class="settings-content"><section><h2>Appearance</h2><div class="theme-options">${["light", "dark", "system"].map((t) => `<button class="button ${state.theme === t ? "primary" : "subtle"}" data-action="set-theme" data-id="${t}" aria-pressed="${state.theme === t}">${icon(t === "dark" ? "moon" : t === "light" ? "sun" : "settings")} ${t[0].toUpperCase() + t.slice(1)}</button>`).join("")}</div></section>
       <section><h2>Link previews</h2><p id="link-previews-description">Show a picture and details for linked pages and videos. Turning this off stops loading previews. Saved on this device.</p><button id="link-previews-toggle" class="button subtle" role="switch" aria-checked="${state.linkPreviews}" aria-describedby="link-previews-description" data-action="toggle-link-previews">Link previews: ${state.linkPreviews ? "On" : "Off"}</button></section>
-      <section><h2>Discovery languages</h2><p>Show publications in any of your chosen languages when exploring Discover. Add languages below and tap a language to remove it. Home and Saved keep all languages.</p>${languageSelector("settings-language")}<p class="muted">This uses language labels supplied by your server. Posts without a label are excluded while language filters are selected. An empty list shows all languages. Your preferences are saved on this device.</p></section>
+      <section><h2>Reading languages</h2><p>Show publications in your chosen languages across feeds, search, profiles, and activity. Add languages below and tap a language to remove it.</p>${languageSelector("settings-language")}<p class="muted">This uses language labels supplied by your server. Posts without a label are excluded while language filters are selected. An empty list shows all languages. Your preferences are saved on this device.</p></section>
       ${interestsSettings()}
       <section><h2>Your account</h2>${session ? `<p>Signed in as <strong>${escapeHTML(session.account.acct)}</strong></p><div class="capability-card"><strong>${session.maxChars.toLocaleString()} characters per publication</strong><p>${session.format === "text/markdown" ? "Native Markdown publishing" : session.format === "text/html" ? "Rich HTML publishing from Markdown" : "Plain-text publishing only"}</p><span>${supportsArticles(session) ? "Ready for long-form writing" : escapeHTML(articleSupportProblem(session))}</span></div>${action("disconnect", "Sign out", "", "button subtle")}` : `<p>Choose an Akkoma, Pleroma, or compatible instance with long posts and rich text. Fedistack checks the server’s capabilities before you write.</p>${action("connect", "Sign in", "", "button primary")}`}</section>
       <section><h2>Fedistack <span class="version-badge">${escapeHTML(version)}</span></h2><p>Fedistack is a quiet place to read and publish independent writing. Your instance hosts your posts and handles your followers. This website is just your reading room.</p><p>No analytics. No external fonts. No runtime dependencies.</p><p class="muted">Choose “Keep me signed in” when signing in to save your sign-in on this device. Sign out to remove it. Drafts save locally, then sync to your server using far-future scheduled posts when supported. Direct messages are private mentions handled by your server, and are not end-to-end encrypted.</p></section><section><h2>Keyboard shortcuts</h2><div class="shortcut-list"><span>Bold / italic</span><kbd>⌘ / Ctrl B · I</kbd><span>Insert a link</span><kbd>⌘ / Ctrl K</kbd><span>Save draft</span><kbd>⌘ / Ctrl S</kbd><span>Zen editing / reading focus</span><kbd>⌘ / Ctrl Shift F</kbd><span>Leave Zen / focus mode</span><kbd>Esc</kbd></div></section></div>`;

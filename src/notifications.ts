@@ -148,9 +148,11 @@ namespace Fedi {
       ? [...new Map([...followingReplies.values(), ...items].map((item) => [item.post?.id || item.id, item])).values()]
         .sort((a, b) => Date.parse(b.created) - Date.parse(a.created))
       : items;
+    const visible = rows.filter(({ post }) => post ? matchesPublication(post) : state.filter === "all");
     return `<div class="notification-list">
       ${state.error ? `<div class="error-panel" role="alert">${escapeHTML(state.error)} ${action("refresh-notifications", "Try again", "", "text-button")}</div>` : ""}
-      ${rows.map(notificationRow).join("")}
+      ${visible.map(notificationRow).join("")}
+      ${rows.length && !visible.length && !state.loading && !state.error ? '<p class="end-note">No activity matches your filters.</p>' : ""}
       ${state.loading ? '<p class="loading" role="status">Loading activity…</p>' : next || (replies && followingNext)
         ? `<div class="load-more">${action("more-notifications", replies ? "Load older replies" : "Load older notifications", "", "button subtle")}</div>`
         : !rows.length && !state.error ? emptyState(replies ? "No replies yet" : "No notifications yet",
@@ -159,6 +161,6 @@ namespace Fedi {
   }
 
   export function notificationsView(): string {
-    return `<header class="page-intro feed-intro home-intro"><h1>Notifications</h1></header>${notificationList(false)}`;
+    return `<header class="page-intro feed-intro home-intro"><h1>Notifications</h1>${state.session ? feedFilters() : ""}</header>${notificationList(false)}`;
   }
 }

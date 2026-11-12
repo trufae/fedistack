@@ -1766,6 +1766,14 @@ footer p {
   border-bottom: 1px solid var(--line);
   padding: 22px 0;
   gap: 14px;
+  text-align: center;
+}
+.stats-grid > button {
+  padding: 0;
+}
+.stats-grid > button:hover strong,
+.stats-grid > button:focus-visible strong {
+  color: var(--accent);
 }
 .stats-grid strong {
   display: block;

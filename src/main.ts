@@ -317,10 +317,11 @@ namespace Fedi {
         state.revealed.add(id);
         render();
         break;
+      case "library-stat":
       case "library-tab":
         state.libraryTab = id;
         render();
-        if (id === "published" || id === "replies") await loadOwnPosts();
+        if (name === "library-tab" && (id === "published" || id === "replies")) await loadOwnPosts();
         break;
       case "own-more":
         await loadOwnPosts(true);

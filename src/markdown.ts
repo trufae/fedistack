@@ -122,7 +122,7 @@ namespace Fedi {
     const url = href || (mention && safeURL(mention.url || "")) ||
       (origin ? safeURL(`${new URL(origin).origin}/@${encodeURIComponent(name)}`) : "");
     return url
-      ? `<a href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer">${escapeHTML(name)}</a>`
+      ? `<a href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer">@${escapeHTML(name)}</a>`
       : escapeHTML(`@${handle}`);
   }
 

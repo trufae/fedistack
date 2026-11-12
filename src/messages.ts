@@ -1,10 +1,29 @@
 namespace Fedi {
   let messageVersion = 0;
+  const recentUnread = new Set<string>();
   let viewportWidth = 0, unobscuredHeight = 0;
   const messageDrafts = new Map<string, string>();
   export function clearMessageDrafts(): void {
     messageDrafts.clear();
+    recentUnread.clear();
     messageVersion++;
+  }
+  export function hasUnreadMessages(): boolean {
+    return recentUnread.size > 0 || state.conversations.some((c) => c.unread);
+  }
+  export async function refreshMessageBadge(api: API): Promise<void> {
+    if (state.view === "messages" && state.loading) return;
+    const version = messageVersion;
+    const flags = await api.conversationUnread();
+    if (version !== messageVersion || state.api !== api) return;
+    recentUnread.clear();
+    for (const [id, unread] of flags)
+      if (unread) recentUnread.add(id);
+    for (const conversation of state.conversations) {
+      const unread = flags.get(conversation.id);
+      if (unread !== undefined) conversation.unread = unread;
+    }
+    updateNavBadges();
   }
   export function updateConversationViewport(): void {
     const viewport = window.visualViewport;
@@ -156,6 +175,8 @@ namespace Fedi {
           ).values(),
         ];
         state.conversationNext = result.next;
+        if (!append) recentUnread.clear();
+        else for (const { id } of incoming) recentUnread.delete(id);
       }
       const current = state.conversations.find((c) => c.id === selected);
       if (current) {
@@ -176,11 +197,12 @@ namespace Fedi {
               sameAudience(p, current.accounts, state.session!.account.id),
             ),
           );
-          if (current.unread)
-            await api.post(
-              `/api/v1/conversations/${encodeURIComponent(current.id)}/read`,
-            );
         }
+        if (api && current.unread && !current.id.startsWith("new-")) {
+          await api.post(`/api/v1/conversations/${encodeURIComponent(current.id)}/read`);
+          if (version !== messageVersion || state.api !== api) return;
+        }
+        recentUnread.delete(current.id);
         current.unread = false;
         if (!api) saveDemo();
       }
@@ -260,6 +282,7 @@ namespace Fedi {
         };
     if (state.api !== api) return;
     current.messages.push(sent);
+    recentUnread.delete(current.id);
     current.unread = false;
     messageDrafts.delete(id);
     if (!api) saveDemo();

@@ -7331,3 +7331,64 @@ test("the bell badge detects new activity without rerendering and clears when op
   assert.equal(dot.hidden, true);
   assert.equal(link.getAttribute("aria-label"), "Notifications");
 });
+
+test("the Messages badge uses server unread flags before the inbox opens and clears on read", async () => {
+  const account = sharedStatus().account;
+  const messages = [{ id: "inbox", accounts: [account], unread: true, last_status: null }];
+  const calls = [];
+  const { app, context, get } = await postActionFixture(async (url, { method }) => {
+    const { pathname } = new URL(url);
+    calls.push([method, pathname]);
+    if (pathname === "/api/v1/notifications") return Response.json({ error: "Unsupported" }, { status: 404 });
+    if (pathname === "/api/v1/conversations") return Response.json(messages);
+    assert.equal(pathname, "/api/v1/conversations/inbox/read");
+    messages[0].unread = false;
+    return Response.json(messages[0]);
+  });
+  context.navigator = { onLine: true };
+  app.state.session = { ...longServer, server: "https://account.example", account: app.demoMe };
+  app.state.api = new app.API(app.state.session.server, "token");
+  const dot = { hidden: true };
+  const link = get("messages-link");
+  link.querySelector = () => dot;
+  context.document.querySelectorAll = (selector) => selector === '[data-nav-badge="messages"]' ? [link] : [];
+  get("app").innerHTML = "Keep the editor mounted";
+  await app.refreshActivityBadges(1000);
+  assert.equal(dot.hidden, false);
+  assert.equal(app.state.conversations.length, 0);
+  assert.equal(get("app").innerHTML, "Keep the editor mounted");
+  app.render();
+  assert.equal(get("app").innerHTML.match(/aria-label="Messages, unread conversations"/g).length, 2);
+
+  context.location.hash = "#messages/inbox";
+  await app.route();
+  assert.equal(app.hasUnreadMessages(), false);
+  assert.doesNotMatch(get("app").innerHTML, /Messages, unread conversations/);
+  assert.deepEqual(calls, [
+    ["GET", "/api/v1/notifications"], ["GET", "/api/v1/conversations"],
+    ["GET", "/api/v1/conversations"], ["POST", "/api/v1/conversations/inbox/read"],
+  ]);
+});
+
+test("a pending badge check cannot restore another account's unread activity", async () => {
+  const { app, context } = setup();
+  elements(context);
+  context.navigator = { onLine: true };
+  const session = { ...longServer, server: "https://account.example", account: app.demoMe };
+  let releaseMessages, releaseNotifications;
+  app.state.session = session;
+  app.state.api = {
+    conversationUnread: () => new Promise((resolve) => { releaseMessages = resolve; }),
+    notifications: () => new Promise((resolve) => { releaseNotifications = resolve; }),
+  };
+  const pending = app.refreshActivityBadges(1000);
+  app.state.session = { ...session, account: app.demoAuthors[0] };
+  app.state.api = {};
+  app.clearMessageDrafts();
+  app.resetNotifications();
+  releaseMessages(new Map([["old-conversation", true]]));
+  releaseNotifications({ items: [{ id: "10", type: "follow", account: app.demoMe, created: "2026-11-12T10:00:00Z" }] });
+  await pending;
+  assert.equal(app.hasUnreadMessages(), false);
+  assert.equal(app.hasNewNotifications(), false);
+});

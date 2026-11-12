@@ -183,7 +183,7 @@ namespace Fedi {
     messages: ["Messages", "Messages, unread conversations"],
   };
   function navUnread(view: keyof typeof badgeLabels): boolean {
-    return view === "notifications" ? hasNewNotifications() : state.conversations.some((c) => c.unread);
+    return view === "notifications" ? hasNewNotifications() : hasUnreadMessages();
   }
   function navBadge(view: string): string {
     if (view !== "notifications" && view !== "messages") return "";

@@ -39,16 +39,15 @@ namespace Fedi {
         (poll?.api === api && now < poll.nextAt)) return;
     const request = poll = { api, nextAt: now + 60000 };
     const started = version;
-    try {
+    const checkNotifications = async () => {
       const { items: latest } = await api.notifications(false);
       if (poll !== request || state.api !== api || started !== version) return;
       const saved = readStore<NotificationMarker | undefined>(notificationStorageKey(session), undefined, session.remember !== true);
       const seen = saved && isNewer(saved, newestSeen) ? saved : newestSeen;
       unread = !!latest[0] && isNewer(latest[0], seen);
       updateNavBadges();
-    } catch {
-      // An unavailable notifications endpoint should not affect navigation.
-    }
+    };
+    await Promise.allSettled([checkNotifications(), refreshMessageBadge(api)]);
   }
 
   export async function loadNotifications(append = false, quiet = false): Promise<void> {

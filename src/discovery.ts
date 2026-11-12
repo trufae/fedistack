@@ -125,13 +125,13 @@ namespace Fedi {
   export function discoveryTimelineView(): string {
     const posts = eligibleDiscoveryPosts(state.posts).slice(0, discovery.limit);
     const errors = Object.entries(discovery.errors).filter(([, error]) => error);
-    return `<section class="discover-section discover-timelines" aria-label="Mixed public feed"><div class="section-heading"><h2>For you</h2><button class="text-button" data-action="refresh" ${state.loading ? "disabled" : ""}>Refresh ${icon("refresh")}</button></div>
+    return `<section class="discover-section discover-timelines" aria-label="Mixed public feed"><div class="section-heading"><h2>For you</h2></div>
       <div class="feed" aria-label="Local and federated posts">${posts.slice(0, discoveryBatch).map((post) => postCard(post)).join("")}${suggestionsView(true)}${posts.slice(discoveryBatch).map((post) => postCard(post)).join("")}</div>
       ${!state.loading ? errors.map(([timeline, error]) => `<p class="muted" role="status">${timeline === "local" ? "Local" : "Federated"}: ${escapeHTML(error)} ${action("refresh", "Try again", "", "text-button")}</p>`).join("") : ""}
       ${state.error ? `<p class="error-panel" role="alert">${escapeHTML(state.error)}</p>` : ""}
       ${state.loading ? '<div class="loading" role="status">Finding more posts…</div>' : state.next
         ? `<div id="discovery-more" class="load-more">${action("load-more", "Load more posts", "", "button subtle")}</div>`
-        : `<p class="end-note">${posts.length ? "You’ve reached the end. Refresh for new posts." : "No new public posts match your discovery preferences yet."}</p>`}</section>`;
+        : `<p class="end-note">${posts.length ? "You’ve reached the end." : "No new public posts match your discovery preferences yet."}</p>`}</section>`;
   }
   let discoveryObserver: IntersectionObserver | undefined;
   export function setupDiscoveryScroll(): void {

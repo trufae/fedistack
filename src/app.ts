@@ -371,7 +371,7 @@ namespace Fedi {
     const saved = state.view === "bookmarks", replies = state.view === "replies";
     const lists = !!state.session && !saved && !replies && state.timeline !== "home";
     const tabs = [["home", "Following"], ...(state.session ? [["lists", "Lists"], ["replies", "Replies"]] : []), ["bookmarks", "Saved"]];
-    const heading = `<header class="page-intro feed-intro home-intro"><h1>Home</h1>${replies ? notificationRefreshButton() : saved || (lists && state.timeline === "lists") ? "" : feedFilters()}</header>
+    const heading = `<header class="page-intro feed-intro home-intro"><h1>Home</h1>${replies || saved || (lists && state.timeline === "lists") ? "" : feedFilters()}</header>
       <div class="timeline-tabs" aria-label="Personal timelines">${tabs.map(([type, label]) => {
         const active = type === (saved ? "bookmarks" : replies ? "replies" : lists ? "lists" : "home");
         return `<button data-action="timeline" data-id="${type}" class="${active ? "active" : ""}" aria-pressed="${active}">${label}</button>`;

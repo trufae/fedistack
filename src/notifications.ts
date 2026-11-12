@@ -140,10 +140,6 @@ namespace Fedi {
       </div></article>`;
   }
 
-  export function notificationRefreshButton(): string {
-    return state.session ? action("refresh-notifications", "Refresh", "", "button subtle small-button") : "";
-  }
-
   export function notificationList(replies: boolean): string {
     if (!state.session)
       return emptyState("Sign in to see activity", "Connect your Fediverse account to see replies and notifications.",
@@ -163,6 +159,6 @@ namespace Fedi {
   }
 
   export function notificationsView(): string {
-    return `<header class="page-intro feed-intro home-intro"><h1>Notifications</h1>${notificationRefreshButton()}</header>${notificationList(false)}`;
+    return `<header class="page-intro feed-intro home-intro"><h1>Notifications</h1></header>${notificationList(false)}`;
   }
 }

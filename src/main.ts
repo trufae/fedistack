@@ -20,7 +20,7 @@ namespace Fedi {
         ...(state.reading && !state.readerServer ? [state.reading] : []),
       ]
         .filter((p) => p.id === id)
-        .forEach((p) => Object.assign(p, updated, { boostedBy: p.boostedBy }));
+        .forEach((p) => Object.assign(p, updated, { boostedBy: p.boostedBy, boostedByEmojis: p.boostedByEmojis }));
     } else {
       if (kind === "like") {
         post.liked = !post.liked;
@@ -329,12 +329,18 @@ namespace Fedi {
       case "finish-editing":
         finishMobileEditing();
         break;
-      case "preview":
+      case "preview": {
         captureDraft();
         flushDraft();
         state.preview = !state.preview;
         render();
+        const { api, draft } = state;
+        if (state.preview && api && !api.emojiCatalog)
+          void api.customEmojis().then(() => {
+            if (state.view === "editor" && state.preview && state.api === api && state.draft === draft) render();
+          }).catch(() => {});
         break;
+      }
       case "focus":
         toggleFocus();
         break;
@@ -343,6 +349,12 @@ namespace Fedi {
         break;
       case "format":
         formatSelection(id);
+        break;
+      case "pick-emoji":
+        await openEmojiPicker(id);
+        break;
+      case "insert-emoji":
+        insertPickedEmoji(id);
         break;
       case "markdown-help":
         markdownHelp();
@@ -535,7 +547,7 @@ namespace Fedi {
     window.visualViewport?.addEventListener("scroll", updateEditorViewport);
     window.addEventListener("resize", updateEditorViewport);
     window.addEventListener("resize", updateSuggestionArrows);
-    document.addEventListener("focusin", () => { updateEditorTyping(); updateEditorViewport(); });
+    document.addEventListener("focusin", (event) => { rememberEmojiField(event); updateEditorTyping(); updateEditorViewport(); });
     document.addEventListener("focusout", () => { setTimeout(updateEditorViewport, 0); });
     document.addEventListener("selectionchange", updateEditorTyping);
     document.addEventListener("beforeinput", editorBeforeInput);

@@ -36,6 +36,7 @@ namespace Fedi {
     locked?: boolean;
     hideCollections?: boolean;
     fields?: { name: string; value: string }[];
+    emojis?: EmojiImages;
   }
   export interface Mention {
     acct: string;
@@ -66,6 +67,8 @@ namespace Fedi {
     replyTo?: string;
     isReply?: boolean;
     boostedBy?: string;
+    boostedByEmojis?: EmojiImages;
+    emojis?: EmojiImages;
     tags: string[];
     mentions?: Mention[];
     local?: boolean;
@@ -172,6 +175,13 @@ namespace Fedi {
     name: string;
     following?: boolean;
   }
+  export type EmojiImages = Readonly<Record<string, string>>;
+  export interface MastodonEmoji {
+    shortcode: string;
+    url?: string;
+    static_url?: string;
+    visible_in_picker?: boolean;
+  }
   export interface MastodonAccount {
     id: string;
     display_name: string;
@@ -188,6 +198,7 @@ namespace Fedi {
     locked?: boolean;
     hide_collections?: boolean;
     fields?: { name: string; value: string }[];
+    emojis?: MastodonEmoji[];
   }
   export interface MastodonStatus {
     object_type?: string;
@@ -211,6 +222,7 @@ namespace Fedi {
     is_reply?: boolean;
     reblog?: MastodonStatus;
     mentions?: (Mention & { id: string })[];
+    emojis?: MastodonEmoji[];
     tags?: { name: string }[];
     filtered?: { filter: { filter_action: string; title: string } }[];
     media_attachments?: MastodonMedia[];

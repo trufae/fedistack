@@ -23,6 +23,7 @@
     "src/discovery.ts",
     "src/profile.ts",
     "src/editor.ts",
+    "src/emoji-picker.ts",
     "src/editor-input.ts",
     "src/media.ts",
     "src/server-drafts.ts",

@@ -94,6 +94,8 @@ namespace Fedi {
 
   export class API {
     readonly server: string;
+    emojiCatalog?: EmojiImages;
+    private emojiRequest?: Promise<EmojiImages>;
     private relationshipCache = new Map<string, { value?: Relationship; updated: number }>();
     private relationshipPending = new Map<string, Promise<Relationship | undefined>>();
     private relationshipVersion = 0;
@@ -230,6 +232,14 @@ namespace Fedi {
     }
     async post<T>(path: string, data: unknown = {}, key?: string): Promise<T> {
       return (await this.request<T>(path, "POST", data, key)).data;
+    }
+    customEmojis(): Promise<EmojiImages> {
+      return this.emojiRequest ??= this.get<MastodonEmoji[]>("/api/v1/custom_emojis").then(
+        (emojis) => this.emojiCatalog = emojiImages(emojis, true) || {},
+      ).catch((error) => {
+        this.emojiRequest = undefined;
+        throw error;
+      });
     }
     async verify(): Promise<Session> {
       const account = await this.get<MastodonAccount>(
@@ -695,6 +705,7 @@ namespace Fedi {
       locked: account.locked,
       hideCollections: account.hide_collections,
       fields: account.fields?.map((f) => ({ name: f.name, value: plainText(htmlToMarkdown(f.value)) })),
+      emojis: emojiImages(account.emojis),
     };
   }
 
@@ -706,7 +717,8 @@ namespace Fedi {
 
   export function mapStatus(input: MastodonStatus): Post {
     const s = input.reblog || input;
-    const content = htmlToMarkdown(s.content),
+    const emojis = emojiImages(s.emojis);
+    const content = htmlToMarkdown(s.content, emojis),
       tags = (s.tags || []).map((t) => t.name);
     const card = s.card;
     const basePreview = card && safeURL(card.url) ? basicLinkPreview(card.url) : undefined;
@@ -759,6 +771,8 @@ namespace Fedi {
       boostedBy: input.reblog
         ? input.account.display_name || input.account.username
         : undefined,
+      boostedByEmojis: input.reblog ? emojiImages(input.account.emojis) : undefined,
+      emojis,
       tags,
       mentions: s.mentions,
       language: s.language || null,

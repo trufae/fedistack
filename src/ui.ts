@@ -87,6 +87,7 @@ namespace Fedi {
     eye: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
     lock: '<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V6a4 4 0 0 1 8 0v4"/>',
     send: '<path d="m22 2-7 20-4-9-9-4zm0 0L11 13"/>',
+    smile: '<circle cx="12" cy="12" r="9"/><path d="M8 14a4.5 4.5 0 0 0 8 0M9 9h.01M15 9h.01"/>',
     leaf: '<path d="M20 3C5 1 1 12 7 17s15-1 13-14ZM5 21 16 8"/>',
   };
   export function icon(name: string): string {
@@ -102,6 +103,7 @@ namespace Fedi {
   }
   export function imageLoadError(event: Event): void {
     const image = event.target as HTMLImageElement | null;
+    if (image?.matches?.("img.custom-emoji")) image.replaceWith(image.alt);
     if (image?.matches?.("img[data-avatar-key]")) image.hidden = true;
     if (image?.matches?.(".link-preview-media img")) image.closest(".link-preview-media")?.remove();
   }
@@ -269,14 +271,14 @@ namespace Fedi {
     const title = authoredTitle || headline || "Untitled article";
     const excerpt = content.subtitle.trim() || (authoredTitle ? body : body.slice(consumed.length));
     const summary = previewExcerpt([...openingMentions, excerpt].join(" "), 180);
-    return { title, excerpt: mentionText(summary, { ...postMentionContext(post), mentions }) };
+    return { title, excerpt: mentionText(summary, { ...postMentionContext(post), mentions }, post.emojis) };
   }
 
   function articleCardContent(post: Post, href: string, featured: boolean): string {
     const preview = postPreview(post);
     return `${featured && post.image ? `<a href="${href}" class="cover-link"><img class="feature-cover" data-image-key="cover:${escapeHTML(post.id)}" src="${escapeHTML(post.image)}" alt="${escapeHTML(post.imageAlt || "")}"></a>` : ""}
       <div class="post-content ${!featured && post.image ? "with-thumbnail" : ""}"><div>
-      <a href="${href}" class="article-link"><h2>${escapeHTML(preview.title)}</h2></a>${preview.excerpt ? `<p class="excerpt">${preview.excerpt}</p>` : ""}<a href="${href}" class="continue-reading">Continue reading ${icon("arrow")}</a>
+      <a href="${href}" class="article-link"><h2>${emojiText(preview.title, post.emojis)}</h2></a>${preview.excerpt ? `<p class="excerpt">${preview.excerpt}</p>` : ""}<a href="${href}" class="continue-reading">Continue reading ${icon("arrow")}</a>
       <div class="article-meta"><span>Article</span>${post.tags[0] ? `<span>·</span><span>${hashtagLink(post.tags[0])}</span>` : ""}<span>·</span><span>${readingTime(post.markdown)} min read</span></div>
       </div>${!featured && post.image ? `<a href="${href}"><img class="thumbnail" data-image-key="cover:${escapeHTML(post.id)}" src="${escapeHTML(post.image)}" alt="${escapeHTML(post.imageAlt || "")}" loading="lazy"></a>` : ""}</div>`;
   }
@@ -285,7 +287,7 @@ namespace Fedi {
     const media = post.media?.length ? post.media : post.image
       ? [{ id: post.id, type: "image", url: post.image, previewUrl: post.image, description: post.imageAlt || "" }]
       : [];
-    const body = post.markdown.trim() ? `<div class="prose note-body${reading ? " reading-prose" : ""}"${reading ? ` style="--reader-font-size: ${state.readerFontSize}px"` : ""}>${markdown(post.markdown, postMentionContext(post))}</div>` : "";
+    const body = post.markdown.trim() ? `<div class="prose note-body${reading ? " reading-prose" : ""}"${reading ? ` style="--reader-font-size: ${state.readerFontSize}px"` : ""}>${markdown(post.markdown, postMentionContext(post), post.emojis)}</div>` : "";
     return body + attachmentGallery(media, post.markdown, !reading) + postLinkPreview(post);
   }
 
@@ -294,12 +296,12 @@ namespace Fedi {
     const href = escapeHTML(postReadLink(post.id));
     const date = relativeDate(post.created);
     return `<article class="post-card ${featured ? "featured" : ""} ${post.kind}">
-      ${post.boostedBy ? `<p class="boost-label">${icon("refresh")} Shared by ${escapeHTML(post.boostedBy)}</p>` : ""}
+      ${post.boostedBy ? `<p class="boost-label">${icon("refresh")} Shared by ${emojiText(post.boostedBy, post.boostedByEmojis)}</p>` : ""}
       ${post.replyTo ? `<p class="reply-context"><a href="${escapeHTML(postReadLink(post.replyTo))}">${icon("comment")} View conversation ${icon("arrow")}</a></p>` : ""}
-      <div class="post-byline">${profileAvatar(post.author, false, `post:${post.id}`)}<div><a class="author-link" href="#${escapeHTML(profilePath(post.author.id))}">${escapeHTML(post.author.name)}</a><div class="byline-sub">${escapeHTML(post.author.publication || post.author.acct)} <span>· ${post.kind === "post" ? `<a class="note-permalink" href="${href}" aria-label="Open note · ${date}">${date}</a>` : date}</span></div></div>${followButton(post.author)}${editPublicationButton(post)}</div>
+      <div class="post-byline">${profileAvatar(post.author, false, `post:${post.id}`)}<div><a class="author-link" href="#${escapeHTML(profilePath(post.author.id))}">${emojiText(post.author.name, post.author.emojis)}</a><div class="byline-sub">${escapeHTML(post.author.publication || post.author.acct)} <span>· ${post.kind === "post" ? `<a class="note-permalink" href="${href}" aria-label="Open note · ${date}">${date}</a>` : date}</span></div></div>${followButton(post.author)}${editPublicationButton(post)}</div>
       ${
         hidden
-          ? `<div class="content-warning">${icon("eye")}<strong>${escapeHTML(post.warning)}</strong>${action("reveal", "Show content", post.id, "button subtle")}</div>`
+          ? `<div class="content-warning">${icon("eye")}<strong>${emojiText(post.warning, post.emojis)}</strong>${action("reveal", "Show content", post.id, "button subtle")}</div>`
           : post.kind === "article" ? articleCardContent(post, href, featured) + postLinkPreview(post) : noteContent(post)
       }
       ${postActions(post)}</article>`;
@@ -309,8 +311,8 @@ namespace Fedi {
     const replyTo = parent && post.replyTo === parent.id && post.author.id !== parent.author.id ? parent.author : undefined;
     const body = `<div class="prose">${markdown(post.markdown, {
       ...postMentionContext(post), replyTo,
-    })}</div>`;
-    return `<div class="comment">${profileAvatar(post.author, true, `post:${post.id}`)}<div><div class="comment-header"><div><a class="author-link" href="#${escapeHTML(profilePath(post.author.id))}">${escapeHTML(post.author.name)}</a><span class="byline-sub"> · ${relativeDate(post.created)}</span></div>${canManagePublication(post) ? action("delete-publication", "Delete comment", post.id, "text-button delete-link") : ""}</div>${post.warning ? `<details><summary>${escapeHTML(post.warning)}</summary>${body}</details>` : body}</div></div>`;
+    }, post.emojis)}</div>`;
+    return `<div class="comment">${profileAvatar(post.author, true, `post:${post.id}`)}<div><div class="comment-header"><div><a class="author-link" href="#${escapeHTML(profilePath(post.author.id))}">${emojiText(post.author.name, post.author.emojis)}</a><span class="byline-sub"> · ${relativeDate(post.created)}</span></div>${canManagePublication(post) ? action("delete-publication", "Delete comment", post.id, "text-button delete-link") : ""}</div>${post.warning ? `<details><summary>${emojiText(post.warning, post.emojis)}</summary>${body}</details>` : body}</div></div>`;
   }
 
   export function emptyState(

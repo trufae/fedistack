@@ -127,11 +127,11 @@ namespace Fedi {
   function noteComposerView(d: Draft): string {
     const me = state.session?.account || demoMe;
     return `<section class="note-composer" aria-label="${d.editingId ? "Edit note" : "New note"}">
-      <header class="note-header">${avatar(me)}<div><strong>${escapeHTML(me.name)}</strong><span>${d.editingId ? "Editing your note" : state.session ? "A quick note" : "Note · offline demo"}</span></div><a href="#drafts" class="text-button">Drafts</a></header>
+      <header class="note-header">${avatar(me)}<div><strong>${emojiText(me.name, me.emojis)}</strong><span>${d.editingId ? "Editing your note" : state.session ? "A quick note" : "Note · offline demo"}</span></div><a href="#drafts" class="text-button">Drafts</a></header>
       <label class="sr-only" for="draft-body">Note text</label><textarea id="draft-body" class="note-input" placeholder="What's on your mind?" spellcheck="true">${escapeHTML(d.body)}</textarea>
       ${draftMediaView(d)}
       ${publicationSettings(d)}
-      <div class="note-save-row"><span id="character-count"></span></div>
+      <div class="note-save-row">${emojiPickerButton("draft-body")}<span id="character-count"></span></div>
       <footer class="note-footer">${draftSaveControls(d)}${scheduleButton(d)}<button id="note-publish" class="button primary" data-action="publish-note" ${(!d.body.trim() && !d.media?.length) || mediaBusy(d) ? "disabled" : ""}>${d.editingId ? "Update note" : "Note"}</button>${publicationManagement(d)}</footer>
     </section>`;
   }
@@ -139,6 +139,7 @@ namespace Fedi {
     const d = state.draft!;
     if (d.kind === "post") return noteComposerView(d);
     const content = articleContent({ title: d.title, subtitle: d.subtitle, markdown: d.body });
+    const emojis = state.api?.emojiCatalog;
     const tools = [
       ["bold", "<b>B</b>", "Bold (⌘/Ctrl+B)"],
       ["italic", "<i>I</i>", "Italic (⌘/Ctrl+I)"],
@@ -155,11 +156,11 @@ namespace Fedi {
       ["inline-code", "`", "Inline code"],
       ["divider", "―", "Divider"],
     ];
-    const toolbar = `<div class="editor-tools"><button type="button" class="editor-done text-button" data-action="finish-editing">Done</button><div class="editor-toolbar" role="toolbar" aria-label="Markdown formatting">${tools.map(([name, label, title]) => `<button type="button" data-action="format" data-id="${name}" title="${title}" aria-label="${title}">${label}</button>`).join("")}<button type="button" data-action="upload-media" title="Upload images" aria-label="Upload images">${icon("image")}+</button><button type="button" data-action="markdown-help" title="Markdown help" aria-label="Markdown help">?</button></div><span id="editor-vim-status" class="editor-vim-status" role="status" aria-live="polite" title="hjkl move · i insert · v select · Esc normal" ${editorVimEnabled ? "" : "hidden"}>Vim · normal</span></div>`;
+    const toolbar = `<div class="editor-tools"><button type="button" class="editor-done text-button" data-action="finish-editing">Done</button><div class="editor-toolbar" role="toolbar" aria-label="Markdown formatting">${tools.map(([name, label, title]) => `<button type="button" data-action="format" data-id="${name}" title="${title}" aria-label="${title}">${label}</button>`).join("")}<button type="button" data-action="upload-media" title="Upload images" aria-label="Upload images">${icon("image")}+</button>${emojiPickerButton("draft-body")}<button type="button" data-action="markdown-help" title="Markdown help" aria-label="Markdown help">?</button></div><span id="editor-vim-status" class="editor-vim-status" role="status" aria-live="polite" title="hjkl move · i insert · v select · Esc normal" ${editorVimEnabled ? "" : "hidden"}>Vim · normal</span></div>`;
     return `<header class="page-top editor-top"><a class="text-button editor-back" href="#drafts" aria-label="Your writing">${icon("back")}<span>Your writing</span></a>${draftSaveControls(d)}<div class="editor-actions"><button class="button subtle editor-preview" data-action="preview" aria-label="${state.preview ? "Edit article" : "Preview article"}" title="${state.preview ? "Edit" : "Preview"}">${icon(state.preview ? "edit" : "eye")}<span>${state.preview ? "Edit" : "Preview"}</span></button>${editorOptions(d)}</div></header>
       <div class="editor-paper">${
         state.preview
-          ? `<div class="article-preview-heading"><span class="eyebrow">READING PREVIEW</span><h1>${escapeHTML(d.title || "Untitled article")}</h1>${content.subtitle ? `<p class="reader-subtitle">${escapeHTML(content.subtitle)}</p>` : ""}<div class="post-byline">${avatar(state.session?.account || demoMe)}<div><strong>${escapeHTML(state.session?.account.name || "You")}</strong><div class="byline-sub">${readingTime(d.body)} min read</div></div></div></div><div class="prose reading-prose">${markdown(content.body) || '<p class="muted">Your story will take shape here.</p>'}</div>`
+          ? `<div class="article-preview-heading"><span class="eyebrow">READING PREVIEW</span><h1>${emojiText(d.title || "Untitled article", emojis)}</h1>${content.subtitle ? `<p class="reader-subtitle">${emojiText(content.subtitle, emojis)}</p>` : ""}<div class="post-byline">${avatar(state.session?.account || demoMe)}<div><strong>${emojiText(state.session?.account.name || "You", state.session?.account.emojis)}</strong><div class="byline-sub">${readingTime(d.body)} min read</div></div></div></div><div class="prose reading-prose">${markdown(content.body, undefined, emojis) || '<p class="muted">Your story will take shape here.</p>'}</div>`
           : `<div class="article-heading"><label class="sr-only" for="draft-title">Article title</label><input id="draft-title" class="title-input" placeholder="Give your story a title…" value="${escapeHTML(d.title)}" maxlength="250"><label class="sr-only" for="draft-subtitle">Subtitle</label><input id="draft-subtitle" class="subtitle-input" placeholder="Add a subtitle, if you like." value="${escapeHTML(d.subtitle)}" maxlength="500"></div>${toolbar}<label class="sr-only" for="draft-body">Article body in Markdown</label><textarea id="draft-body" class="writing-area" placeholder="It starts with a thought.\n\nTell your story…" spellcheck="${editorSmartPunctuation}" autocorrect="${editorSmartPunctuation ? "on" : "off"}" autocapitalize="${editorSmartPunctuation ? "sentences" : "off"}" writingsuggestions="${editorSmartPunctuation}">${escapeHTML(d.body)}</textarea>`
       }${state.preview ? attachmentGallery(d.media, d.body) : ""}</div>
       ${draftMediaView(d)}
@@ -285,14 +286,15 @@ namespace Fedi {
     if (publishing) return;
     const textarea = document.getElementById("draft-body") as HTMLTextAreaElement | null;
     if (!textarea) return;
-    start ??= textarea.selectionStart;
-    end ??= textarea.selectionEnd;
-    textarea.focus();
-    textarea.setSelectionRange(start, end);
+    replaceInputText(textarea, text, start ?? textarea.selectionStart, end ?? textarea.selectionEnd);
+    captureDraft();
+  }
+  export function replaceInputText(input: HTMLTextAreaElement | HTMLInputElement, text: string, start: number, end: number): void {
+    input.focus();
+    input.setSelectionRange(start, end);
     // Use the browser's editing operation to retain native Undo/Redo history.
     if (!document.execCommand?.("insertText", false, text))
-      textarea.setRangeText(text, start, end, "end");
-    captureDraft();
+      input.setRangeText(text, start, end, "end");
   }
   let linkSelection: { draft: Draft; start: number; end: number; image: boolean } | undefined;
   export interface EditorSelection { textarea: HTMLTextAreaElement; start: number; end: number }

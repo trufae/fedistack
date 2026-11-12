@@ -1271,6 +1271,30 @@ footer p {
   border-radius: 4px;
   margin: 20px auto;
 }
+.custom-emoji, .prose img.custom-emoji {
+  width: 1.2em;
+  height: 1.2em;
+  margin: 0;
+  border-radius: 0;
+  object-fit: contain;
+  vertical-align: -.2em;
+}
+.emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+  gap: 4px;
+  max-height: 40dvh;
+  overflow: auto;
+}
+.emoji-grid button {
+  height: 44px;
+  overflow: hidden;
+  border-radius: 4px;
+  font-size: 22px;
+}
+.emoji-grid button:hover, .emoji-grid button:focus-visible {
+  background: var(--wash);
+}
 .prose .task-item { list-style: none; }
 .prose .task-item input { width: auto; margin-right: 6px; accent-color: var(--accent); }
 .prose li > ul, .prose li > ol { margin: 0; }
@@ -3499,8 +3523,12 @@ label.language-add select {
 }
 .note-save-row {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   padding: 14px 0;
+}
+.note-save-row > button {
+  margin-right: auto;
 }
 .note-save-row > span {
   color: var(--muted);

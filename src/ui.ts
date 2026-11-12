@@ -307,12 +307,12 @@ namespace Fedi {
       ${postActions(post)}</article>`;
   }
 
-  export function commentCard(post: Post, parent?: Post): string {
+  export function commentCard(post: Post, parent?: Post, depth = 0): string {
     const replyTo = parent && post.replyTo === parent.id && post.author.id !== parent.author.id ? parent.author : undefined;
     const body = `<div class="prose">${markdown(post.markdown, {
       ...postMentionContext(post), replyTo,
     }, post.emojis)}</div>`;
-    return `<div class="comment">${profileAvatar(post.author, true, `post:${post.id}`)}<div><div class="comment-header"><div><a class="author-link" href="#${escapeHTML(profilePath(post.author.id))}">${emojiText(post.author.name, post.author.emojis)}</a><span class="byline-sub"> · ${relativeDate(post.created)}</span></div>${canManagePublication(post) ? action("delete-publication", "Delete comment", post.id, "text-button delete-link") : ""}</div>${post.warning ? `<details><summary>${emojiText(post.warning, post.emojis)}</summary>${body}</details>` : body}</div></div>`;
+    return `<div class="comment"${depth ? ` style="--reply-depth: ${Math.min(depth, 3)}"` : ""}>${profileAvatar(post.author, true, `post:${post.id}`)}<div><div class="comment-header"><div><a class="author-link" href="#${escapeHTML(profilePath(post.author.id))}">${emojiText(post.author.name, post.author.emojis)}</a><span class="byline-sub"> · <a href="${escapeHTML(postReadLink(post.id))}" aria-label="Open reply thread">${relativeDate(post.created)}</a></span></div>${canManagePublication(post) ? action("delete-publication", "Delete comment", post.id, "text-button delete-link") : ""}</div>${post.warning ? `<details><summary>${emojiText(post.warning, post.emojis)}</summary>${body}</details>` : body}</div></div>`;
   }
 
   export function emptyState(

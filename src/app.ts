@@ -54,8 +54,10 @@ namespace Fedi {
   const feedPageLimit = 3;
   let feedSource: string | undefined;
   let feedController: AbortController | undefined;
+  let threadController: AbortController | undefined;
   export function cancelReadingRequests(): void {
     feedController?.abort();
+    threadController?.abort();
     state.profile?.controller?.abort();
   }
   let feedInFlight: { key: string; api: API | null; promise: Promise<void> } | undefined;
@@ -639,6 +641,62 @@ namespace Fedi {
     } finally { refreshingReading = false; }
   }
 
+  async function loadThread(api: API, post: Post, publicReading: boolean, signal: AbortSignal): Promise<Post[]> {
+    const visible = (p: Post) => p.id !== post.id && p.visibility !== "direct" &&
+      (!publicReading || p.visibility === "public" || p.visibility === "unlisted");
+    const { ancestors, descendants } = await api.statusContext(post.id, signal);
+    const ancestorIds = new Set(ancestors.map((p) => p.id));
+    const replies = new Map(descendants.filter((p) => visible(p) && !ancestorIds.has(p.id)).map((p) => [p.id, p]));
+    const checked = new Set<string>();
+
+    // Some servers truncate the root context. Query only branches with missing children.
+    for (let remaining = 6; remaining > 0 && !signal.aborted;) {
+      const counts = new Map<string, number>();
+      for (const { replyTo } of replies.values())
+        if (replyTo) counts.set(replyTo, (counts.get(replyTo) || 0) + 1);
+      const branches = [...replies.values()]
+        .filter((p) => !checked.has(p.id) && p.replies > (counts.get(p.id) || 0))
+        .slice(0, Math.min(3, remaining));
+      if (!branches.length) break;
+      remaining -= branches.length;
+      const results = await Promise.allSettled(branches.map(({ id }) => {
+        checked.add(id);
+        return api.statusContext(id, signal);
+      }));
+      for (const result of results)
+        if (result.status === "fulfilled")
+          for (const p of result.value.descendants)
+            if (visible(p) && !replies.has(p.id) && !ancestorIds.has(p.id))
+              replies.set(p.id, p);
+    }
+    return [...ancestors.filter(visible), ...replies.values()];
+  }
+
+  function demoThread(post: Post): Post[] {
+    const comments = [...Object.values(demoState.comments).flat(), ...demoState.posts.flatMap(demoComments)];
+    const byId = new Map([...demoState.posts, ...comments].map((p) => [p.id, p]));
+    const children = new Map<string, Post[]>();
+    for (const comment of comments) {
+      if (!comment.replyTo || comment.visibility === "direct") continue;
+      if (!children.has(comment.replyTo)) children.set(comment.replyTo, []);
+      children.get(comment.replyTo)!.push(comment);
+    }
+    const seen = new Set([post.id]), thread: Post[] = [];
+    for (let parent = byId.get(post.replyTo || ""); parent && !seen.has(parent.id); parent = byId.get(parent.replyTo || "")) {
+      if (parent.visibility === "direct") break;
+      seen.add(parent.id);
+      thread.unshift(parent);
+    }
+    const pending = [...(children.get(post.id) || [])];
+    for (const comment of pending) {
+      if (seen.has(comment.id)) continue;
+      seen.add(comment.id);
+      thread.push(comment);
+      for (const reply of children.get(comment.id) || []) pending.push(reply);
+    }
+    return thread;
+  }
+
   export async function route(force = false): Promise<void> {
     const fromReader = state.view === "reader";
     if (state.view === "editor" && state.draft) {
@@ -714,13 +772,14 @@ namespace Fedi {
         ? state.query ? searchPath(state.query) : state.exploring ? "discover" : `discover?timeline=${state.timeline}`
         : "home";
       state.view = "reader";
-      state.reading = source ? null : findPost(id) || null;
+      state.reading = source ? null : findPost(id) ||
+        (!state.api ? demoState.posts.flatMap(demoComments).find((p) => p.id === id) : null) || null;
       if (source) state.revealed.delete(id);
       state.comments = [];
       state.loading = true;
       render();
-      const version = loadVersion,
-        api = state.api;
+      const version = loadVersion, api = state.api;
+      const controller = threadController = new AbortController();
       try {
         if (sharedPublication) {
           id = expandPublicationID(rawId || "", page.startsWith("@"));
@@ -757,13 +816,10 @@ namespace Fedi {
         state.reading = post;
         render();
         const comments = readerAPI
-          ? await readerAPI.context(post.id)
-          : [...demoComments(post), ...(demoState.comments[id] || [])];
+          ? await loadThread(readerAPI, post, !!state.readerServer, controller.signal)
+          : demoThread(post);
         if (version !== loadVersion || state.api !== api) return;
-        const readingId = post.id;
-        state.comments = comments.filter(
-          (p) => p.visibility !== "direct" && (!state.readerServer || p.visibility !== "private") && p.id !== readingId && !!p.replyTo,
-        );
+        state.comments = [...new Map([...comments, ...state.comments].map((p) => [p.id, p])).values()];
       } catch (error) {
         if (version === loadVersion) state.error = (error as Error).message;
       } finally {
@@ -838,6 +894,32 @@ namespace Fedi {
     writeStore("reader-font-size", state.readerFontSize);
   }
 
+  function threadComments(post: Post): string {
+    const byId = new Map([...state.comments, post].map((p) => [p.id, p]));
+    const children = new Map<string, Post[]>();
+    const roots: Post[] = [];
+    for (const p of byId.values()) {
+      if (p.replyTo && byId.has(p.replyTo)) {
+        if (!children.has(p.replyTo)) children.set(p.replyTo, []);
+        children.get(p.replyTo)!.push(p);
+      } else roots.push(p);
+    }
+    const seen = new Set<string>(), html: string[] = [];
+    for (const root of [...roots, ...byId.values()]) {
+      const pending = [{ p: root, depth: 0 }];
+      while (pending.length) {
+        const { p, depth } = pending.pop()!;
+        if (seen.has(p.id)) continue;
+        seen.add(p.id);
+        if (p.id !== post.id) html.push(commentCard(p, byId.get(p.replyTo || ""), depth));
+        const replies = children.get(p.id) || [];
+        for (let i = replies.length - 1; i >= 0; i--)
+          pending.push({ p: replies[i], depth: p.id === post.id ? 0 : depth + 1 });
+      }
+    }
+    return html.join("");
+  }
+
   function readerView(): string {
     const p = state.reading;
     if (!p)
@@ -857,7 +939,7 @@ namespace Fedi {
       <div class="post-byline">${profileAvatar(p.author, false, `post:${p.id}`)}<div>${author}<div class="byline-sub">${new Date(p.created).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}${article ? ` · ${readingTime(p.markdown)} min read` : ""}</div></div>${publicReading ? "" : followButton(p.author)}</div>
       ${article ? postActions(p) : ""}${hidden ? "" : article ? `${!p.media?.length && p.image ? `<img class="reader-cover" data-image-key="cover:${escapeHTML(p.id)}" src="${escapeHTML(p.image)}" alt="${escapeHTML(p.imageAlt || "")}">` : ""}<div class="prose reading-prose" style="--reader-font-size: ${state.readerFontSize}px">${markdown(content.body, mentions, p.emojis)}</div>${attachmentGallery(p.media, p.markdown)}${postLinkPreview(p)}<div class="reader-end">${icon("leaf")}<span>Thanks for reading. Keep the conversation going.</span></div>` : noteContent(p, true)}${article ? "" : postActions(p)}</article>
       <section class="comments"><div class="section-heading"><h2>Conversation <span>${p.replies}</span></h2>${action("share", "Share publication", p.id, "text-button")}</div>${replyForm}
-      ${state.error ? `<p class="form-error" role="alert">${escapeHTML(state.error)}</p>` : ""}${state.loading ? '<p class="loading">Loading the conversation…</p>' : state.comments.map((comment) => commentCard(comment, p)).join("") || '<p class="muted">Be the first to start the conversation.</p>'}</section>`;
+      ${state.error ? `<p class="form-error" role="alert">${escapeHTML(state.error)}</p>` : ""}${state.loading ? '<p class="loading">Loading the conversation…</p>' : threadComments(p) || '<p class="muted">Be the first to start the conversation.</p>'}</section>`;
   }
 
   function libraryView(): string {

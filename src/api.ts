@@ -357,10 +357,11 @@ namespace Fedi {
       const { ancestors, descendants } = await this.statusContext(id);
       return [...ancestors, ...descendants];
     }
-    async status(id: string): Promise<Post> {
+    async status(id: string, signal?: AbortSignal): Promise<Post> {
       return mapStatus(
         await this.get<MastodonStatus>(
           `/api/v1/statuses/${encodeURIComponent(id)}`,
+          signal,
         ),
       );
     }

@@ -92,6 +92,10 @@ namespace Fedi {
     ];
   }
   export function findPost(id: string): Post | undefined {
+    if (state.view === "reader") {
+      const post = state.reading?.id === id ? state.reading : state.comments.find((p) => p.id === id);
+      if (post) return post;
+    }
     if (state.view === "profile") {
       const post = state.profile?.posts.find((p) => p.id === id);
       if (post) return post;
@@ -674,6 +678,50 @@ namespace Fedi {
     } finally { refreshingReading = false; }
   }
 
+  function readerPostProblem(post: Post, publicReading: boolean): string {
+    if (post.visibility === "direct") return "This is a private message. Open it from Conversations.";
+    if (publicReading && post.visibility !== "public" && post.visibility !== "unlisted")
+      return "This publication requires access through its server. Connect an authorized account to read it.";
+    return "";
+  }
+
+  export async function refreshReader(): Promise<void> {
+    const { reading, api, readerServer } = state;
+    if (state.view !== "reader" || state.loading || !reading) return;
+    const readerAPI = readerServer ? new API(readerServer) : api;
+    if (!readerAPI) return;
+    threadController?.abort();
+    const controller = threadController = new AbortController();
+    const hash = location.hash;
+    const current = () => !controller.signal.aborted && location.hash === hash && state.view === "reader" &&
+      state.api === api && state.readerServer === readerServer && state.reading === reading;
+    const content = () => JSON.stringify([state.reading, state.comments]);
+    const before = content();
+    let checkingAccess = true, post: Post, comments: Post[];
+    try {
+      post = await readerAPI.status(reading.id, controller.signal);
+      if (!current()) return;
+      const problem = readerPostProblem(post, !!readerServer);
+      if (problem) throw new APIError(problem, 403);
+      checkingAccess = false;
+      comments = await loadThread(readerAPI, post, !!readerServer, controller.signal);
+    } catch (error) {
+      if (!current()) return;
+      if (!checkingAccess || !(error instanceof APIError) || ![401, 403, 404, 410].includes(error.status)) throw error;
+      state.reading = null;
+      state.comments = [];
+      state.error = error.message;
+      render();
+      return;
+    }
+    // A reply or reaction can finish while the refresh is in flight.
+    if (!current() || content() !== before || (!state.error && JSON.stringify([post, comments]) === before)) return;
+    state.reading = post;
+    state.comments = comments;
+    state.error = "";
+    render();
+  }
+
   async function loadThread(api: API, post: Post, publicReading: boolean, signal: AbortSignal): Promise<Post[]> {
     const visible = (p: Post) => p.id !== post.id && p.visibility !== "direct" &&
       (!publicReading || p.visibility === "public" || p.visibility === "unlisted");
@@ -823,17 +871,14 @@ namespace Fedi {
         }
         const server = source ? serverURL(source) : "";
         let readerAPI = server && server !== api?.server ? new API(server) : api;
-        let post = state.reading || (readerAPI ? await readerAPI.status(id) : null);
+        let post = state.reading || (readerAPI ? await readerAPI.status(id, controller.signal) : null);
         if (version !== loadVersion || state.api !== api) return;
         if (!post) throw new Error("This publication is not available.");
-        if (post.visibility === "direct") {
+        const problem = readerPostProblem(post, !!readerAPI && readerAPI !== api);
+        if (problem) {
           state.reading = null;
-          throw new Error(
-            "This is a private message. Open it from Conversations.",
-          );
+          throw new Error(problem);
         }
-        if (readerAPI && readerAPI !== api && post.visibility !== "public" && post.visibility !== "unlisted")
-          throw new Error("This publication requires access through its server. Connect an authorized account to read it.");
         if (api && readerAPI !== api && post.url) {
           try {
             const originalURL = post.url;

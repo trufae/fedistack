@@ -108,7 +108,7 @@ namespace Fedi {
       (c) => c.id === state.conversation,
     );
     const feedback = `${state.error ? `<p class="error-panel" role="alert">${escapeHTML(state.error)} ${action("refresh-messages", "Try again", "", "text-button")}</p>` : ""}${state.loading ? '<div class="loading" role="status">Loading conversations…</div>' : ""}`;
-    return `${current ? "" : `<header class="page-top"><span>KEEP THE CONVERSATION GOING</span>${action("new-message", `${icon("plus")} New message`, "", "button subtle small-button")}</header><div class="page-intro"><h1>Conversations<span class="accent">.</span></h1><p>A little more personal.</p></div>`}
+    return `${current ? "" : `<header class="page-top"><a href="#profile" class="text-button">${icon("back")} Your profile</a>${action("new-message", `${icon("plus")} New message`, "", "button subtle small-button")}</header><div class="page-intro"><h1>Conversations<span class="accent">.</span></h1><p>A little more personal.</p></div>`}
       <div class="messages-layout ${current ? "has-conversation" : ""}"><div class="conversation-list">${
         state.conversations
           .map((c) => {

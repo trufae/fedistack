@@ -22,6 +22,7 @@ version:
 dist: deps version
 	mkdir -p dist/assets
 	$(TSC) --project tsconfig.json
+	node scripts/bundle.mjs
 	cp public/index.html public/styles.css public/editor-vim.js public/config.js public/manifest.webmanifest public/.htaccess dist/
 	cp node_modules/@highlightjs/cdn-assets/highlight.min.js dist/
 	cp node_modules/@highlightjs/cdn-assets/LICENSE dist/highlight-LICENSE.txt

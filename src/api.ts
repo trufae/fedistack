@@ -344,16 +344,18 @@ namespace Fedi {
         next: result.next,
       };
     }
-    async context(id: string): Promise<Post[]> {
-      const context = await this.get<{
-        ancestors: MastodonStatus[];
-        descendants: MastodonStatus[];
-      }>(`/api/v1/statuses/${encodeURIComponent(id)}/context`);
-      return [...context.ancestors, ...context.descendants]
-        .filter(
-          (s) => !s.filtered?.some((f) => f.filter.filter_action === "hide"),
-        )
+    async statusContext(id: string, signal?: AbortSignal): Promise<{ ancestors: Post[]; descendants: Post[] }> {
+      const { data } = await this.request<{ ancestors: MastodonStatus[]; descendants: MastodonStatus[] }>(
+        `/api/v1/statuses/${encodeURIComponent(id)}/context`, "GET", undefined, undefined, signal,
+      );
+      const visible = (statuses: MastodonStatus[]) => statuses
+        .filter((s) => !s.filtered?.some((f) => f.filter.filter_action === "hide"))
         .map(mapStatus);
+      return { ancestors: visible(data.ancestors), descendants: visible(data.descendants) };
+    }
+    async context(id: string): Promise<Post[]> {
+      const { ancestors, descendants } = await this.statusContext(id);
+      return [...ancestors, ...descendants];
     }
     async status(id: string): Promise<Post> {
       return mapStatus(

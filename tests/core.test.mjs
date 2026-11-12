@@ -1989,7 +1989,7 @@ test("same-origin sharing copies a compact UUID link that opens without an accou
   const reader = await postActionFixture(async (url, options) => {
     requests.push({ url, options });
     return Response.json(url.endsWith("/context")
-      ? { ancestors: [], descendants: [sharedStatus({ id: "reply", in_reply_to_id: id })] }
+      ? { ancestors: [], descendants: [sharedStatus({ id: "reply", in_reply_to_id: id, replies_count: 0 })] }
       : sharedStatus({ id }));
   });
   Object.assign(reader.context.location, { origin, href: copied, hash: new URL(copied).hash });
@@ -2304,6 +2304,60 @@ test("the article renders while its comments are still loading", async () => {
   assert.equal(app.state.error, "");
 });
 
+test("the reader recovers missing nested replies without reopening complete branches", async () => {
+  const calls = [];
+  const reply = (id, parent, extra) => sharedStatus({
+    id, in_reply_to_id: parent, content: id, replies_count: 0, ...extra,
+  });
+  const parent = reply("my-reply", "root", { replies_count: 1 });
+  const nested = reply("nested-reply", parent.id);
+  const other = reply("other-branch", "root", { replies_count: 1 });
+  const { app, context, get } = await postActionFixture(async (url) => {
+    const [, id, endpoint] = new URL(url).pathname.match(/statuses\/([^/]+)(\/context)?$/);
+    calls.push([id, !!endpoint]);
+    if (!endpoint) return Response.json(reply(id, undefined, { replies_count: 3 }));
+    if (id === "root") return Response.json({
+      ancestors: [],
+      descendants: [reply("already-loaded", other.id), parent, other,
+        reply("unavailable-branch", "root", { replies_count: 1 })],
+    });
+    if (id === "unavailable-branch") return Response.json({ error: "Unavailable" }, { status: 404 });
+    assert.equal(id, parent.id);
+    return Response.json({
+      ancestors: [reply("root")],
+      descendants: [nested, nested, reply("direct-child", parent.id, { visibility: "direct" }),
+        reply("filtered-child", parent.id, { filtered: [{ filter: { filter_action: "hide" } }] })],
+    });
+  });
+  context.location.hash = "#read/root?server=https%3A%2F%2Fsource.example";
+  await app.route();
+  const html = get("app").innerHTML;
+  assert.deepEqual(calls, [["root", false], ["root", true], ["my-reply", true], ["unavailable-branch", true]]);
+  assert.equal(app.state.error, "");
+  assert.equal(html.match(/<p>nested-reply<\/p>/g).length, 1);
+  assert.match(html, /<p>my-reply<\/p>[\s\S]*?--reply-depth: 1[\s\S]*?<p>nested-reply<\/p>/);
+  assert.match(html, /href="#read\/nested-reply\?server=https%3A%2F%2Fsource.example"/);
+  assert.ok(html.indexOf("<p>other-branch</p>") < html.indexOf("<p>already-loaded</p>"));
+  assert.doesNotMatch(html, /direct-child|filtered-child/);
+});
+
+test("the demo reader follows saved nested replies across both thread entry points", async () => {
+  const { app, context } = setup();
+  const { get } = elements(context);
+  const root = app.demoState.posts[0];
+  const parent = { ...root, id: "parent", markdown: "First reply", replyTo: root.id };
+  const child = { ...parent, id: "child", markdown: "Nested reply", replyTo: parent.id };
+  app.demoState.comments[root.id] = [parent];
+  app.demoState.comments[parent.id] = [child];
+  context.location.hash = `#read/${root.id}`;
+  await app.route();
+  assert.match(get("app").innerHTML, /<p>First reply<\/p>[\s\S]*?<p>Nested reply<\/p>/);
+  context.location.hash = "#read/parent";
+  await app.route();
+  assert.equal(app.state.comments[0].id, root.id);
+  assert.match(get("app").innerHTML, /<p>Nested reply<\/p>/);
+});
+
 test("a shared link opens Markdown and public comments without a session or cached post", async () => {
   const requests = [];
   const { app, context, get } = await postActionFixture(async (url, options) => {
@@ -2311,7 +2365,7 @@ test("a shared link opens Markdown and public comments without a session or cach
     return Response.json(url.endsWith("/context") ? {
       ancestors: [],
       descendants: [
-        sharedStatus({ id: "reply", content: "A *public reply*.", in_reply_to_id: "slow-web" }),
+        sharedStatus({ id: "reply", content: "A *public reply*.", in_reply_to_id: "slow-web", replies_count: 0 }),
         sharedStatus({ id: "private", content: "Private reply", visibility: "private", in_reply_to_id: "slow-web" }),
       ],
     } : sharedStatus());

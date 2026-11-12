@@ -13,6 +13,7 @@
   --line: #e7e8e1;
   --wash: #f1f2ec;
   --accent: #c9512c;
+  --unread: #c32937;
   --heading: #98472f;
   --saved: #456b44;
   --accent-wash: #f9ece4;
@@ -37,6 +38,7 @@
   --line: #343b32;
   --wash: #252c25;
   --accent: #ec936b;
+  --unread: #fa707c;
   --heading: #efb18c;
   --saved: #a7c593;
   --accent-wash: #3c2c23;
@@ -268,7 +270,7 @@ input[type="checkbox"] {
 .unread-dot {
   width: 7px;
   height: 7px;
-  background: var(--accent);
+  background: var(--unread);
   border-radius: 50%;
   flex-shrink: 0;
   margin-left: auto;
@@ -1952,7 +1954,27 @@ body.conversation-open {
   min-height: 0;
   border-top: 0;
 }
-.conversation-open .conversation-list {
+.conversation-open .notification-list {
+  margin-inline: clamp(22px, 4vw, 34px);
+}
+.notification-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding-block: 16px;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.notification-post {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+}
+.notification-post:hover,
+.notification-post:focus-visible {
+  text-decoration: underline;
+}
+.conversation-list {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior-y: contain;
@@ -3107,7 +3129,7 @@ summary {
   }
   .mobile-nav {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(var(--nav-items, 5), minmax(0, 1fr));
     align-items: center;
     position: fixed;
     bottom: 0;
@@ -3128,6 +3150,15 @@ summary {
     align-items: center;
     justify-content: center;
     color: var(--muted);
+  }
+  .mobile-nav [data-nav-badge] {
+    position: relative;
+  }
+  .mobile-nav .unread-dot {
+    position: absolute;
+    top: 8px;
+    left: calc(50% + 7px);
+    box-shadow: 0 0 0 2px var(--bg);
   }
   .mobile-nav > .mobile-sign-in::before {
     content: "";

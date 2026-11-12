@@ -12,7 +12,8 @@ namespace Fedi {
   }
   function canPullRefresh(): boolean {
     return canRefreshReading() || (!!state.api && !!state.session &&
-      (state.view === "drafts" || (state.view === "messages" && !state.conversation)));
+      (["drafts", "replies", "notifications"].includes(state.view) ||
+        (state.view === "messages" && !state.conversation)));
   }
   function showPull(mode = "", distance = 0): void {
     if (!pullIndicator || !pullLabel) return;
@@ -86,6 +87,7 @@ namespace Fedi {
       if (navigator.onLine === false) toast("You’re offline.");
       else if (state.view === "drafts") await loadWriting(true);
       else if (state.view === "messages") await loadConversations(false, true);
+      else if (state.view === "replies" || state.view === "notifications") await loadNotifications(false, true);
       else await refreshReading(Date.now(), true);
     } catch (error) {
       if (gesture.context === pullContext() && gesture.api === state.api) toast((error as Error).message);

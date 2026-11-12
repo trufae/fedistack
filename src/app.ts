@@ -163,19 +163,55 @@ namespace Fedi {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
   }
 
-  function sidebar(): string {
-    const current = state.view === "editor" ? "drafts" : state.view === "bookmarks" ? "home" : state.view === "people" ? "discover" : state.view;
-    const me = state.session?.account || demoMe;
-    const items = [
+  function navItems(): string[][] {
+    return [
       ["home", "home", "Home"],
       ["discover", "compass", "Discover"],
       ["drafts", "edit", "Your writing"],
+      ...(state.session ? [["notifications", "bell", "Notifications"]] : []),
       ["messages", "mail", "Messages"],
       ["settings", "settings", "Settings"],
     ];
+  }
+  function navView(): View {
+    const { view } = state;
+    return view === "editor" ? "drafts" : view === "bookmarks" || view === "replies" ? "home"
+      : view === "people" ? "discover" : view;
+  }
+  const badgeLabels = {
+    notifications: ["Notifications", "Notifications, new activity"],
+    messages: ["Messages", "Messages, unread conversations"],
+  };
+  function navUnread(view: keyof typeof badgeLabels): boolean {
+    return view === "notifications" ? hasNewNotifications() : state.conversations.some((c) => c.unread);
+  }
+  function navBadge(view: string): string {
+    if (view !== "notifications" && view !== "messages") return "";
+    const unread = navUnread(view);
+    return `<span class="unread-dot" aria-hidden="true"${unread ? "" : " hidden"}></span>`;
+  }
+  function navBadgeAttributes(view: string): string {
+    if (view !== "notifications" && view !== "messages") return "";
+    return ` data-nav-badge="${view}" aria-label="${badgeLabels[view][Number(navUnread(view))]}"`;
+  }
+  export function updateNavBadges(): void {
+    for (const view of ["notifications", "messages"] as const) {
+      const unread = navUnread(view);
+      for (const link of document.querySelectorAll<HTMLElement>(`[data-nav-badge="${view}"]`)) {
+        const dot = link.querySelector<HTMLElement>(".unread-dot");
+        if (dot) dot.hidden = !unread;
+        link.setAttribute("aria-label", badgeLabels[view][Number(unread)]);
+      }
+    }
+  }
+
+  function sidebar(): string {
+    const current = navView();
+    const me = state.session?.account || demoMe;
+    const items = navItems();
     return `<aside class="sidebar"><div class="brand-block"><a class="brand" href="#home"><img src="assets/favicon.svg" alt="">fedistack</a><p class="brand-date">${new Date().toLocaleDateString("en", { weekday: "long", month: "long", day: "numeric" })}</p></div>
       ${state.session ? "" : action("connect", "Sign in", "", "button primary account-action mobile-account-action")}
-      <nav aria-label="Main navigation">${items.map(([view, symbol, name]) => `<a href="#${view}" class="nav-item ${current === view ? "active" : ""}" ${current === view ? 'aria-current="page"' : ""}>${icon(symbol)}<span>${name}</span>${view === "drafts" && getDrafts().length ? `<span class="nav-count">${getDrafts().length}</span>` : ""}${view === "messages" && state.conversations.some((c) => c.unread) ? '<span class="unread-dot"></span>' : ""}</a>`).join("")}</nav>
+      <nav aria-label="Main navigation">${items.map(([view, symbol, name]) => `<a href="#${view}" class="nav-item ${current === view ? "active" : ""}" ${current === view ? 'aria-current="page"' : ""}${navBadgeAttributes(view)}>${icon(symbol)}<span>${name}</span>${view === "drafts" && getDrafts().length ? `<span class="nav-count">${getDrafts().length}</span>` : ""}${navBadge(view)}</a>`).join("")}</nav>
       <a href="#write" class="button primary write-button">${icon("edit")}<span>Write an article</span></a><a href="#note" class="button subtle note-button">${icon("comment")}<span>Note</span></a>
       <div class="sidebar-bottom"><div class="sidebar-tools"><button class="icon-button" data-action="theme" aria-label="Toggle light and dark theme">${icon(document.documentElement.dataset.theme === "dark" ? "sun" : "moon")}</button></div>
       ${state.session ? `<button class="profile-switch" data-action="account" aria-haspopup="dialog">${avatar(me, false, "sidebar")}<span><strong>${emojiText(me.name, me.emojis)}</strong><small>${escapeHTML(new URL(state.session.server).host)}</small></span>${icon("chevron")}</button>` : ""}</div></aside>`;
@@ -190,15 +226,10 @@ namespace Fedi {
   }
 
   function mobileNav(): string {
-    const current = state.view === "editor" ? "drafts" : state.view === "bookmarks" ? "home" : state.view === "people" ? "discover" : state.view;
+    const current = navView();
     const me = state.session?.account || demoMe;
-    const items = [
-      ["home", "home", "Home"],
-      ["discover", "compass", "Discover"],
-      ["drafts", "edit", "Your writing"],
-      ["messages", "mail", "Messages"],
-    ];
-    return `<nav class="mobile-nav" aria-label="Mobile navigation">${items.map(([view, symbol, name]) => `<a href="#${view}"${view === "drafts" ? ' class="mobile-write"' : ""} aria-label="${name}"${current === view ? ' aria-current="page"' : ""}>${icon(symbol)}</a>`).join("")}${state.session ? `<a href="#profile" aria-label="Your profile"${current === "profile" && state.profile?.owner ? ' aria-current="page"' : ""}>${avatar(me, false, "mobile-account")}</a>` : '<button type="button" data-action="connect" class="mobile-sign-in" aria-label="Sign in" title="Sign in" aria-haspopup="dialog"></button>'}</nav>`;
+    const items = navItems().filter(([view]) => view !== "settings");
+    return `<nav class="mobile-nav" aria-label="Mobile navigation" style="--nav-items: ${items.length + 1}">${items.map(([view, symbol, name]) => `<a href="#${view}"${view === "drafts" ? ' class="mobile-write"' : ""}${navBadgeAttributes(view) || ` aria-label="${name}"`}${current === view ? ' aria-current="page"' : ""}>${icon(symbol)}${navBadge(view)}</a>`).join("")}${state.session ? `<a href="#profile" aria-label="Your profile"${current === "profile" && state.profile?.owner ? ' aria-current="page"' : ""}>${avatar(me, false, "mobile-account")}</a>` : '<button type="button" data-action="connect" class="mobile-sign-in" aria-label="Sign in" title="Sign in" aria-haspopup="dialog"></button>'}</nav>`;
   }
 
   export function render(): void {
@@ -245,7 +276,8 @@ namespace Fedi {
                   ? profileView()
                   : state.view === "people"
                     ? peopleView()
-                    : state.view === "discover" ? discoverView() : homeView();
+                    : state.view === "discover" ? discoverView()
+                      : state.view === "notifications" ? notificationsView() : homeView();
     renderHTML(
       document.getElementById("app")!,
       `<div class="layout">${sidebar()}${!state.session ? action("connect", "Sign in", "", "button primary desktop-sign-in") : ""}<main id="main" tabindex="-1">${content}</main>${rightRail()}</div>${mobileNav()}`,
@@ -263,7 +295,7 @@ namespace Fedi {
     updateEditorVim();
     if (state.view === "editor") updateEditorMeta();
     updateEditorViewport();
-    document.title = `${state.view === "reader" && state.reading ? state.reading.title || (state.reading.kind === "article" ? "Article" : "Note") : state.view === "editor" ? (state.draft?.kind === "post" ? "New note" : state.draft?.title) || "New draft" : state.view === "profile" ? state.profile?.account?.name || "Profile" : state.view === "people" ? "People to follow" : state.view === "discover" ? "Discover" : "Your reading room"} — Fedistack`;
+    document.title = `${state.view === "reader" && state.reading ? state.reading.title || (state.reading.kind === "article" ? "Article" : "Note") : state.view === "editor" ? (state.draft?.kind === "post" ? "New note" : state.draft?.title) || "New draft" : state.view === "profile" ? state.profile?.account?.name || "Profile" : state.view === "people" ? "People to follow" : state.view === "discover" ? "Discover" : state.view === "notifications" ? "Notifications" : state.view === "replies" ? "Replies" : "Your reading room"} — Fedistack`;
   }
 
   function normalizeDiscoveryLanguages(value: unknown): string[] {
@@ -325,14 +357,15 @@ namespace Fedi {
   }
 
   function homeView(): string {
-    const saved = state.view === "bookmarks";
-    const lists = !!state.session && !saved && state.timeline !== "home";
-    const tabs = [["home", "Following"], ...(state.session ? [["lists", "Lists"]] : []), ["bookmarks", "Saved"]];
-    const heading = `<header class="page-intro feed-intro home-intro"><h1>Home</h1>${saved || (lists && state.timeline === "lists") ? "" : feedFilters()}</header>
+    const saved = state.view === "bookmarks", replies = state.view === "replies";
+    const lists = !!state.session && !saved && !replies && state.timeline !== "home";
+    const tabs = [["home", "Following"], ...(state.session ? [["lists", "Lists"], ["replies", "Replies"]] : []), ["bookmarks", "Saved"]];
+    const heading = `<header class="page-intro feed-intro home-intro"><h1>Home</h1>${replies ? notificationRefreshButton() : saved || (lists && state.timeline === "lists") ? "" : feedFilters()}</header>
       <div class="timeline-tabs" aria-label="Personal timelines">${tabs.map(([type, label]) => {
-        const active = type === (saved ? "bookmarks" : lists ? "lists" : "home");
+        const active = type === (saved ? "bookmarks" : replies ? "replies" : lists ? "lists" : "home");
         return `<button data-action="timeline" data-id="${type}" class="${active ? "active" : ""}" aria-pressed="${active}">${label}</button>`;
       }).join("")}</div>${lists ? feedLists() : ""}`;
+    if (replies) return heading + notificationList(true);
     if (lists && state.timeline === "lists") return heading;
     return heading + feedView();
   }
@@ -710,7 +743,9 @@ namespace Fedi {
       state.draft = null;
     }
     const [path, query = ""] = location.hash.slice(1).split("?");
+    const params = new URLSearchParams(query);
     let [page, rawId] = path.split("/");
+    if (page === "home" && params.get("tab") === "replies") page = "replies";
     const sharedPublication = page === "p" || page.startsWith("@");
     let id = "";
     try {
@@ -770,7 +805,7 @@ namespace Fedi {
         (sharedPublication ? location.origin : "");
       if (!fromReader) state.readerBack = state.view === "discover"
         ? state.query ? searchPath(state.query) : state.exploring ? "discover" : `discover?timeline=${state.timeline}`
-        : "home";
+        : state.view === "replies" ? "home?tab=replies" : state.view === "notifications" ? "notifications" : "home";
       state.view = "reader";
       state.reading = source ? null : findPost(id) ||
         (!state.api ? demoState.posts.flatMap(demoComments).find((p) => p.id === id) : null) || null;
@@ -838,6 +873,8 @@ namespace Fedi {
         "bookmarks",
         "drafts",
         "messages",
+        "notifications",
+        "replies",
         "settings",
       ].includes(page)
         ? page
@@ -854,6 +891,11 @@ namespace Fedi {
       }
       return;
     }
+    if (state.view === "notifications" || state.view === "replies") {
+      state.query = "";
+      await loadNotifications();
+      return;
+    }
     if (state.view === "messages") {
       state.conversation = id;
       await loadConversations();
@@ -868,7 +910,6 @@ namespace Fedi {
       render();
       return;
     }
-    const params = new URLSearchParams(query);
     state.query = state.view === "discover" ? params.get("q")?.trim() || "" : "";
     if (state.view === "discover") {
       const timeline = params.get("timeline");
@@ -1080,6 +1121,7 @@ namespace Fedi {
     state.replyDrafts.clear();
     state.revealed.clear();
     clearMessageDrafts();
+    resetNotifications();
     state.relationships.clear();
     state.query = "";
     state.homeTimeline = state.timeline = "home";

@@ -28,6 +28,7 @@
     "src/media.ts",
     "src/server-drafts.ts",
     "src/messages.ts",
+    "src/notifications.ts",
     "src/interests.ts",
     "src/refresh.ts",
     "src/main.ts"

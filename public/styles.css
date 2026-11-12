@@ -620,6 +620,9 @@ main {
 .byline-sub > span {
   white-space: nowrap;
 }
+.note-permalink:hover {
+  text-decoration: underline;
+}
 .follow {
   flex-shrink: 0;
   margin-left: auto;
@@ -1348,6 +1351,18 @@ footer p {
   line-height: 1.4;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+.note-body {
+  font-family: inherit;
+  color: var(--ink);
+}
+.note-body :is(h1, h2, h3, h4, h5, h6) {
+  font: inherit;
+  color: inherit;
+  margin: 0 0 1em;
+}
+.note-reader > .post-actions {
+  margin: 17px 0 0;
 }
 .reader-end {
   margin: 40px 0 24px;

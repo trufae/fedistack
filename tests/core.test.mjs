@@ -3880,65 +3880,71 @@ test("the editing preview removes a pasted title without changing the draft", ()
   assert.equal(app.state.draft.body, body);
 });
 
-test("notes have bounded previews without duplicating the opening or embedding the full body", () => {
+test("notes show their complete body and inline links in the feed and reader", () => {
   const { app, context } = setup();
   const { get } = elements(context);
-  const markdown = "**A small discovery.** A [quiet corner](https://example.org/quiet) of the web. " +
-    "There is more to this story. ".repeat(30) + "\n\nThe ending is only in the reader.";
+  const markdown = "[@friend](https://social.example/@friend)\n**A small discovery.** A [quiet corner](https://example.org/quiet) of the web. " +
+    "There is more to this story. ".repeat(18) + "\n\nHere is the ending. #Nature";
   const post = { ...app.demoPosts[0], id: "compact-note", kind: "post", title: "", subtitle: "", markdown, image: "" };
   const card = app.postCard(post);
-  assert.match(card, /<h2>A small discovery\.<\/h2><p class="excerpt">A quiet corner of the web\./);
-  assert.equal(card.split("A small discovery.").length, 2);
-  assert.match(card, /…<\/p><span class="continue-reading">Continue reading/);
-  assert.match(card, /href="#read\/compact-note" class="article-link"/);
-  assert.match(card, /class="article-meta"><span>Note<\/span>/);
-  assert.doesNotMatch(card, /note-body|The ending is only/);
-  assert.match(card, /class="link-preview" href="https:\/\/example.org\/quiet"/);
+  assert.match(card, /class="note-permalink" href="#read\/compact-note"/);
+  assert.doesNotMatch(card, /<h[12]|class="excerpt"|Continue reading|article-meta/);
+  assert.match(card, /class="link-preview" href="https:\/\/example\.org\/quiet"/);
   app.state.view = "reader";
   app.state.reading = post;
   app.render();
-  assert.match(get("app").innerHTML, /<strong>A small discovery\.<\/strong>/);
-  assert.match(get("app").innerHTML, /href="https:\/\/example.org\/quiet"/);
-  assert.match(get("app").innerHTML, /The ending is only in the reader\./);
+  const reader = get("app").innerHTML;
+  assert.doesNotMatch(reader, /A note from|reader-subtitle|reader-end|min read/);
+  for (const html of [card, reader]) {
+    assert.match(html, /class="prose note-body[^>]*><p><a href="https:\/\/social\.example\/@friend"[^>]*>@friend<\/a><br><strong>A small discovery\.<\/strong>/);
+    assert.match(html, /href="https:\/\/example\.org\/quiet"[^>]*>quiet corner<\/a>/);
+    assert.match(html, /<p>Here is the ending\. <a [^>]*>#Nature<\/a><\/p>/);
+    assert.equal(html.split("A small discovery.").length, 2);
+  }
   assert.equal(post.markdown, markdown);
   assert.equal(post.title, "");
 });
 
-test("short, multiline, and media-only notes keep usable preview headings", () => {
+test("media-only notes show their attachments and respect content warnings", () => {
   const { app } = setup();
   const note = { ...app.demoPosts[0], kind: "post", title: "", subtitle: "", image: "" };
-  const short = app.postCard({ ...note, markdown: "A passing thought…" });
-  assert.match(short, /<h2>A passing thought…<\/h2><span class="continue-reading">Continue reading/);
-  assert.doesNotMatch(short, /class="excerpt"/);
-  const multiline = app.postCard({ ...note, markdown: "Today's discovery\n\nA little more context." });
-  assert.match(multiline, /<h2>Today&#39;s discovery<\/h2><p class="excerpt">A little more context\.<\/p>/);
-  const media = app.postCard({ ...note, markdown: "", image: "https://example.org/photo.jpg" });
-  assert.match(media, /<h2>Note<\/h2><span class="continue-reading">Continue reading/);
-  assert.match(media, /class="thumbnail"/);
-  const long = app.postCard({ ...note, markdown: "🦊".repeat(120) + "\n\nThe rest of the note." });
-  assert.match(long, new RegExp(`<h2>${"🦊".repeat(100)}…</h2><p class="excerpt">${"🦊".repeat(20)} The rest of the note\\.</p>`));
+  const url = "https://example.org/photo.jpg";
+  const previewUrl = "https://example.org/small.jpg";
+  const media = [{ id: "photo", type: "image", url, previewUrl, description: "A sleeping cat" }];
+  const post = { ...note, markdown: "", image: previewUrl, media, warning: "Spoilers" };
+  assert.doesNotMatch(app.postCard(post), /attachment-gallery|small\.jpg/);
+  app.state.revealed.add(post.id);
+  const card = app.postCard(post);
+  assert.doesNotMatch(card, /note-body|<h2|Continue reading/);
+  assert.match(card, /class="attachment-gallery"[^]*href="https:\/\/example\.org\/photo\.jpg"[^]*src="https:\/\/example\.org\/small\.jpg" alt="A sleeping cat"/);
+  assert.equal(card.split("small.jpg").length, 2);
+  assert.doesNotMatch(app.postCard({ ...post, markdown: app.mediaMarkdown(media[0]) }), /attachment-gallery/);
+  assert.match(app.postCard({ ...post, media: undefined }), /class="attachment-gallery"[^]*src="https:\/\/example\.org\/small\.jpg"/);
 });
 
-test("URL-first notes use the following text for their feed headline", () => {
+test("untitled article previews skip opening URLs and move leading mentions into the excerpt", () => {
   const { app, context } = setup();
   const { get } = elements(context);
   const url = "https://example.org/a_long_article";
-  const note = { ...app.demoPosts[0], kind: "post", title: "", subtitle: "", image: "" };
+  const article = { ...app.demoPosts[0], title: "", subtitle: "", image: "" };
   for (const opening of [`${url} `, `[${url}](${url})\n\n`, `**${url}**\n<https://example.net/>\n`]) {
-    const card = app.postCard({ ...note, markdown: `${opening}A melting statue. It's a cute hack.` });
+    const card = app.postCard({ ...article, markdown: `${opening}A melting statue. It's a cute hack.` });
     assert.match(card, /<h2>A melting statue\.<\/h2><p class="excerpt">It&#39;s a cute hack\.<\/p>/);
     assert.ok(card.includes(`class="link-preview" href="${url}"`));
   }
-  const onlyLink = { ...note, markdown: `[${url}](${url})` };
-  assert.match(app.postCard(onlyLink), /<h2>Note<\/h2><span class="continue-reading">/);
-  app.state.linkPreviews = false;
-  assert.match(app.postCard(onlyLink), /<h2>Note<\/h2>/);
+  const withMentions = { ...article, markdown: `[@flying_penguin](https://social.example/@flying_penguin), ${url}\n\n**@joxean@mastodon.social**\n\nA melting statue. It's a cute hack.` };
+  assert.match(app.postCard(withMentions), /<h2>A melting statue\.<\/h2><p class="excerpt">@flying_penguin @joxean@mastodon\.social It&#39;s a cute hack\.<\/p>/);
+  assert.match(app.postCard({ ...article, markdown: "@flyingpenguin" }), /<h2>Untitled article<\/h2><p class="excerpt">@flyingpenguin<\/p>/);
+  assert.match(app.postCard({ ...article, title: "An authored title", markdown: withMentions.markdown }), /<h2>An authored title<\/h2>/);
   app.state.view = "reader";
-  app.state.reading = onlyLink;
+  app.state.reading = withMentions;
   app.render();
-  assert.ok(get("app").innerHTML.includes(`href="${url}"`));
-  assert.match(app.postCard({ ...note, markdown: `[A labelled link](${url})` }), /<h2>A labelled link<\/h2>/);
-  assert.match(app.postCard({ ...note, title: "A written title", markdown: url }), /<h2>A written title<\/h2>/);
+  assert.match(get("app").innerHTML, /<a href="https:\/\/social\.example\/@flying_penguin"[^>]*>@flying_penguin<\/a>, <a /);
+  assert.match(get("app").innerHTML, /<p><strong>@joxean@mastodon\.social<\/strong><\/p>\s*<p>A melting statue/);
+  app.state.linkPreviews = false;
+  const linkNote = app.postCard({ ...article, kind: "post", markdown: `[${url}](${url})` });
+  assert.ok(linkNote.includes(`href="${url}"`));
+  assert.doesNotMatch(linkNote, /<h2|class="link-preview"/);
 });
 
 function feedFixture() {

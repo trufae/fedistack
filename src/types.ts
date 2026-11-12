@@ -37,6 +37,10 @@ namespace Fedi {
     hideCollections?: boolean;
     fields?: { name: string; value: string }[];
   }
+  export interface Mention {
+    acct: string;
+    url?: string;
+  }
   export interface Post {
     id: string;
     author: Account;
@@ -63,6 +67,7 @@ namespace Fedi {
     isReply?: boolean;
     boostedBy?: string;
     tags: string[];
+    mentions?: Mention[];
     local?: boolean;
     audience?: string[];
     language?: string | null;
@@ -205,7 +210,7 @@ namespace Fedi {
     in_reply_to_id?: string;
     is_reply?: boolean;
     reblog?: MastodonStatus;
-    mentions?: { id: string; acct: string }[];
+    mentions?: (Mention & { id: string })[];
     tags?: { name: string }[];
     filtered?: { filter: { filter_action: string; title: string } }[];
     media_attachments?: MastodonMedia[];

@@ -45,9 +45,72 @@ namespace Fedi {
 
   const inlineToken =
     /`([^`\n]+)`|(!?)\[((?:\\.|[^\]\\\n])*)\]\(([^\s)]+)\)|\*\*([^*\n]+)\*\*|__([^_\n]+)__|~~([^~\n]+)~~|\*([^*\n]+)\*|_([^_\n]+)_|(https?:\/\/[^\s<>]+)|\\([\\\[\]*_`~])/g;
+  const username = /[\p{L}\p{M}\p{N}_-]+(?:\.[\p{L}\p{M}\p{N}_-]+)*/u;
+  const hostname = /[a-z\d-]+(?:\.[a-z\d-]+)*/i;
+  const handle = String.raw`@(?<mention>${username.source}(?:@${hostname.source})?)`;
+  const exactMention = new RegExp(`^${handle}$`, "iu");
+  const rawMention = String.raw`(?<![\p{L}\p{M}\p{N}_.@/\\#-])${handle}(?![\p{L}\p{M}\p{N}_@-]|\.[\p{L}\p{M}\p{N}_-])`;
   const publicationToken = new RegExp(
-    String.raw`${inlineToken.source}|(^|[^\p{L}\p{M}\p{N}_#/@\\])${hashtag.source}`, "gu",
+    String.raw`${inlineToken.source}|(^|[^\p{L}\p{M}\p{N}_#/@\\])${hashtag.source}|${rawMention}`, "giu",
   );
+  const mentionTextToken = new RegExp(String.raw`https?://[^\s<>]+|${rawMention}`, "giu");
+
+  interface PublicationMarkdown {
+    mentions?: Mention[];
+    server?: string;
+    replyTo?: Account;
+  }
+
+  export function mentionHandle(label: string): string | undefined {
+    return exactMention.exec(label)?.groups?.mention;
+  }
+
+  function matchesHandle(account: Mention, handle: string): boolean {
+    const acct = account.acct.toLowerCase();
+    if (acct === handle) return true;
+    const url = safeURL(account.url || "");
+    return !!url && !acct.includes("@") && `${acct}@${new URL(url).hostname}` === handle;
+  }
+
+  function mentionLink(handle: string, publication: PublicationMarkdown, href = ""): string {
+    const [name, host] = handle.split("@");
+    const key = handle.toLowerCase();
+    const origin = host ? safeURL(`https://${host}`) : publication.server;
+    const scopedKey = !host && origin ? `${key}@${new URL(origin).hostname}` : key;
+    const mention = !href && publication.mentions?.find((m) => matchesHandle(m, key) || matchesHandle(m, scopedKey));
+    const url = href || (mention && safeURL(mention.url || "")) ||
+      (origin ? safeURL(`${new URL(origin).origin}/@${encodeURIComponent(name)}`) : "");
+    return url
+      ? `<a href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer">${escapeHTML(name)}</a>`
+      : escapeHTML(`@${handle}`);
+  }
+
+  export function mentionText(source: string, publication: PublicationMarkdown): string {
+    let result = "", cursor = 0;
+    for (const match of source.matchAll(mentionTextToken)) {
+      const handle = match.groups?.mention;
+      if (!handle) continue;
+      result += escapeHTML(source.slice(cursor, match.index)) + mentionLink(handle, publication);
+      cursor = match.index! + match[0].length;
+    }
+    return result + escapeHTML(source.slice(cursor));
+  }
+
+  function withoutReplyMention(source: string, parent: Account): string {
+    const text = source.trimStart();
+    if (!text.startsWith("@") && !text.startsWith("[")) return source;
+    const first = text.matchAll(publicationToken).next().value;
+    if (!first || first.index !== 0) return source;
+    const rest = text.slice(first[0].length);
+    if (!/^\s+\S/.test(rest)) return source;
+    const raw = first.groups?.mention;
+    const url = first[3] && mentionHandle(first[3]) && safeURL(first[4]);
+    const parentURL = safeURL(parent.url || "");
+    if (raw ? matchesHandle(parent, raw.toLowerCase())
+      : url && parentURL && url.replace(/\/$/, "") === parentURL.replace(/\/$/, ""))
+      return rest.trimStart();
+    return source;
+  }
 
   export function markdownLinks(source: string, depth = 0): string[] {
     if (depth > 8) return [];
@@ -72,31 +135,34 @@ namespace Fedi {
     return [...links];
   }
 
-  function inline(source: string, linkHashtags: boolean, depth = 0): string {
+  function inline(source: string, publication?: PublicationMarkdown, depth = 0): string {
     if (depth > 8) return escapeHTML(source);
     // Parse from source, then escape each text node. Generated HTML is never parsed again.
     let result = "",
       cursor = 0;
-    for (const match of source.matchAll(linkHashtags ? publicationToken : inlineToken)) {
+    for (const match of source.matchAll(publication ? publicationToken : inlineToken)) {
       result += escapeHTML(source.slice(cursor, match.index));
       if (match[1]) result += `<code>${escapeHTML(match[1])}</code>`;
       else if (match[3] !== undefined) {
         const url = safeURL(match[4], !!match[2]);
-        const tag = linkHashtags && url && !match[2] && hashtagName(match[3]);
-        if (tag && /\/(?:tags?|hashtags)\/[^/]+\/?$/.test(new URL(url).pathname))
+        const tag = publication && url && !match[2] && hashtagName(match[3]);
+        const mention = publication && url && !match[2] && mentionHandle(match[3]);
+        if (mention && publication) result += mentionLink(mention, publication, url);
+        else if (tag && /\/(?:tags?|hashtags)\/[^/]+\/?$/.test(new URL(url).pathname))
           result += hashtagLink(tag);
         else
           result += !url
             ? escapeHTML(match[3])
             : match[2]
               ? `<img src="${escapeHTML(url)}" alt="${escapeHTML(match[3].replace(/\\([\\\[\]])/g, "$1"))}" loading="lazy" referrerpolicy="no-referrer">`
-              : `<a href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer">${inline(match[3], false, depth + 1)}</a>`;
+              : `<a href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer">${inline(match[3], undefined, depth + 1)}</a>`;
       } else if (match[5] || match[6])
-        result += `<strong>${inline(match[5] || match[6], linkHashtags, depth + 1)}</strong>`;
-      else if (match[7]) result += `<del>${inline(match[7], linkHashtags, depth + 1)}</del>`;
+        result += `<strong>${inline(match[5] || match[6], publication, depth + 1)}</strong>`;
+      else if (match[7]) result += `<del>${inline(match[7], publication, depth + 1)}</del>`;
       else if (match[8] || match[9])
-        result += `<em>${inline(match[8] || match[9], linkHashtags, depth + 1)}</em>`;
+        result += `<em>${inline(match[8] || match[9], publication, depth + 1)}</em>`;
       else if (match[11]) result += escapeHTML(match[11]);
+      else if (match.groups?.mention && publication) result += mentionLink(match.groups.mention, publication);
       else if (match[13]) result += escapeHTML(match[12]) + hashtagLink(match[13]);
       else {
         const url = safeURL(match[10]);
@@ -123,8 +189,9 @@ namespace Fedi {
     return `<pre><code${classes}>${content}</code></pre>`;
   }
 
-  export function markdown(source: string, linkHashtags = false, depth = 0): string {
+  export function markdown(source: string, publication?: PublicationMarkdown, depth = 0): string {
     if (depth > 32) return escapeHTML(source);
+    if (!depth && publication?.replyTo) source = withoutReplyMention(source, publication.replyTo);
     const lines = source.replace(/\r\n?/g, "\n").split("\n");
     const output: string[] = [];
     let i = 0;
@@ -148,7 +215,7 @@ namespace Fedi {
       const heading = /^(#{1,6})\s+(.+)$/.exec(line);
       if (heading) {
         const n = heading[1].length;
-        output.push(`<h${n}>${inline(heading[2], linkHashtags)}</h${n}>`);
+        output.push(`<h${n}>${inline(heading[2], publication)}</h${n}>`);
         i++;
         continue;
       }
@@ -162,7 +229,7 @@ namespace Fedi {
         while (i < lines.length && /^>/.test(lines[i]))
           quote.push(lines[i++].replace(/^>\s?/, ""));
         output.push(
-          `<blockquote>${inline(quote.join("\n"), linkHashtags).replace(/\n/g, "<br>")}</blockquote>`,
+          `<blockquote>${inline(quote.join("\n"), publication).replace(/\n/g, "<br>")}</blockquote>`,
         );
         continue;
       }
@@ -177,7 +244,7 @@ namespace Fedi {
           const nested: string[] = [];
           while (i < lines.length && /^( {2,}|\t)/.test(lines[i]))
             nested.push(lines[i++].replace(/^( {2}|\t)/, ""));
-          items.push(`<li${task ? ' class="task-item"' : ""}>${task ? `<input type="checkbox" disabled${task[1] !== " " ? " checked" : ""} aria-label="${task[1] !== " " ? "Completed task" : "Incomplete task"}"> ` : ""}${inline(task ? task[2] : text, linkHashtags)}${nested.length ? markdown(nested.join("\n"), linkHashtags, depth + 1) : ""}</li>`);
+          items.push(`<li${task ? ' class="task-item"' : ""}>${task ? `<input type="checkbox" disabled${task[1] !== " " ? " checked" : ""} aria-label="${task[1] !== " " ? "Completed task" : "Incomplete task"}"> ` : ""}${inline(task ? task[2] : text, publication)}${nested.length ? markdown(nested.join("\n"), publication, depth + 1) : ""}</li>`);
         }
         const first = ordered ? parseInt(line, 10) : 1;
         output.push(`<${tag}${ordered && first !== 1 ? ` start="${first}"` : ""}>${items.join("")}</${tag}>`);
@@ -188,7 +255,7 @@ namespace Fedi {
       while (i < lines.length && lines[i].trim() && !boundary(lines[i]))
         paragraph.push(lines[i++]);
       output.push(
-        `<p>${inline(paragraph.join("\n"), linkHashtags).replace(/\n/g, "<br>")}</p>`,
+        `<p>${inline(paragraph.join("\n"), publication).replace(/\n/g, "<br>")}</p>`,
       );
     }
     return output.join("\n");

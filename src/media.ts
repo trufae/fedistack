@@ -16,14 +16,15 @@ namespace Fedi {
   export function inlineMedia(body: string, media: MediaAttachment): boolean {
     return Array.from(body.matchAll(imagePattern)).some((m) => m[1] === markdownURL(media.url));
   }
-  export function attachmentGallery(media: MediaAttachment[] = [], body = ""): string {
+  export function attachmentGallery(media: MediaAttachment[] = [], body = "", previews = false): string {
     const attachments = media.filter((m) => m.url && !inlineMedia(body, m));
     if (!attachments.length) return "";
     return `<div class="attachment-gallery">${attachments.map((m) => {
       const url = safeURL(m.url, true);
       if (!url) return "";
+      const image = (previews && safeURL(m.previewUrl, true)) || url;
       return `<a href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer">${m.type === "image"
-        ? `<img src="${escapeHTML(url)}" alt="${escapeHTML(m.description)}" loading="lazy" referrerpolicy="no-referrer">`
+        ? `<img src="${escapeHTML(image)}" alt="${escapeHTML(m.description)}" loading="lazy" referrerpolicy="no-referrer">`
         : escapeHTML(m.description || `Open ${m.type} attachment`)}</a>`;
     }).join("")}</div>`;
   }

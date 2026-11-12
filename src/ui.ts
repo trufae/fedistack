@@ -241,37 +241,56 @@ namespace Fedi {
     // Preview headings are display-only; the reader keeps the original post.
     const content = articleContent(post);
     const authoredTitle = post.title.trim();
-    const text = content.body.replace(/!?\[([^\]]*)\]\([^)]+\)/g, "$1");
-    const previewText = authoredTitle ? text : text.trimStart()
-      .replace(/^(?:[*_`~]*<?https?:\/\/\S+(?:\s+|$))+/i, "");
-    const body = plainText(previewText)
+    const text = content.body.replace(/!?\[([^\]]*)\]\([^)]+\)/g, "$1").trimStart();
+    const mentions: string[] = [];
+    let start = 0;
+    if (!authoredTitle) {
+      const openingToken = /[*_`~]*(?:<?https?:\/\/\S+|(@[\p{L}\p{M}\p{N}_-]+(?:@[\w.-]+)?)[*_`~]*[,.:;!?]*)(?:\s+|$)/iyu;
+      for (let token; (token = openingToken.exec(text)); ) {
+        if (token[1]) mentions.push(token[1]);
+        start = openingToken.lastIndex;
+      }
+    }
+    const body = plainText(text.slice(start))
       .replace(/^[ \t]*(?:>\s*|[-+*]\s+|\d+[.)]\s+)/gm, "")
       .replace(/[^\S\r\n]+/g, " ").trim();
     const opening = body.split(/\r?\n/, 1)[0].match(/^.*?(?:[.!?](?=\s|$)|[。！？]|$)/)?.[0] || "";
     const headline = previewExcerpt(opening, 100);
     const consumed = Array.from(opening).length > 100 ? headline.slice(0, -1) : headline;
-    const title = authoredTitle || headline || (post.kind === "article" ? "Untitled article" : "Note");
+    const title = authoredTitle || headline || "Untitled article";
     const excerpt = content.subtitle.trim() || (authoredTitle ? body : body.slice(consumed.length));
-    return { title, excerpt: previewExcerpt(excerpt, 180) };
+    return { title, excerpt: previewExcerpt([...mentions, excerpt].join(" "), 180) };
+  }
+
+  function articleCardContent(post: Post, href: string, featured: boolean): string {
+    const preview = postPreview(post);
+    return `${featured && post.image ? `<a href="${href}" class="cover-link"><img class="feature-cover" data-image-key="cover:${escapeHTML(post.id)}" src="${escapeHTML(post.image)}" alt="${escapeHTML(post.imageAlt || "")}"></a>` : ""}
+      <div class="post-content ${!featured && post.image ? "with-thumbnail" : ""}"><div>
+      <a href="${href}" class="article-link"><h2>${escapeHTML(preview.title)}</h2>${preview.excerpt ? `<p class="excerpt">${escapeHTML(preview.excerpt)}</p>` : ""}<span class="continue-reading">Continue reading ${icon("arrow")}</span></a>
+      <div class="article-meta"><span>Article</span>${post.tags[0] ? `<span>·</span><span>${hashtagLink(post.tags[0])}</span>` : ""}<span>·</span><span>${readingTime(post.markdown)} min read</span></div>
+      </div>${!featured && post.image ? `<a href="${href}"><img class="thumbnail" data-image-key="cover:${escapeHTML(post.id)}" src="${escapeHTML(post.image)}" alt="${escapeHTML(post.imageAlt || "")}" loading="lazy"></a>` : ""}</div>`;
+  }
+
+  export function noteContent(post: Post, reading = false): string {
+    const media = post.media?.length ? post.media : post.image
+      ? [{ id: post.id, type: "image", url: post.image, previewUrl: post.image, description: post.imageAlt || "" }]
+      : [];
+    const body = post.markdown.trim() ? `<div class="prose note-body${reading ? " reading-prose" : ""}"${reading ? ` style="--reader-font-size: ${state.readerFontSize}px"` : ""}>${markdown(post.markdown, true)}</div>` : "";
+    return body + attachmentGallery(media, post.markdown, !reading) + postLinkPreview(post);
   }
 
   export function postCard(post: Post, featured = false): string {
     const hidden = post.warning && !state.revealed.has(post.id);
     const href = escapeHTML(postReadLink(post.id));
-    const preview = hidden ? { title: "", excerpt: "" } : postPreview(post);
+    const date = relativeDate(post.created);
     return `<article class="post-card ${featured ? "featured" : ""} ${post.kind}">
       ${post.boostedBy ? `<p class="boost-label">${icon("refresh")} Shared by ${escapeHTML(post.boostedBy)}</p>` : ""}
       ${post.replyTo ? `<p class="reply-context"><a href="${escapeHTML(postReadLink(post.replyTo))}">${icon("comment")} View conversation ${icon("arrow")}</a></p>` : ""}
-      <div class="post-byline">${profileAvatar(post.author, false, `post:${post.id}`)}<div><a class="author-link" href="#${escapeHTML(profilePath(post.author.id))}">${escapeHTML(post.author.name)}</a><div class="byline-sub">${escapeHTML(post.author.publication || post.author.acct)} <span>· ${relativeDate(post.created)}</span></div></div>${followButton(post.author)}${editPublicationButton(post)}</div>
+      <div class="post-byline">${profileAvatar(post.author, false, `post:${post.id}`)}<div><a class="author-link" href="#${escapeHTML(profilePath(post.author.id))}">${escapeHTML(post.author.name)}</a><div class="byline-sub">${escapeHTML(post.author.publication || post.author.acct)} <span>· ${post.kind === "post" ? `<a class="note-permalink" href="${href}" aria-label="Open note · ${date}">${date}</a>` : date}</span></div></div>${followButton(post.author)}${editPublicationButton(post)}</div>
       ${
         hidden
           ? `<div class="content-warning">${icon("eye")}<strong>${escapeHTML(post.warning)}</strong>${action("reveal", "Show content", post.id, "button subtle")}</div>`
-          : `
-      ${featured && post.image ? `<a href="${href}" class="cover-link"><img class="feature-cover" data-image-key="cover:${escapeHTML(post.id)}" src="${escapeHTML(post.image)}" alt="${escapeHTML(post.imageAlt || "")}"></a>` : ""}
-      <div class="post-content ${!featured && post.image ? "with-thumbnail" : ""}"><div>
-      <a href="${href}" class="article-link"><h2>${escapeHTML(preview.title)}</h2>${preview.excerpt ? `<p class="excerpt">${escapeHTML(preview.excerpt)}</p>` : ""}<span class="continue-reading">Continue reading ${icon("arrow")}</span></a>
-      <div class="article-meta"><span>${post.kind === "article" ? "Article" : "Note"}</span>${post.tags[0] ? `<span>·</span><span>${hashtagLink(post.tags[0])}</span>` : ""}${post.kind === "article" ? `<span>·</span><span>${readingTime(post.markdown)} min read</span>` : ""}</div>
-      </div>${!featured && post.image ? `<a href="${href}"><img class="thumbnail" data-image-key="cover:${escapeHTML(post.id)}" src="${escapeHTML(post.image)}" alt="${escapeHTML(post.imageAlt || "")}" loading="lazy"></a>` : ""}</div>${postLinkPreview(post)}`
+          : post.kind === "article" ? articleCardContent(post, href, featured) + postLinkPreview(post) : noteContent(post)
       }
       ${postActions(post)}</article>`;
   }

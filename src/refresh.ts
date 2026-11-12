@@ -8,9 +8,11 @@ namespace Fedi {
 
   function pullContext(): string {
     return JSON.stringify([location.hash, state.view, state.timeline, state.query,
-      state.session?.account.id, state.profile?.id, state.profile?.tab, state.libraryTab, state.conversation]);
+      state.session?.account.id, state.profile?.id, state.profile?.tab, state.libraryTab, state.conversation,
+      state.reading?.id, state.readerServer]);
   }
   function canPullRefresh(): boolean {
+    if (state.view === "reader") return !!state.reading && !!(state.readerServer || state.api);
     return canRefreshReading() || (!!state.api && !!state.session &&
       (["drafts", "replies", "notifications"].includes(state.view) ||
         (state.view === "messages" && !state.conversation)));
@@ -85,6 +87,7 @@ namespace Fedi {
     const started = Date.now();
     try {
       if (navigator.onLine === false) toast("You’re offline.");
+      else if (state.view === "reader") await refreshReader();
       else if (state.view === "drafts") await loadWriting(true);
       else if (state.view === "messages") await loadConversations(false, true);
       else if (state.view === "replies" || state.view === "notifications") await loadNotifications(false, true);

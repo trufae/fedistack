@@ -6298,8 +6298,8 @@ test("Discover pull refresh only reads two public heads and keeps the loaded mix
   assert.equal(app.state.error, "");
 });
 
-function pullFixture() {
-  const { app, context } = setup(), { get } = elements(context);
+function pullFixture(fetch) {
+  const { app, context } = setup(fetch), { get } = elements(context);
   const events = {}, windowEvents = {};
   const indicator = get("pull-refresh"), label = get("pull-refresh-label");
   indicator.style = { setProperty() {} };
@@ -6320,6 +6320,91 @@ function pullFixture() {
   app.setupPullRefresh();
   return { app, context, get, events, windowEvents, indicator, label, target, start, move };
 }
+
+test("pulling an article or note reloads its body and thread in place", async () => {
+  for (const article of [true, false]) {
+    const requests = [];
+    let finish;
+    const { app, context, get, events, indicator, start, move } = pullFixture(async (url, options) => {
+      requests.push([url, options.headers.Authorization]);
+      const refreshed = requests.length > 2;
+      if (url.endsWith("/new-reply/context")) return Response.json({ ancestors: [], descendants: [
+        sharedStatus({ id: "nested", content: "A nested reply", in_reply_to_id: "new-reply", replies_count: 0 }),
+      ] });
+      if (url.endsWith("/context")) {
+        if (!refreshed) return Response.json({ ancestors: [], descendants: [] });
+        return new Promise((resolve) => { finish = resolve; });
+      }
+      return Response.json(sharedStatus({ id: "reader-refresh",
+        content: `${article ? "# Shared article\n\n" : ""}${refreshed ? "Edited body" : "Original body"}` }));
+    });
+    app.htmlToMarkdown = (text) => text;
+    const server = article ? "https://source.example" : "https://reader.example";
+    if (!article) {
+      app.state.session = { ...longServer, account: app.demoMe, server, token: "local-token" };
+      app.state.api = new app.API(server, "local-token");
+    }
+    context.location.hash = article ? "#read/reader-refresh?server=https%3A%2F%2Fsource.example" : "#read/reader-refresh";
+    await app.route();
+    const cached = app.state.reading;
+    assert.ok(cached, app.state.error);
+    app.state.posts = [cached];
+    app.state.focus = true;
+    app.state.replyDrafts.set(cached.id, "Unsent reply");
+    const frames = captureFeedRenders(get);
+    start(); move(100, 260); events.touchend();
+    assert.equal(indicator.dataset.state, "loading");
+    await new Promise(setImmediate);
+    assert.equal(frames.length, 0);
+    assert.match(get("app").innerHTML, /Original body/);
+    finish(Response.json({ ancestors: [], descendants: [
+      sharedStatus({ id: "new-reply", content: "A new reply", in_reply_to_id: cached.id }),
+    ] }));
+    await new Promise(setImmediate);
+    assert.deepEqual(requests.slice(2), [cached.id, `${cached.id}/context`, "new-reply/context"].map((path) => [
+      `${server}/api/v1/statuses/${path}`, article ? undefined : "Bearer local-token",
+    ]));
+    assert.equal(frames.length, 1);
+    assert.match(frames[0], /Edited body/);
+    assert.match(frames[0], /A new reply/);
+    assert.match(frames[0], /A nested reply/);
+    assert.equal(app.state.focus, true);
+    if (!article) {
+      assert.match(frames[0], /Unsent reply/);
+      assert.equal(app.findPost(cached.id).markdown, "Edited body");
+    }
+  }
+});
+
+test("reader refresh keeps content on a failed thread request and cancels on navigation", async () => {
+  let mode = "open", finish, signal;
+  const { app, context, get } = pullFixture(async (url, options) => {
+    if (mode === "pending") {
+      signal = options.signal;
+      return new Promise((resolve) => { finish = resolve; });
+    }
+    if (url.endsWith("/context")) return mode === "failed"
+      ? Response.json({ error: "Thread unavailable" }, { status: 503 })
+      : Response.json({ ancestors: [], descendants: [] });
+    return Response.json(sharedStatus());
+  });
+  app.htmlToMarkdown = (text) => text;
+  context.location.hash = "#read/slow-web?server=https%3A%2F%2Fsource.example";
+  await app.route();
+  const html = get("app").innerHTML;
+  mode = "failed";
+  await assert.rejects(app.refreshReader(), /Thread unavailable/);
+  assert.equal(get("app").innerHTML, html);
+  mode = "pending";
+  const refresh = app.refreshReader();
+  context.location.hash = "#settings";
+  await app.route();
+  assert.equal(signal.aborted, true);
+  finish(Response.json(sharedStatus()));
+  await refresh;
+  assert.equal(app.state.view, "settings");
+  assert.equal(app.state.reading, null);
+});
 
 test("mobile pull gesture arms only at the top and refreshes once on release", async () => {
   const { app, context, events, indicator, label, start, move } = pullFixture();
